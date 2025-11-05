@@ -9,6 +9,7 @@
     "esModuleInterop": true,
     "types": ["vite/client"]
   },
-  "include": ["src/**/*.ts", "src/**/*.tsx", "vite-env.d.ts"],
+  "include": ["src/**/*.ts", "src/**/*.tsx", "vite-env.d.ts"],/// <reference types="vite/client" />
+
   "exclude": ["node_modules", "dist"]
 }
