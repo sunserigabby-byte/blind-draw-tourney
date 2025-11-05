@@ -20,3 +20,7 @@ npm run preview
 - Build Command: `npm run build`
 - Output Directory: `dist`
 - Framework preset: Vite
+
+git add tsconfig.json package.json vite-env.d.ts
+git commit -m "Fix TS include + decouple tsc from build"
+git push
