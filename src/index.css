@@ -3,5 +3,7 @@
 @tailwind components;
 @tailwind utilities;
 
-:root { color-scheme: light; }
-body { @apply bg-white text-slate-800; }
+html, body, #root {
+  height: 100%;
+}
+
