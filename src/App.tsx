@@ -1,18 +1,19 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 
 /**
- * Sunny Sports Performance – Blind Draw Tourney (clean build)
+ * Sunny Sports Performance – Blind Draw Tourney (stable build)
  *
- * ✅ Guys/Girls text boxes with line numbers + duplicate highlighting
- * ✅ Strict no-repeat (partners/opponents) toggle for pool rounds
+ * ✅ Guys/Girls text boxes with line numbers + duplicate highlighting + live counts
+ * ✅ Strict no-repeat (partners/opponents) toggle inside Round Generator
  * ✅ Random round generation (1 guy + 1 girl / team) with imbalance handling:
  *    - Ultimate Revco = 2 guys (blue)
  *    - Power Puff = 2 girls (pink)
- * ✅ Matches view: collapsible by round, score input, auto-winner tint
+ * ✅ Matches view: collapsible by round, delete-with-confirm, score input, auto-winner tint
  * ✅ Live Leaderboard (Guys & Girls) with W/L/PD (pool rules: to 21+, win by 2, no cap)
  * ✅ Autosave (rosters, matches, brackets) to localStorage
- * ✅ Playoff Builder: split upper/lower, seed by guys, randomize girls in groups
+ * ✅ Playoff Builder: split upper/lower, pair within buckets, then **seed by combined W then PD**
  * ✅ Brackets: ESPN-style layout with BYEs placed in correct rounds, winners auto-advance
+ * ✅ Redemption Rally (RR): losers from Upper+Lower R1/R2; optional partner re-randomize
  */
 
 /* ========================= Types & helpers ========================= */
@@ -27,13 +28,16 @@ type MatchRow = {
   scoreText?: string;
 };
 
-type PlayDiv = 'UPPER'|'LOWER';
+type PlayDiv = 'UPPER'|'LOWER'|'RR';
 interface Team { id:string; name:string; members:[string,string]; seed:number; division:PlayDiv; }
 interface BracketMatch {
   id:string; division:PlayDiv; round:number; slot:number;
   team1?:Team; team2?:Team; score?:string;
   nextId?: string; nextSide?: 'team1'|'team2';
   team1SourceId?: string; team2SourceId?: string;
+  court?: number;
+  loserNextId?: string; loserNextSide?: 'team1'|'team2';
+  redemption?: boolean;
 }
 
 const slug = (s:string)=> s.trim().toLowerCase().replace(/\s+/g,' ');
@@ -46,6 +50,14 @@ const shuffle = <T,>(arr:T[], seed?:number)=>{
   const rand = ()=> (r = (r*1664525 + 1013904223) % 4294967296) / 4294967296;
   for(let i=a.length-1;i>0;i--){ const j = Math.floor(rand()*(i+1)); [a[i],a[j]]=[a[j],a[i]]; }
   return a;
+};
+
+// Court pools for playoffs
+const UPPER_COURTS = [1,2,3,4,5];
+const LOWER_COURTS = [6,7,8,9,10];
+const courtFor = (division:PlayDiv, round:number, slot:number)=>{
+  const pool = division==='UPPER' ? UPPER_COURTS : LOWER_COURTS; // RR uses lower courts by default
+  return pool[(slot-1) % pool.length];
 };
 
 // ===== Pool scoring helpers: one game to 21+, win by 2, no cap
@@ -144,7 +156,7 @@ function LinedTextarea({
             placeholder={placeholder || ''}
             onChange={(e) => {
               const ta = e.currentTarget;
-              selRef.current = { start: ta.selectionStart ?? 0, end: ta.selectionEnd ?? 0 };
+              selRef.current = { start: (ta.selectionStart ?? 0), end: (ta.selectionEnd ?? 0) };
               scrollRef.current = ta.scrollTop;
               onChange(e);
             }}
@@ -507,7 +519,6 @@ function nextPow2(n:number){ let p=1; while(p<n) p<<=1; return p; }
 function buildBracket(division:PlayDiv, teams:Team[], topSeedByeCount:number = 0): BracketMatch[] {
   const N = teams.length; if (N === 0) return [];
   const size = nextPow2(N);
-
   function espnOrder(n:number): number[] {
     if (n === 1) return [1];
     if (n === 2) return [1,2];
@@ -535,7 +546,7 @@ function buildBracket(division:PlayDiv, teams:Team[], topSeedByeCount:number = 0
   let round = 1;
   let current: BracketMatch[] = [];
   for(let i=0;i<size;i+=2){
-    const m: BracketMatch = { id:`${division}-R${round}-${(i/2)+1}`, division, round, slot:(i/2)+1, team1:slots[i], team2:slots[i+1] };
+    const m: BracketMatch = { id:`${division}-R${round}-${(i/2)+1}`, division, round, slot:(i/2)+1, team1:slots[i], team2:slots[i+1], court:courtFor(division, round, (i/2)+1) };
     current.push(m);
   }
   matches.push(...current);
@@ -544,7 +555,7 @@ function buildBracket(division:PlayDiv, teams:Team[], topSeedByeCount:number = 0
     const nextRound: BracketMatch[] = [];
     round++;
     for(let i=0;i<current.length;i+=2){
-      const parent: BracketMatch = { id:`${division}-R${round}-${(i/2)+1}`, division, round, slot:(i/2)+1 };
+      const parent: BracketMatch = { id:`${division}-R${round}-${(i/2)+1}`, division, round, slot:(i/2)+1, court:courtFor(division, round, (i/2)+1) };
       const a = current[i], b = current[i+1];
       if(a){ a.nextId = parent.id; a.nextSide = 'team1'; parent.team1SourceId = a.id; }
       if(b){ b.nextId = parent.id; b.nextSide = 'team2'; parent.team2SourceId = b.id; }
@@ -575,6 +586,7 @@ function buildBracket(division:PlayDiv, teams:Team[], topSeedByeCount:number = 0
   return matches;
 }
 
+// Build visual columns from matches; hide pure BYE leaves
 function buildVisualColumns(brackets:BracketMatch[], division:PlayDiv){
   const list = brackets.filter(b=>b.division===division);
   const maxRound = Math.max(1, ...list.map(b=> b.round));
@@ -608,7 +620,7 @@ function BracketCard({m}:{m:BracketMatch}){
 
   return (
     <div className="relative min-w-[260px] rounded-lg border bg-white shadow-sm p-2">
-      <div className="text-[11px] text-slate-500 mb-1">{m.division} · R{m.round} · M{m.slot}</div>
+      <div className="text-[11px] text-slate-500 mb-1 flex items-center justify-between"><span>{m.division}{m.redemption? ' · Redemption Rally':''} · R{m.round} · M{m.slot}</span>{m.court!==undefined && (<span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-sky-50 text-sky-700 ring-1 ring-sky-200">Court {m.court}</span>)}</div>
       <div className="text-sm">
         <TeamLine t={m.team1} />
         <div className="h-px my-1 bg-slate-200" />
@@ -617,6 +629,7 @@ function BracketCard({m}:{m:BracketMatch}){
       {m.score !== undefined && (
         <div className="mt-1 text-xs text-slate-600">Score: {m.score}</div>
       )}
+      {/* connector visuals */}
       <div className="absolute right-0 top-1/2 -translate-y-1/2 w-6 h-10">
         <div className="absolute right-0 top-0 bottom-0 w-px bg-slate-300" />
         <div className="absolute right-0 top-1/2 -translate-y-1/2 w-6 h-px bg-slate-300" />
@@ -626,7 +639,7 @@ function BracketCard({m}:{m:BracketMatch}){
 }
 
 function BracketView({brackets, setBrackets}:{brackets:BracketMatch[]; setBrackets:(f:(prev:BracketMatch[])=>BracketMatch[]|BracketMatch[])=>void;}){
-  const divisions:PlayDiv[] = ['UPPER','LOWER'];
+  const divisions:PlayDiv[] = ['UPPER','LOWER','RR'];
 
   function parseScoreLoose(s?:string): [number,number] | null {
     if(!s) return null; const txt = String(s).trim();
@@ -642,9 +655,12 @@ function BracketView({brackets, setBrackets}:{brackets:BracketMatch[]; setBracke
     const m = map.get(id); if(!m) return copy;
     m.score = score;
     const parsed = parseScoreLoose(score);
-    if(parsed){ const a = parsed[0], b = parsed[1];
-      const winner = (a>b) ? m.team1 : (a<b ? m.team2 : undefined);
+    if(parsed){
+      const [a,b] = parsed;
+      const winner = a>b ? m.team1 : (a<b ? m.team2 : undefined);
+      const loser  = a>b ? m.team2 : (a<b ? m.team1 : undefined);
       if(winner && m.nextId && m.nextSide){ const p = map.get(m.nextId); if(p){ if(m.nextSide==='team1') p.team1 = winner; else p.team2 = winner; }}
+      if(loser && m.loserNextId && m.loserNextSide){ const q = map.get(m.loserNextId); if(q){ if(m.loserNextSide==='team1') q.team1 = loser; else q.team2 = loser; }}
     }
     return copy;
   });
@@ -652,7 +668,7 @@ function BracketView({brackets, setBrackets}:{brackets:BracketMatch[]; setBracke
   return (
     <section className="bg-white/90 backdrop-blur rounded-xl shadow ring-1 ring-slate-200 p-6">
       <h2 className="text-xl font-bold text-sky-700 mb-2">Playoff Brackets</h2>
-      <p className="text-xs text-slate-500 mb-4">ESPN-style seeding and BYEs. Quarterfinals → Semifinals → Final. Winners auto-advance.</p>
+      <p className="text-xs text-slate-500 mb-4">ESPN-style seeding and BYEs. Quarterfinals → Semifinals → Final. Winners auto-advance. The <strong>RR</strong> bracket combines UPPER+LOWER losers from R1/R2.</p>
       {divisions.map(div=>{
         const cfg = buildVisualColumns(brackets, div);
         const cols = cfg.cols;
@@ -700,13 +716,20 @@ function PlayoffBuilder({matches, guysText, girlsText, setBrackets}:{matches:Mat
   const { guysRows, girlsRows } = useMemo(()=> computeStandings(matches, guysText, girlsText), [matches, guysText, girlsText]);
   const [upperK, setUpperK] = useState<number>(Math.ceil(Math.max(1, guysRows.length)/2));
   const [seedRandom, setSeedRandom] = useState<boolean>(true);
-  const [groupSize, setGroupSize] = useState<number>(4);
-  const [byeUpper, setByeUpper] = useState<number>(0);
-  const [byeLower, setByeLower] = useState<number>(0);
+  const [groupSize, setGroupSize] = useState<number>(4); // randomized pairing window size
+  const [byeUpper, setByeUpper] = useState<number>(0); // top-seed BYEs for UPPER
+  const [byeLower, setByeLower] = useState<number>(0); // top-seed BYEs for LOWER
+  const [rrRandomize, setRrRandomize] = useState<boolean>(false); // randomize partners in combined RR
 
+  // Build teams from buckets, then seed by COMBINED pool results (W, then PD)
   function build(div:PlayDiv, guySlice:{start:number,end:number}, girlSlice:{start:number,end:number}){
-    const g = guysRows.slice(guySlice.start, guySlice.end);
+    const g = guysRows.slice(guySlice.start, guySlice.end); // sorted by guys W/PD already
     const h = girlsRows.slice(girlSlice.start, girlSlice.end);
+
+    // Helper: quick lookup of stats by name
+    const gStats = new Map(guysRows.map(r=>[r.name, r] as const));
+    const hStats = new Map(girlsRows.map(r=>[r.name, r] as const));
+
     const teams: Team[] = [];
     const K = Math.min(g.length, h.length);
 
@@ -717,28 +740,97 @@ function PlayoffBuilder({matches, guysText, girlsText, setBrackets}:{matches:Mat
       for(let j = base; j < end; j++){
         const guy = g[j];
         const girl = girlsShuffled[j - base];
-        const seed = j + 1;
         const name = `${guy?.name || '—'} & ${girl?.name || '—'}`;
-        teams.push({ id:`${div}-${j+1}-${slug(name)}`, name, members:[guy?.name||'', girl?.name||''], seed, division:div });
+        // temporary seed (reassigned after ranking)
+        teams.push({ id:`${div}-tmp-${j+1}-${slug(name)}`, name, members:[guy?.name||'', girl?.name||''], seed:j+1, division:div });
       }
     }
+
+    // Rank by combined record (W first) then combined PD
+    const score = (t:Team)=>{
+      const [a,b] = t.members;
+      const aS = gStats.get(a) || hStats.get(a) || {W:0,L:0,PD:0};
+      const bS = gStats.get(b) || hStats.get(b) || {W:0,L:0,PD:0};
+      return { W:(aS.W||0)+(bS.W||0), PD:(aS.PD||0)+(bS.PD||0) };
+    };
+    teams.sort((A,B)=>{
+      const sA = score(A), sB = score(B);
+      return (sB.W - sA.W) || (sB.PD - sA.PD) || A.name.localeCompare(B.name);
+    });
+    // Reassign seeds based on rank
+    teams.forEach((t,i)=>{ t.seed = i+1; t.id = `${div}-${t.seed}-${slug(t.name)}`; });
+
     return teams;
   }
 
   function onBuild(){
     const upperTeams = build('UPPER', {start:0,end:upperK}, {start:0,end:upperK});
     const lowerTeams = build('LOWER', {start:upperK,end:guysRows.length}, {start:upperK,end:girlsRows.length});
-    const bracket = [
-      ...buildBracket('UPPER', upperTeams, byeUpper),
-      ...buildBracket('LOWER', lowerTeams, byeLower)
-    ];
-    setBrackets(() => bracket);
+    const upperMain = buildBracket('UPPER', upperTeams, byeUpper);
+    const lowerMain = buildBracket('LOWER', lowerTeams, byeLower);
+    // Only main brackets initially; RR is built via separate action
+    setBrackets(() => ([...upperMain, ...lowerMain]));
+  }
+
+  function buildCombinedRR(){
+    setBrackets(prev => {
+      const main = prev.filter(b => b.division==='UPPER' || b.division==='LOWER');
+      const rrPruned = prev.filter(b => b.division!=='RR');
+
+      // Collect losers from Round 1 & 2 of UPPER+LOWER **with entered scores**
+      const losers: Team[] = [];
+      const guysSet = new Set((guysText||'').split(/\r?\n/).map(s=>slug(s.trim())).filter(Boolean));
+      const girlsSet = new Set((girlsText||'').split(/\r?\n/).map(s=>slug(s.trim())).filter(Boolean));
+
+      function teamFromMembers(members:[string,string], seed:number): Team{
+        const name = `${members[0]||'—'} & ${members[1]||'—'}`;
+        return { id:`RR-${seed}-${slug(name)}`, name, members, seed, division:'RR' };
+      }
+
+      const decided = main.filter(m=> (m.round===1 || m.round===2) && m.team1 && m.team2 && typeof m.score==='string' && m.score.trim());
+      for(const m of decided){
+        const txt = String(m.score);
+        const sep = txt.includes('–') ? '–' : '-';
+        const parts = txt.split(sep).map(p=>p.trim());
+        const a = parseInt(parts[0],10), b = parseInt(parts[1],10);
+        if(!isFinite(a) || !isFinite(b)) continue;
+        const loserMembers = (a>b) ? (m.team2?.members) : (a<b ? m.team1?.members : undefined);
+        if(loserMembers){ losers.push(teamFromMembers([loserMembers[0], loserMembers[1]], losers.length+1)); }
+      }
+
+      // Optionally re-randomize partners while keeping gender where possible
+      let rrTeams: Team[] = [];
+      if(rrRandomize){
+        const guys: string[] = []; const girls: string[] = [];
+        for(const t of losers){
+          const a = t.members[0], b = t.members[1];
+          if(guysSet.has(slug(a))) guys.push(a); else if(girlsSet.has(slug(a))) girls.push(a); else guys.push(a);
+          if(guysSet.has(slug(b))) guys.push(b); else if(girlsSet.has(slug(b))) girls.push(b); else girls.push(b);
+        }
+        const G = shuffle(uniq(guys));
+        const H = shuffle(uniq(girls));
+        const K = Math.min(G.length, H.length);
+        for(let i=0;i<K;i++){
+          const members:[string,string] = [G[i], H[i]];
+          rrTeams.push(teamFromMembers(members, i+1));
+        }
+        // Handle leftovers: make same-gender teams if needed
+        const restG = G.slice(K), restH = H.slice(K);
+        while(restG.length>=2){ const members:[string,string]=[restG.shift()!, restG.shift()!]; rrTeams.push(teamFromMembers(members, rrTeams.length+1)); }
+        while(restH.length>=2){ const members:[string,string]=[restH.shift()!, restH.shift()!]; rrTeams.push(teamFromMembers(members, rrTeams.length+1)); }
+      } else {
+        rrTeams = losers;
+      }
+
+      const rrBracket = buildBracket('RR', rrTeams, 0);
+      return [...rrPruned, ...rrBracket];
+    });
   }
 
   return (
     <section className="bg-white/90 backdrop-blur rounded-xl shadow ring-1 ring-slate-200 p-4">
       <h2 className="text-lg font-semibold text-sky-700">Playoff Setup</h2>
-      <p className="text-xs text-slate-500 mb-2">Pairs are formed by seeding on the <strong>guys</strong> order. Girls are randomized within <strong>groups of N</strong> inside each bucket (configurable).</p>
+      <p className="text-xs text-slate-500 mb-2">Pairs are formed from standings buckets, then <strong>teams are seeded by combined pool results</strong> (sum of both partners' W, then PD). Upper uses courts 1–5, Lower uses 6–10. Girls can be randomized within <strong>groups of N</strong> before ranking.</p>
       <div className="flex flex-wrap gap-3 items-end text-sm">
         <label className="flex flex-col">Upper size per gender
           <input type="number" min={2} max={Math.max(2,Math.min(guysRows.length,girlsRows.length))} value={upperK} onChange={(e)=>setUpperK(clampN(+e.target.value||upperK,2))} className="w-24 border rounded px-2 py-1" />
@@ -756,68 +848,106 @@ function PlayoffBuilder({matches, guysText, girlsText, setBrackets}:{matches:Mat
         </label>
         <button className="px-3 py-1.5 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 shadow-sm" onClick={onBuild}>Build Playoffs</button>
       </div>
-      <div className="mt-2 text-xs text-slate-500">Upper uses top <span className="font-semibold">{upperK}</span> guys & girls. Lower uses the rest. BYEs limited by available bracket spots (power-of-two gap).</div>
+
+      <div className="mt-4 p-3 rounded-lg bg-slate-50 border text-sm">
+        <div className="font-medium text-slate-700 mb-1">Redemption Rally (Combined Upper + Lower)</div>
+        <p className="text-xs text-slate-500 mb-2">Pulls <strong>losers from Round 1 and Round 2</strong> (with entered scores) across both divisions. You can optionally randomize partners before building the bracket. RR uses Courts 6–10 by default.</p>
+        <div className="flex flex-wrap items-center gap-3">
+          <label className="flex items-center gap-2"><input type="checkbox" checked={rrRandomize} onChange={(e)=>setRrRandomize(e.target.checked)} /> Randomize partners for RR</label>
+          <button className="px-3 py-1.5 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 shadow-sm" onClick={buildCombinedRR}>Build / Refresh Redemption Rally</button>
+        </div>
+      </div>
+
+      <div className="mt-2 text-xs text-slate-500">Upper uses top <span className="font-semibold">{upperK}</span> guys & girls (by individual pool results). <strong>Seeding is based on the pair's combined W then PD.</strong> BYEs limited by available bracket spots (power-of-two gap).</div>
     </section>
   );
 }
 
-/* ========================= Main App ========================= */
+/* ========================= Header (Sunny Sports Performance) ========================= */
 
-export default function App() {
+function SunnyLogo(){
+  return (
+    <div className="flex items-center gap-2 select-none">
+      <svg width="28" height="28" viewBox="0 0 48 48" className="drop-shadow-sm">
+        <defs>
+          <radialGradient id="g" cx="50%" cy="50%" r="50%">
+            <stop offset="0%" stopColor="#fff"/>
+            <stop offset="100%" stopColor="#93c5fd"/>
+          </radialGradient>
+        </defs>
+        <rect x="0" y="0" width="48" height="48" rx="10" fill="url(#g)"/>
+        {/* sun */}
+        <circle cx="24" cy="24" r="8" fill="#fde68a" stroke="#f59e0b" strokeWidth="1"/>
+        {Array.from({length:12}).map((_,i)=>{
+          const ang = (i*Math.PI*2)/12; const x1=24+Math.cos(ang)*11; const y1=24+Math.sin(ang)*11; const x2=24+Math.cos(ang)*16; const y2=24+Math.sin(ang)*16; return <line key={i} x1={x1} y1={y1} x2={x2} y2={y2} stroke="#fbbf24" strokeWidth="2" strokeLinecap="round"/>;
+        })}
+      </svg>
+      <div className="leading-tight">
+        <div className="font-bold text-sky-800">Sunny Sports Performance</div>
+        <div className="text-[11px] text-slate-500">Blind Draw Tourney</div>
+      </div>
+    </div>
+  );
+}
+
+/* ========================= App ========================= */
+
+export default function BlindDrawTourneyApp(){
   const [guysText, setGuysText] = useState('');
   const [girlsText, setGirlsText] = useState('');
-  const [matches, setMatches] = useState<MatchRow[]>(()=>{ try{ const raw=localStorage.getItem('ssp_matches'); return raw? JSON.parse(raw): []; }catch{return []} });
-  const [brackets, setBrackets] = useState<BracketMatch[]>(()=>{ try{ const raw=localStorage.getItem('ssp_brackets'); return raw? JSON.parse(raw): []; }catch{return []} });
+  const [matches, setMatches] = useState<MatchRow[]>([]);
+  const [brackets, setBrackets] = useState<BracketMatch[]>([]);
 
-  useEffect(()=>{ try{ const raw=localStorage.getItem('ssp_rosters'); if(raw){ const o=JSON.parse(raw); if(o.guysText) setGuysText(o.guysText); if(o.girlsText) setGirlsText(o.girlsText);} }catch{} },[]);
-  useEffect(()=>{ try{ localStorage.setItem('ssp_matches', JSON.stringify(matches)); }catch{} }, [matches]);
-  useEffect(()=>{ try{ localStorage.setItem('ssp_rosters', JSON.stringify({guysText,girlsText})); }catch{} }, [guysText,girlsText]);
-  useEffect(()=>{ try{ localStorage.setItem('ssp_brackets', JSON.stringify(brackets)); }catch{} }, [brackets]);
+  // Autosave
+  useEffect(()=>{
+    try{
+      const raw = localStorage.getItem('sunnysports.autosave');
+      if(raw){
+        const data = JSON.parse(raw);
+        if(typeof data.guysText==='string') setGuysText(data.guysText);
+        if(typeof data.girlsText==='string') setGirlsText(data.girlsText);
+        if(Array.isArray(data.matches)) setMatches(data.matches);
+        if(Array.isArray(data.brackets)) setBrackets(data.brackets);
+      }
+    }catch{}
+  },[]);
+  useEffect(()=>{
+    try{
+      localStorage.setItem('sunnysports.autosave', JSON.stringify({guysText, girlsText, matches, brackets}));
+    }catch{}
+  },[guysText,girlsText,matches,brackets]);
 
   return (
-    <div className="min-h-screen p-6 relative overflow-x-hidden" style={{ backgroundImage: 'linear-gradient(to bottom, #b3e5fc, #e1f5fe, white)' }}>
-      <header className="sticky top-0 z-30 shadow-sm" style={{ overflowAnchor: 'none' }}>
-        <div className="bg-gradient-to-b from-sky-400 to-sky-200 text-white">
-          <div className="max-w-6xl mx-auto flex items-center justify-between gap-4 py-3 px-3">
-            <div className="flex items-center gap-3">
-              {/* Sun-only logo */}
-              <svg width="50" height="50" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Sunny Sports Performance logo">
-                <g stroke="#FFD54F" strokeWidth="4" strokeLinecap="round">{Array.from({ length: 12 }).map((_, i) => { const angle=(i*30*Math.PI)/180; const x1=50+Math.cos(angle)*38; const y1=50+Math.sin(angle)*38; const x2=50+Math.cos(angle)*46; const y2=50+Math.sin(angle)*46; return <line key={i} x1={x1} y1={y1} x2={x2} y2={y2}/>; })}</g>
-                <circle cx="50" cy="50" r="32" fill="#FFD54F" stroke="#FBC02D" strokeWidth="3"/>
-              </svg>
-              <div>
-                <h1 className="text-2xl font-bold tracking-tight leading-6 text-blue-900">Sunny Sports Performance</h1>
-                <p className="text-xs text-blue-800 opacity-90 -mt-0.5">Grass Reverse Coed · Tournament Manager</p>
-              </div>
-            </div>
-            <div className="hidden sm:flex items-center gap-3 text-xs text-blue-900">
-              <span className="px-2 py-1 rounded-full bg-white/70 border border-sky-300">Autosave: <span className="font-semibold">On</span></span>
-              <span className="px-2 py-1 rounded-full bg-white/60 border border-sky-300">Strict pairing available</span>
-            </div>
-          </div>
+    <main className="min-h-screen bg-gradient-to-b from-white to-sky-50 text-slate-800">
+      <header className="sticky top-0 z-10 bg-white/80 backdrop-blur border-b">
+        <div className="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between">
+          <SunnyLogo/>
+          <span className="text-xs text-slate-500">Autosaves locally</span>
         </div>
       </header>
 
-      <main className="max-w-6xl mx-auto space-y-8 mt-6">
+      <div className="max-w-6xl mx-auto px-4 py-6 grid gap-6">
+        {/* Leaderboard first */}
         <Leaderboard matches={matches} guysText={guysText} girlsText={girlsText} />
 
+        {/* Matches & Results next */}
         <MatchesView matches={matches} setMatches={setMatches} />
 
-        <RoundGenerator guysText={guysText} girlsText={girlsText} matches={matches} setMatches={setMatches} />
+        {/* Round generator */}
+        <section className="grid md:grid-cols-3 gap-4">
+          <div className="md:col-span-2"><RoundGenerator guysText={guysText} girlsText={girlsText} matches={matches} setMatches={setMatches} /></div>
+          <div className="space-y-4">
+            <LinedTextarea id="guys" label="Guys" value={guysText} onChange={(e)=>setGuysText(e.target.value)} placeholder="One name per line" />
+            <LinedTextarea id="girls" label="Girls" value={girlsText} onChange={(e)=>setGirlsText(e.target.value)} placeholder="One name per line" />
+          </div>
+        </section>
 
+        {/* Playoffs */}
         <PlayoffBuilder matches={matches} guysText={guysText} girlsText={girlsText} setBrackets={setBrackets} />
         <BracketView brackets={brackets} setBrackets={setBrackets} />
 
-        <section className="bg-white/90 backdrop-blur rounded-xl shadow ring-1 ring-slate-200 p-4">
-          <h2 className="text-lg font-semibold mb-3 text-sky-700">Player Lists</h2>
-          <div className="grid md:grid-cols-2 gap-4">
-            <LinedTextarea id="guys-input" label="Guys" value={guysText} onChange={(e)=>setGuysText(e.target.value)} placeholder="One name per line" />
-            <LinedTextarea id="girls-input" label="Girls" value={girlsText} onChange={(e)=>setGirlsText(e.target.value)} placeholder="One name per line" />
-          </div>
-        </section>
-      </main>
-
-      <footer className="text-center text-[11px] text-gray-500 mt-10"><p>Autosave enabled · Data stored locally · Built for Sunny Sports Performance</p></footer>
-    </div>
+        <footer className="text-center text-xs text-slate-400 py-6">© {new Date().getFullYear()} Sunny Sports Performance</footer>
+      </div>
+    </main>
   );
 }
