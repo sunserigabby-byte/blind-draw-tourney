@@ -2454,146 +2454,142 @@ function PlayoffBuilder({
 /* ========================= App ========================= */
 
 export default function BlindDrawTourneyApp() {
-  const [guysText, setGuysText] =
-    useState<string>('');
-  const [girlsText, setGirlsText] =
-    useState<string>('');
-  const [matches, setMatches] =
-    useState<MatchRow[]>([]);
-  const [brackets, setBrackets] =
-    useState<BracketMatch[]>([]);
+  const [guysText, setGuysText] = useState<string>("");
+  const [girlsText, setGirlsText] = useState<string>("");
+  const [matches, setMatches] = useState<MatchRow[]>([]);
+  const [brackets, setBrackets] = useState<BracketMatch[]>([]);
 
   // Autosave load
   useEffect(() => {
     try {
-      const raw =
-        localStorage.getItem(
-          'sunnysports.autosave'
-        );
+      const raw = localStorage.getItem("sunnysports.autosave");
       if (!raw) return;
       const data = JSON.parse(raw);
-      if (
-        typeof data.guysText === 'string'
-      )
-        setGuysText(
-          data.guysText
-        );
-      if (
-        typeof data.girlsText ===
-        'string'
-      )
-        setGirlsText(
-          data.girlsText
-        );
-      if (Array.isArray(data.matches))
-        setMatches(
-          data.matches
-        );
-      if (
-        Array.isArray(
-          data.brackets
-        )
-      )
-        setBrackets(
-          data.brackets
-        );
+      if (typeof data.guysText === "string") setGuysText(data.guysText);
+      if (typeof data.girlsText === "string") setGirlsText(data.girlsText);
+      if (Array.isArray(data.matches)) setMatches(data.matches);
+      if (Array.isArray(data.brackets)) setBrackets(data.brackets);
     } catch {
-      // ignore
+      // ignore corrupted state
     }
   }, []);
 
-  // Autosave store
+  // Autosave persist
   useEffect(() => {
-    const snapshot = JSON.stringify({
-      guysText,
-      girlsText,
-      matches,
-      brackets,
-    });
-    localStorage.setItem(
-      'sunnysports.autosave',
-      snapshot
-    );
-  }, [
-    guysText,
-    girlsText,
-    matches,
-    brackets,
-  ]);
+    const snapshot = JSON.stringify({ guysText, girlsText, matches, brackets });
+    localStorage.setItem("sunnysports.autosave", snapshot);
+  }, [guysText, girlsText, matches, brackets]);
 
   return (
-<main className="min-h-screen bg-gradient-to-b from-sky-300 via-sky-400 to-sky-700 text-slate-800 antialiased">
-  <header className="sticky top-0 z-20 bg-sky-200/80 backdrop-blur border-b border-sky-400/70 shadow-lg">
-    <div className="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between gap-3">
-      <div className="flex items-center gap-3 scale-125 drop-shadow-md">
-        <SunnyLogo />
+    <main className="min-h-screen bg-gradient-to-b from-sky-50 via-sky-100 to-sky-200 text-slate-800 antialiased">
+      {/* Top banner */}
+      <header className="sticky top-0 z-30 bg-gradient-to-r from-sky-700 via-sky-800 to-sky-900 text-white shadow-xl border-b border-sky-900/60 backdrop-blur">
+        <div className="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <div className="scale-125 drop-shadow-[0_6px_18px_rgba(15,23,42,0.55)]">
+              <SunnyLogo />
+            </div>
+            <div className="hidden sm:flex flex-col leading-tight">
+              <span className="text-xs uppercase tracking-[0.16em] text-sky-200">
+                Tournament Control Panel
+              </span>
+              <span className="text-[13px] text-sky-100">
+                Live blind draw · pool play · playoffs · redemption rally
+              </span>
+            </div>
+          </div>
+          <div className="flex flex-col items-end text-[10px] leading-snug text-sky-100/80">
+            <span>Build: <span className="font-semibold">2025-11-08</span></span>
+            <span className="px-2 py-0.5 mt-0.5 rounded-full bg-sky-900/70 border border-sky-500 text-[9px] uppercase tracking-wide">
+              Autosave On
+            </span>
+          </div>
+        </div>
+      </header>
+
+      {/* Main content */}
+      <div className="max-w-6xl mx-auto px-4 py-6 space-y-6 text-[15px] leading-relaxed">
+        {/* Leaderboard Card */}
+        <section className="bg-white/98 border border-sky-200 rounded-2xl shadow-[0_10px_26px_rgba(15,23,42,0.08)] p-5">
+          <Leaderboard matches={matches} guysText={guysText} girlsText={girlsText} />
+        </section>
+
+        {/* Matches Card */}
+        <section className="bg-white/98 border border-sky-200 rounded-2xl shadow-[0_10px_26px_rgba(15,23,42,0.08)] p-5">
+          <MatchesView matches={matches} setMatches={setMatches} />
+        </section>
+
+        {/* Round Generator Card */}
+        <section className="bg-white/98 border border-sky-200 rounded-2xl shadow-[0_10px_26px_rgba(15,23,42,0.08)] p-5">
+          <RoundGenerator
+            guysText={guysText}
+            girlsText={girlsText}
+            matches={matches}
+            setMatches={setMatches}
+          />
+        </section>
+
+        {/* Players / Rosters */}
+        <section className="bg-white/98 border border-sky-200 rounded-2xl shadow-[0_10px_26px_rgba(15,23,42,0.08)] p-5">
+          <h2 className="text-[19px] font-semibold text-sky-800 mb-3">
+            Player Rosters
+          </h2>
+          <p className="text-[12px] text-slate-500 mb-3">
+            Enter one name per line. Duplicates are highlighted automatically so you
+            can catch signup errors fast.
+          </p>
+          <div className="grid md:grid-cols-2 gap-4">
+            <LinedTextarea
+              id="guys"
+              label="Guys"
+              value={guysText}
+              onChange={(e) => setGuysText(e.target.value)}
+              placeholder="One name per line"
+            />
+            <LinedTextarea
+              id="girls"
+              label="Girls"
+              value={girlsText}
+              onChange={(e) => setGirlsText(e.target.value)}
+              placeholder="One name per line"
+            />
+          </div>
+        </section>
+
+        {/* Playoff Builder + Brackets */}
+        <section className="bg-white/98 border border-sky-200 rounded-2xl shadow-[0_10px_26px_rgba(15,23,42,0.08)] p-5 space-y-4">
+          <PlayoffBuilder
+            matches={matches}
+            guysText={guysText}
+            girlsText={girlsText}
+            setBrackets={setBrackets}
+          />
+          <BracketView brackets={brackets} setBrackets={setBrackets} />
+        </section>
+
+        {/* Data / Reset */}
+        <section className="bg-sky-50/90 border border-sky-200 rounded-xl p-3 text-[12px] text-sky-800 flex flex-wrap items-center gap-3">
+          <button
+            className="px-3 py-1.5 rounded-lg border border-red-400 bg-red-50 text-red-700 text-[11px] hover:bg-red-100 hover:border-red-500 transition-colors"
+            onClick={() => {
+              if (
+                window.confirm(
+                  "This will clear all saved players, matches, and brackets on THIS device. Continue?"
+                )
+              ) {
+                localStorage.removeItem("sunnysports.autosave");
+                location.reload();
+              }
+            }}
+          >
+            Reset App (clear autosave)
+          </button>
+          <span>
+            All tournament data is stored locally in this browser. Share your deployed URL so others can{" "}
+            <span className="font-semibold">view live standings</span> without editing access.
+          </span>
+        </section>
       </div>
-      <div className="text-[11px] text-sky-800 font-medium">
-        build: 2025-11-08 · autosave on
-      </div>
-    </div>
-  </header>
-
-  <div className="max-w-6xl mx-auto px-4 py-6 space-y-6 text-[15px] leading-relaxed">
-    {/* Each major card area */}
-    <section className="bg-white border-2 border-sky-700 rounded-2xl shadow-xl p-6">
-      <Leaderboard matches={matches} guysText={guysText} girlsText={girlsText} />
-    </section>
-
-    <section className="bg-white border-2 border-sky-700 rounded-2xl shadow-xl p-6">
-      <MatchesView matches={matches} setMatches={setMatches} />
-    </section>
-
-    <section className="bg-white border-2 border-sky-700 rounded-2xl shadow-xl p-6">
-      <RoundGenerator
-        guysText={guysText}
-        girlsText={girlsText}
-        matches={matches}
-        setMatches={setMatches}
-      />
-    </section>
-
-    <section className="bg-white border-2 border-sky-700 rounded-2xl shadow-xl p-6">
-      <LinedTextarea
-        id="guys"
-        label="Guys"
-        value={guysText}
-        onChange={(e) => setGuysText(e.target.value)}
-      />
-      <LinedTextarea
-        id="girls"
-        label="Girls"
-        value={girlsText}
-        onChange={(e) => setGirlsText(e.target.value)}
-      />
-    </section>
-
-    <section className="bg-white border-2 border-sky-700 rounded-2xl shadow-xl p-6">
-      <PlayoffBuilder
-        matches={matches}
-        guysText={guysText}
-        girlsText={girlsText}
-        setBrackets={setBrackets}
-      />
-      <BracketView brackets={brackets} setBrackets={setBrackets} />
-    </section>
-
-    <section className="bg-sky-100 border border-sky-400 rounded-xl p-3 text-[12px] text-sky-700">
-      <div className="flex flex-wrap items-center gap-2">
-        <button
-          className="px-3 py-1 border border-red-500 rounded text-red-700 bg-red-50 hover:bg-red-100"
-          onClick={() => {
-            localStorage.removeItem('sunnysports.autosave');
-            location.reload();
-          }}
-        >
-          Reset App (clear autosave)
-        </button>
-        <span>All inputs are stored only in this browser via autosave.</span>
-      </div>
-    </section>
-  </div>
-</main>
-
+    </main>
   );
 }
