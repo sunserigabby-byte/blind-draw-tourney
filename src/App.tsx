@@ -2522,113 +2522,78 @@ export default function BlindDrawTourneyApp() {
   ]);
 
   return (
-    <main className="min-h-screen bg-gradient-to-b from-sky-900 via-sky-800 to-sky-900 text-slate-100 antialiased">
-      <header className="sticky top-0 z-10 bg-slate-950/70 backdrop-blur border-b border-sky-700/60 shadow-lg">
-        <div className="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between gap-3">
-          <SunnyLogo />
-          <div className="flex items-center gap-3 text-[10px] text-slate-300">
-            <span>
-              build{' '}
-              2025-11-06_04
-            </span>
-            <button
-              className="px-2 py-1 border border-slate-600 rounded-md hover:bg-slate-900/70 text-slate-200"
-              onClick={() => {
-                localStorage.removeItem(
-                  'sunnysports.autosave'
-                );
-                location.reload();
-              }}
-            >
-              Reset App
-            </button>
-          </div>
-        </div>
-      </header>
-
-      <div className="max-w-6xl mx-auto px-4 py-6 space-y-6">
-        {/* Leaderboard */}
-        <Leaderboard
-          matches={matches}
-          guysText={guysText}
-          girlsText={girlsText}
-        />
-
-        {/* Matches (pool) */}
-        <MatchesView
-          matches={matches}
-          setMatches={setMatches}
-        />
-
-        {/* Generator */}
-        <RoundGenerator
-          guysText={guysText}
-          girlsText={girlsText}
-          matches={matches}
-          setMatches={setMatches}
-        />
-
-        {/* Rosters */}
-        <section className="bg-slate-900/70 backdrop-blur rounded-2xl shadow-lg ring-1 ring-sky-500/40 p-4 border border-slate-700">
-          <h2 className="text-lg font-semibold text-sky-100 mb-2">
-            Player Rosters
-          </h2>
-          <div className="grid md:grid-cols-2 gap-4">
-            <LinedTextarea
-              id="guys"
-              label="Guys"
-              value={guysText}
-              onChange={(e) =>
-                setGuysText(
-                  e.target.value
-                )
-              }
-              placeholder="One name per line"
-            />
-            <LinedTextarea
-              id="girls"
-              label="Girls"
-              value={girlsText}
-              onChange={(e) =>
-                setGirlsText(
-                  e.target.value
-                )
-              }
-              placeholder="One name per line"
-            />
-          </div>
-        </section>
-
-        {/* Playoffs + Brackets */}
-        <PlayoffBuilder
-          matches={matches}
-          guysText={guysText}
-          girlsText={girlsText}
-          setBrackets={setBrackets}
-        />
-        <BracketView
-          brackets={brackets}
-          setBrackets={setBrackets}
-        />
-
-        {/* Data & backup */}
-        <section className="bg-slate-950/60 rounded-xl p-3 text-[10px] text-slate-300 border border-slate-700/80">
-          <div className="flex items-center gap-2 flex-wrap">
-            <span>
-              Autosave is on (local to this
-              browser). Use{' '}
-              <strong>
-                Reset App
-              </strong>{' '}
-              in the header to clear.
-            </span>
-            <span className="text-slate-500">
-              (Export/Import removed per
-              request to keep UI clean.)
-            </span>
-          </div>
-        </section>
+<main className="min-h-screen bg-gradient-to-b from-sky-300 via-sky-400 to-sky-700 text-slate-800 antialiased">
+  <header className="sticky top-0 z-20 bg-sky-200/80 backdrop-blur border-b border-sky-400/70 shadow-lg">
+    <div className="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between gap-3">
+      <div className="flex items-center gap-3 scale-125 drop-shadow-md">
+        <SunnyLogo />
       </div>
-    </main>
+      <div className="text-[11px] text-sky-800 font-medium">
+        build: 2025-11-08 · autosave on
+      </div>
+    </div>
+  </header>
+
+  <div className="max-w-6xl mx-auto px-4 py-6 space-y-6 text-[15px] leading-relaxed">
+    {/* Each major card area */}
+    <section className="bg-white border-2 border-sky-700 rounded-2xl shadow-xl p-6">
+      <Leaderboard matches={matches} guysText={guysText} girlsText={girlsText} />
+    </section>
+
+    <section className="bg-white border-2 border-sky-700 rounded-2xl shadow-xl p-6">
+      <MatchesView matches={matches} setMatches={setMatches} />
+    </section>
+
+    <section className="bg-white border-2 border-sky-700 rounded-2xl shadow-xl p-6">
+      <RoundGenerator
+        guysText={guysText}
+        girlsText={girlsText}
+        matches={matches}
+        setMatches={setMatches}
+      />
+    </section>
+
+    <section className="bg-white border-2 border-sky-700 rounded-2xl shadow-xl p-6">
+      <LinedTextarea
+        id="guys"
+        label="Guys"
+        value={guysText}
+        onChange={(e) => setGuysText(e.target.value)}
+      />
+      <LinedTextarea
+        id="girls"
+        label="Girls"
+        value={girlsText}
+        onChange={(e) => setGirlsText(e.target.value)}
+      />
+    </section>
+
+    <section className="bg-white border-2 border-sky-700 rounded-2xl shadow-xl p-6">
+      <PlayoffBuilder
+        matches={matches}
+        guysText={guysText}
+        girlsText={girlsText}
+        setBrackets={setBrackets}
+      />
+      <BracketView brackets={brackets} setBrackets={setBrackets} />
+    </section>
+
+    <section className="bg-sky-100 border border-sky-400 rounded-xl p-3 text-[12px] text-sky-700">
+      <div className="flex flex-wrap items-center gap-2">
+        <button
+          className="px-3 py-1 border border-red-500 rounded text-red-700 bg-red-50 hover:bg-red-100"
+          onClick={() => {
+            localStorage.removeItem('sunnysports.autosave');
+            location.reload();
+          }}
+        >
+          Reset App (clear autosave)
+        </button>
+        <span>All inputs are stored only in this browser via autosave.</span>
+      </div>
+    </section>
+  </div>
+</main>
+
   );
 }
