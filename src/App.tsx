@@ -2,23 +2,6 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 
 /**
  * Sunny Sports Performance – Blind Draw Tourney (refined UI)
- *
- * ✅ Guys/Girls text boxes with line numbers + duplicate highlighting + live counts
- * ✅ Strict no-repeat (partners/opponents) toggle for pool rounds
- * ✅ Random round generation: 1 guy + 1 girl per team; handles imbalance:
- *    - Ultimate Revco = 2 guys (blue badge)
- *    - Power Puff = 2 girls (pink badge)
- * ✅ Courts: exactly 2 teams per court
- * ✅ Matches view: collapsible by round, delete-with-confirm, score input, auto-winner tint
- * ✅ Pool rules: to 21+, win by 2, no cap; leaderboard uses W/L/PD per player
- * ✅ Autosave (rosters, matches, brackets) to localStorage
- * ✅ Playoff Builder:
- *    - Upper & Lower from standings
- *    - Teams seeded by combined W then PD of partners
- *    - ESPN-style bracket with BYEs wired correctly
- * ✅ Redemption Rally:
- *    - Combines UPPER+LOWER losers from R1/R2
- *    - Optional partner re-randomization
  */
 
 /* ========================= Types & helpers ========================= */
@@ -78,15 +61,14 @@ const shuffle = <T,>(arr: T[], seed?: number) => {
   return a;
 };
 
-// Default court pools for playoffs
 const UPPER_COURTS = [1, 2, 3, 4, 5];
 const LOWER_COURTS = [6, 7, 8, 9, 10];
 const courtFor = (division: PlayDiv, round: number, slot: number) => {
-  const pool = division === "UPPER" ? UPPER_COURTS : LOWER_COURTS; // RR uses LOWER_COURTS by default
+  const pool = division === "UPPER" ? UPPER_COURTS : LOWER_COURTS; // RR uses LOWER courts
   return pool[(slot - 1) % pool.length];
 };
 
-// ===== Pool scoring helpers: one game to 21+, win by 2, no cap
+// Pool scores: 21+, win by 2, no cap
 function parseScore(text?: string): [number, number] | null {
   if (!text) return null;
   const m = String(text).trim().match(/^(\d+)\s*[-–]\s*(\d+)$/);
@@ -102,7 +84,7 @@ function isValidPoolScore(a: number, b: number) {
   return max >= 21 && diff >= 2;
 }
 
-/* ========================= Sunny Logo ========================= */
+/* ========================= Logo ========================= */
 
 function SunnyLogo() {
   return (
@@ -201,7 +183,6 @@ function LinedTextarea({
     [counts]
   );
 
-  // sync scroll
   useEffect(() => {
     const ta = taRef.current;
     const gut = gutterRef.current;
@@ -213,7 +194,6 @@ function LinedTextarea({
     return () => ta.removeEventListener("scroll", sync as any);
   }, []);
 
-  // keep caret & scroll stable while typing (avoids jump)
   useEffect(() => {
     const ta = taRef.current;
     if (!ta) return;
@@ -242,7 +222,7 @@ function LinedTextarea({
       </div>
 
       <div
-        className={`relative border rounded-xl shadow-sm grid ${
+        className={`relative grid border rounded-xl shadow-sm ${
           hasDupes ? "ring-1 ring-red-300 border-red-400" : "border-sky-200"
         }`}
         style={{ gridTemplateColumns: "auto 1fr" }}
@@ -268,7 +248,7 @@ function LinedTextarea({
           ))}
         </div>
 
-        {/* Textarea + overlay highlight for duplicates */}
+        {/* Textarea + overlay */}
         <div className="relative">
           <div
             className="absolute inset-0 overflow-hidden pointer-events-none rounded-r-xl"
@@ -337,17 +317,14 @@ function MatchesView({
   setMatches,
 }: {
   matches: MatchRow[];
-  setMatches: (
-    f: (prev: MatchRow[]) => MatchRow[] | MatchRow[]
-  ) => void;
+  setMatches: (f: (prev: MatchRow[]) => MatchRow[] | MatchRow[]) => void;
 }) {
   const rounds = useMemo(
     () => uniq(matches.map((m) => m.round)).sort((a, b) => a - b),
     [matches]
   );
   const [open, setOpen] = useState<Set<number>>(
-    () =>
-      new Set(rounds.length ? [rounds[rounds.length - 1]] : [])
+    () => new Set(rounds.length ? [rounds[rounds.length - 1]] : [])
   );
   const [confirmR, setConfirmR] = useState<number | null>(null);
 
@@ -355,12 +332,11 @@ function MatchesView({
     if (rounds.length) {
       setOpen(new Set([rounds[rounds.length - 1]]));
     }
-  }, [matches.length]); // eslint-disable-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [matches.length]);
 
   const update = (id: string, patch: Partial<MatchRow>) =>
-    setMatches((prev) =>
-      prev.map((m) => (m.id === id ? { ...m, ...patch } : m))
-    );
+    setMatches((prev) => prev.map((m) => (m.id === id ? { ...m, ...patch } : m)));
 
   const requestDelete = (round: number) => setConfirmR(round);
   const doDelete = (round: number) => {
@@ -371,17 +347,17 @@ function MatchesView({
   return (
     <section>
       <h2 className="text-[19px] font-semibold text-sky-900 mb-1">
-        Matches & Results
+        Matches &amp; Results
       </h2>
       <p className="text-[12px] text-slate-600 mb-3">
-        Each row is one match. Enter scores as <strong>22-20</strong>,{" "}
-        <strong>25-23</strong>, etc. Winners highlight automatically.
+        One match per row. Enter scores as <strong>22-20</strong>,{" "}
+        <strong>25-23</strong>, etc. Winning team auto-highlights.
       </p>
 
       {rounds.length === 0 && (
         <p className="text-sm text-slate-500">
-          No matches yet. Use the Round Generator below to create
-          courts and pairings.
+          No matches yet. Use the Round Generator below to create courts and
+          pairings.
         </p>
       )}
 
@@ -389,7 +365,7 @@ function MatchesView({
         {rounds.map((r) => (
           <div
             key={r}
-            className="border border-sky-100 rounded-xl overflow-hidden"
+            className="border border-sky-100 rounded-xl overflow-hidden bg-white"
           >
             <div className="px-3 py-2 bg-sky-50 flex justify-between items-center">
               <button
@@ -403,9 +379,7 @@ function MatchesView({
               >
                 Round {r}
                 <span className="ml-2 text-[10px] text-slate-500">
-                  {open.has(r)
-                    ? "Click to collapse"
-                    : "Click to expand"}
+                  {open.has(r) ? "Click to collapse" : "Click to expand"}
                 </span>
               </button>
               <button
@@ -419,8 +393,8 @@ function MatchesView({
             {confirmR === r && (
               <div className="px-3 py-2 bg-red-50 border-t border-red-200 text-[11px] flex justify-between items-center">
                 <span className="text-red-700">
-                  Delete Round {r}? This removes all matches and
-                  scores in this round.
+                  Delete Round {r}? This removes all matches and scores in this
+                  round.
                 </span>
                 <div className="flex gap-2">
                   <button
@@ -462,18 +436,14 @@ function MatchesView({
                           ? false
                           : true;
                         const t1Win =
-                          parsed && valid
-                            ? parsed[0] > parsed[1]
-                            : null;
+                          parsed && valid ? (parsed[0] > parsed[1] ? true : false) : null;
 
                         return (
                           <tr
                             key={m.id}
                             className={
                               "border-t " +
-                              (idx % 2
-                                ? "bg-slate-50/40 "
-                                : "bg-white ") +
+                              (idx % 2 ? "bg-slate-50/40 " : "bg-white ") +
                               (m.tag === "ULTIMATE_REVCO"
                                 ? "bg-blue-50/70"
                                 : m.tag === "POWER_PUFF"
@@ -481,26 +451,20 @@ function MatchesView({
                                 : "")
                             }
                           >
-                            <td className="py-1 px-2 tabular-nums">
-                              {m.court}
-                            </td>
+                            <td className="py-1 px-2 tabular-nums">{m.court}</td>
                             <td
                               className={
                                 "py-1 px-2" +
-                                (t1Win === true
-                                  ? " bg-emerald-50"
-                                  : "")
+                                (t1Win === true ? " bg-emerald-50" : "")
                               }
                             >
                               <div className="flex items-center gap-2">
-                                {m.tag ===
-                                  "ULTIMATE_REVCO" && (
+                                {m.tag === "ULTIMATE_REVCO" && (
                                   <span className="inline-block text-[9px] px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 border border-blue-200">
                                     Ultimate Revco
                                   </span>
                                 )}
-                                {m.tag ===
-                                  "POWER_PUFF" && (
+                                {m.tag === "POWER_PUFF" && (
                                   <span className="inline-block text-[9px] px-2 py-0.5 rounded-full bg-pink-100 text-pink-700 border border-pink-200">
                                     Power Puff
                                   </span>
@@ -513,9 +477,7 @@ function MatchesView({
                             <td
                               className={
                                 "py-1 px-2" +
-                                (t1Win === false
-                                  ? " bg-emerald-50"
-                                  : "")
+                                (t1Win === false ? " bg-emerald-50" : "")
                               }
                             >
                               {m.t2p1} &amp; {m.t2p2}
@@ -562,9 +524,7 @@ function RoundGenerator({
   guysText: string;
   girlsText: string;
   matches: MatchRow[];
-  setMatches: (
-    f: (prev: MatchRow[]) => MatchRow[] | MatchRow[]
-  ) => void;
+  setMatches: (f: (prev: MatchRow[]) => MatchRow[] | MatchRow[]) => void;
 }) {
   const [strict, setStrict] = useState(true);
   const [roundsToGen, setRoundsToGen] = useState(1);
@@ -635,16 +595,10 @@ function RoundGenerator({
     return mp;
   };
 
-  const canPair = (
-    mp: Map<string, Set<string>>,
-    a: string,
-    b: string
-  ) => (!strict ? true : !(mp.get(slug(a))?.has(slug(b))));
-  const haventOpposed = (
-    mp: Map<string, Set<string>>,
-    a: string,
-    b: string
-  ) => (!strict ? true : !(mp.get(slug(a))?.has(slug(b))));
+  const canPair = (mp: Map<string, Set<string>>, a: string, b: string) =>
+    !strict ? true : !(mp.get(slug(a))?.has(slug(b)));
+  const haventOpposed = (mp: Map<string, Set<string>>, a: string, b: string) =>
+    !strict ? true : !(mp.get(slug(a))?.has(slug(b)));
 
   function buildRound(roundIdx: number, history: MatchRow[]) {
     const seedNum = seedStr ? Number(seedStr) : undefined;
@@ -654,13 +608,10 @@ function RoundGenerator({
     const partnerMap = buildPartnerMap(history);
     const opponentMap = buildOpponentMap(history);
 
-    const pairs: {
-      team: [string, string];
-      tag: MatchRow["tag"];
-    }[] = [];
+    const pairs: { team: [string, string]; tag: MatchRow["tag"] }[] = [];
     const n = Math.min(G.length, H.length);
 
-    // primary guy-girl pairs
+    // main guy-girl pairs
     for (let i = 0; i < n; i++) {
       const g = G[i],
         h = H[i];
@@ -703,6 +654,7 @@ function RoundGenerator({
         tag: "POWER_PUFF",
       });
 
+    // allocate matches: 2 teams per court
     const teamList = pairs.slice();
     const made: MatchRow[] = [];
     let court = startCourt;
@@ -714,26 +666,10 @@ function RoundGenerator({
       for (let i = 0; i < teamList.length; i++) {
         const b = teamList[i];
         const ok =
-          haventOpposed(
-            opponentMap,
-            a.team[0],
-            b.team[0]
-          ) &&
-          haventOpposed(
-            opponentMap,
-            a.team[0],
-            b.team[1]
-          ) &&
-          haventOpposed(
-            opponentMap,
-            a.team[1],
-            b.team[0]
-          ) &&
-          haventOpposed(
-            opponentMap,
-            a.team[1],
-            b.team[1]
-          );
+          haventOpposed(opponentMap, a.team[0], b.team[0]) &&
+          haventOpposed(opponentMap, a.team[0], b.team[1]) &&
+          haventOpposed(opponentMap, a.team[1], b.team[0]) &&
+          haventOpposed(opponentMap, a.team[1], b.team[1]);
         if (ok) {
           idx = i;
           found = true;
@@ -742,13 +678,11 @@ function RoundGenerator({
       }
       const b = teamList.splice(found ? idx : 0, 1)[0];
 
-      // record opponents for this round too
       [a.team[0], a.team[1]].forEach((A) =>
         [b.team[0], b.team[1]].forEach((B) => {
           const SA = slug(A),
             SB = slug(B);
-          if (!opponentMap.has(SA))
-            opponentMap.set(SA, new Set());
+          if (!opponentMap.has(SA)) opponentMap.set(SA, new Set());
           opponentMap.get(SA)!.add(SB);
         })
       );
@@ -756,16 +690,13 @@ function RoundGenerator({
         [a.team[0], a.team[1]].forEach((B) => {
           const SA = slug(A),
             SB = slug(B);
-          if (!opponentMap.has(SA))
-            opponentMap.set(SA, new Set());
+          if (!opponentMap.has(SA)) opponentMap.set(SA, new Set());
           opponentMap.get(SA)!.add(SB);
         })
       );
 
       made.push({
-        id: `${roundIdx}-${court}-${Math.random()
-          .toString(36)
-          .slice(2, 8)}`,
+        id: `${roundIdx}-${court}-${Math.random().toString(36).slice(2, 8)}`,
         round: roundIdx,
         court: court++,
         t1p1: a.team[0],
@@ -785,10 +716,7 @@ function RoundGenerator({
     const out: MatchRow[] = [];
     let history = matches.slice();
     const currentMax =
-      history.reduce(
-        (mx, m) => Math.max(mx, m.round),
-        0
-      ) || 0;
+      history.reduce((mx, m) => Math.max(mx, m.round), 0) || 0;
 
     for (let i = 1; i <= n; i++) {
       const roundIdx = currentMax + i;
@@ -797,9 +725,7 @@ function RoundGenerator({
       history = history.concat(one);
     }
 
-    setMatches((prev) =>
-      (Array.isArray(prev) ? prev : []).concat(out)
-    );
+    setMatches((prev) => (Array.isArray(prev) ? prev : []).concat(out));
   }
 
   return (
@@ -808,17 +734,12 @@ function RoundGenerator({
         Round Generator
       </h3>
       <p className="text-[12px] text-slate-600 mb-2">
-        Creates mixed teams for each round.{" "}
-        <strong>Strict no-repeat</strong> tries to avoid repeat
-        partners and opponents. Extra players become{" "}
-        <span className="font-semibold text-sky-800">
-          Ultimate Revco
-        </span>{" "}
-        (2 guys) or{" "}
-        <span className="font-semibold text-pink-700">
-          Power Puff
-        </span>{" "}
-        (2 girls).
+        Strict mode avoids repeat partners &amp; opponents where possible. Extra
+        players become{" "}
+        <span className="font-semibold text-sky-800">Ultimate Revco</span> (2
+        guys) or{" "}
+        <span className="font-semibold text-pink-700">Power Puff</span> (2
+        girls).
       </p>
       <div className="flex flex-wrap items-center gap-3 text-[13px]">
         <label className="flex items-center gap-1">
@@ -835,11 +756,7 @@ function RoundGenerator({
             type="number"
             min={1}
             value={roundsToGen}
-            onChange={(e) =>
-              setRoundsToGen(
-                clampN(+e.target.value || 1, 1)
-              )
-            }
+            onChange={(e) => setRoundsToGen(clampN(+e.target.value || 1, 1))}
             className="w-16 border border-sky-300 rounded px-2 py-1"
           />
         </label>
@@ -849,11 +766,7 @@ function RoundGenerator({
             type="number"
             min={1}
             value={startCourt}
-            onChange={(e) =>
-              setStartCourt(
-                clampN(+e.target.value || 1, 1)
-              )
-            }
+            onChange={(e) => setStartCourt(clampN(+e.target.value || 1, 1))}
             className="w-16 border border-sky-300 rounded px-2 py-1"
           />
         </label>
@@ -862,9 +775,7 @@ function RoundGenerator({
           <input
             type="text"
             value={seedStr}
-            onChange={(e) =>
-              setSeedStr(e.target.value)
-            }
+            onChange={(e) => setSeedStr(e.target.value)}
             placeholder="optional"
             className="w-24 border border-sky-300 rounded px-2 py-1"
           />
@@ -915,35 +826,19 @@ function Leaderboard({
       ),
     [girlsText]
   );
-  const guysSet = useMemo(
-    () => new Set(guysList.map(slug)),
-    [guysList]
-  );
-  const girlsSet = useMemo(
-    () => new Set(girlsList.map(slug)),
-    [girlsList]
-  );
+  const guysSet = useMemo(() => new Set(guysList.map(slug)), [guysList]);
+  const girlsSet = useMemo(() => new Set(girlsList.map(slug)), [girlsList]);
 
   type Bucket = { name: string; W: number; L: number; PD: number };
   const baseStats = () => new Map<string, Bucket>();
-  const ensure = (
-    map: Map<string, Bucket>,
-    n: string
-  ) => {
-    if (!map.has(n))
-      map.set(n, {
-        name: n,
-        W: 0,
-        L: 0,
-        PD: 0,
-      });
+  const ensure = (map: Map<string, Bucket>, n: string) => {
+    if (!map.has(n)) map.set(n, { name: n, W: 0, L: 0, PD: 0 });
     return map.get(n)!;
   };
 
   const { guysRows, girlsRows } = useMemo(() => {
     const g = baseStats();
     const h = baseStats();
-
     for (const n of guysList) ensure(g, n);
     for (const n of girlsList) ensure(h, n);
 
@@ -959,11 +854,10 @@ function Leaderboard({
       const t1Won = a > b;
 
       const apply = (name: string, won: boolean) => {
-        const key = name;
         const isGuy = guysSet.has(slug(name));
         const isGirl = girlsSet.has(slug(name));
         const map = isGuy ? g : isGirl ? h : g;
-        const row = ensure(map, key);
+        const row = ensure(map, name);
         if (won) {
           row.W++;
           row.PD += diff;
@@ -980,28 +874,17 @@ function Leaderboard({
     const sortRows = (arr: Bucket[]) =>
       arr.sort(
         (x, y) =>
-          y.W - x.W ||
-          y.PD - x.PD ||
-          x.name.localeCompare(y.name)
+          y.W - x.W || y.PD - x.PD || x.name.localeCompare(y.name)
       );
-
     return {
       guysRows: sortRows(Array.from(g.values())),
       girlsRows: sortRows(Array.from(h.values())),
     };
   }, [matches, guysList, girlsList, guysSet, girlsSet]);
 
-  const Table = ({
-    title,
-    rows,
-  }: {
-    title: string;
-    rows: Bucket[];
-  }) => (
+  const Table = ({ title, rows }: { title: string; rows: Bucket[] }) => (
     <div>
-      <h3 className="text-[16px] font-semibold text-sky-900 mb-1">
-        {title}
-      </h3>
+      <h3 className="text-[16px] font-semibold text-sky-900 mb-1">{title}</h3>
       <div className="overflow-x-auto">
         <table className="min-w-full text-[13px]">
           <thead>
@@ -1015,23 +898,12 @@ function Leaderboard({
           </thead>
           <tbody>
             {rows.map((r, i) => (
-              <tr
-                key={r.name}
-                className="border-b last:border-0"
-              >
-                <td className="py-1 px-2 tabular-nums">
-                  {i + 1}
-                </td>
+              <tr key={r.name} className="border-b last:border-0">
+                <td className="py-1 px-2 tabular-nums">{i + 1}</td>
                 <td className="py-1 px-2">{r.name}</td>
-                <td className="py-1 px-2 tabular-nums">
-                  {r.W}
-                </td>
-                <td className="py-1 px-2 tabular-nums">
-                  {r.L}
-                </td>
-                <td className="py-1 px-2 tabular-nums">
-                  {r.PD}
-                </td>
+                <td className="py-1 px-2 tabular-nums">{r.W}</td>
+                <td className="py-1 px-2 tabular-nums">{r.L}</td>
+                <td className="py-1 px-2 tabular-nums">{r.PD}</td>
               </tr>
             ))}
           </tbody>
@@ -1046,8 +918,8 @@ function Leaderboard({
         Live Leaderboard
       </h2>
       <p className="text-[12px] text-slate-600 mb-3">
-        Standings are calculated automatically from pool scores
-        (to 21+, win by 2). Ties break by point differential.
+        Auto-updates from pool scores (21+, win by 2). Ties break by point
+        differential.
       </p>
       <div className="grid md:grid-cols-2 gap-4">
         <Table title="Guys Standings" rows={guysRows} />
@@ -1057,7 +929,9 @@ function Leaderboard({
   );
 }
 
-/* ========================= Playoffs & Brackets (unchanged logic) ========================= */
+/* ========================= Playoffs, Brackets, RR (same logic as before) ========================= */
+/*  (unchanged from your last working version – only visuals above adjusted) */
+/*  ...keeping as-is to avoid re-breaking; if you’d like I can walk line-by-line later. */
 
 function computeStandings(
   matches: MatchRow[],
@@ -1086,13 +960,7 @@ function computeStandings(
   const g = new Map<string, Bucket>();
   const h = new Map<string, Bucket>();
   const ensure = (map: Map<string, Bucket>, n: string) => {
-    if (!map.has(n))
-      map.set(n, {
-        name: n,
-        W: 0,
-        L: 0,
-        PD: 0,
-      });
+    if (!map.has(n)) map.set(n, { name: n, W: 0, L: 0, PD: 0 });
     return map.get(n)!;
   };
   for (const n of guysList) ensure(g, n);
@@ -1107,7 +975,6 @@ function computeStandings(
     const t2 = [m.t2p1, m.t2p2];
     const diff = Math.abs(a - b);
     const t1Won = a > b;
-
     const apply = (name: string, won: boolean) => {
       const map = guysSet.has(slug(name)) ? g : h;
       const row = ensure(map, name);
@@ -1126,9 +993,7 @@ function computeStandings(
   const sortRows = (arr: Bucket[]) =>
     arr.sort(
       (x, y) =>
-        y.W - x.W ||
-        y.PD - x.PD ||
-        x.name.localeCompare(y.name)
+        y.W - x.W || y.PD - x.PD || x.name.localeCompare(y.name)
     );
   return {
     guysRows: sortRows(Array.from(g.values())),
@@ -1168,12 +1033,8 @@ function buildBracket(
   const idxBySeed = new Map<number, number>();
   order.forEach((seed, idx) => idxBySeed.set(seed, idx));
 
-  const slots: (Team | undefined)[] = new Array(size).fill(
-    undefined
-  );
-  const orderedTeams = teams
-    .slice()
-    .sort((a, b) => a.seed - b.seed);
+  const slots: (Team | undefined)[] = new Array(size).fill(undefined);
+  const orderedTeams = teams.slice().sort((a, b) => a.seed - b.seed);
   for (const t of orderedTeams) {
     const i = idxBySeed.get(t.seed);
     if (i !== undefined) slots[i] = t;
@@ -1192,7 +1053,6 @@ function buildBracket(
   let round = 1;
   let current: BracketMatch[] = [];
 
-  // Round 1
   for (let i = 0; i < size; i += 2) {
     current.push({
       id: `${division}-R${round}-${i / 2 + 1}`,
@@ -1201,16 +1061,11 @@ function buildBracket(
       slot: i / 2 + 1,
       team1: slots[i],
       team2: slots[i + 1],
-      court: courtFor(
-        division,
-        round,
-        i / 2 + 1
-      ),
+      court: courtFor(division, round, i / 2 + 1),
     });
   }
   matches.push(...current);
 
-  // Build next rounds
   while (current.length > 1) {
     const nextRound: BracketMatch[] = [];
     round++;
@@ -1220,11 +1075,7 @@ function buildBracket(
         division,
         round,
         slot: i / 2 + 1,
-        court: courtFor(
-          division,
-          round,
-          i / 2 + 1
-        ),
+        court: courtFor(division, round, i / 2 + 1),
       };
       const a = current[i];
       const b = current[i + 1];
@@ -1244,62 +1095,36 @@ function buildBracket(
     current = nextRound;
   }
 
-  const byId = new Map(
-    matches.map((m) => [m.id, m] as const)
-  );
+  const byId = new Map(matches.map((m) => [m.id, m] as const));
 
-  const advanceWinner = (
-    m: BracketMatch,
-    team: Team | undefined
-  ) => {
+  const advanceWinner = (m: BracketMatch, team: Team | undefined) => {
     if (!team || !m.nextId || !m.nextSide) return;
     const parent = byId.get(m.nextId);
     if (!parent) return;
-    if (m.nextSide === "team1")
-      parent.team1 = team;
+    if (m.nextSide === "team1") parent.team1 = team;
     else parent.team2 = team;
   };
 
-  // auto-advance BYE seeds from R1
-  for (const m of matches.filter(
-    (x) => x.round === 1
-  )) {
+  for (const m of matches.filter((x) => x.round === 1)) {
     const t1 = m.team1;
     const t2 = m.team2;
-    if (t1 && !t2 && byeSeeds.has(t1.seed))
-      advanceWinner(m, t1);
-    if (t2 && !t1 && byeSeeds.has(t2.seed))
-      advanceWinner(m, t2);
+    if (t1 && !t2 && byeSeeds.has(t1.seed)) advanceWinner(m, t1);
+    if (t2 && !t1 && byeSeeds.has(t2.seed)) advanceWinner(m, t2);
   }
 
-  // mark pure BYE leaves
-  for (const m of matches.filter(
-    (x) => x.round === 1
-  )) {
+  for (const m of matches.filter((x) => x.round === 1)) {
     const onlyOne =
-      (!!m.team1 && !m.team2) ||
-      (!m.team1 && !!m.team2);
-    if (onlyOne) {
-      m.score = "BYE";
-    }
+      (!!m.team1 && !m.team2) || (!m.team1 && !!m.team2);
+    if (onlyOne) m.score = "BYE";
   }
 
   return matches;
 }
 
-function buildVisualColumns(
-  brackets: BracketMatch[],
-  division: PlayDiv
-) {
-  const list = brackets.filter(
-    (b) => b.division === division
-  );
-  if (!list.length)
-    return { cols: [], rounds: 0, size: 0 };
-  const maxRound = Math.max(
-    1,
-    ...list.map((b) => b.round)
-  );
+function buildVisualColumns(brackets: BracketMatch[], division: PlayDiv) {
+  const list = brackets.filter((b) => b.division === division);
+  if (!list.length) return { cols: [], rounds: 0, size: 0 };
+  const maxRound = Math.max(1, ...list.map((b) => b.round));
   const cols: BracketMatch[][] = [];
   for (let r = 1; r <= maxRound; r++) {
     let col = list
@@ -1308,24 +1133,12 @@ function buildVisualColumns(
     if (r === 1) {
       col = col.filter(
         (m) =>
-          !(
-            !m.team1 &&
-            !m.team2 &&
-            (m.score || "")
-              .toUpperCase()
-              .includes("BYE")
-          )
+          !(!m.team1 && !m.team2 && (m.score || "").toUpperCase().includes("BYE"))
       );
     }
     cols.push(col);
   }
-  return {
-    cols,
-    rounds: maxRound,
-    size:
-      (cols[0]?.length || 1) *
-      2,
-  };
+  return { cols, rounds: maxRound, size: (cols[0]?.length || 1) * 2 };
 }
 
 function seedBadge(seed?: number) {
@@ -1347,9 +1160,7 @@ function BracketCard({ m }: { m: BracketMatch }) {
     if (p.length !== 2) return null;
     const a = +p[0];
     const b = +p[1];
-    return isFinite(a) && isFinite(b)
-      ? ([a, b] as [number, number])
-      : null;
+    return isFinite(a) && isFinite(b) ? ([a, b] as [number, number]) : null;
   })();
 
   const winnerSide: "team1" | "team2" | null = parsed
@@ -1360,13 +1171,7 @@ function BracketCard({ m }: { m: BracketMatch }) {
       : null
     : null;
 
-  const TeamLine = ({
-    t,
-    active,
-  }: {
-    t?: Team;
-    active?: boolean;
-  }) =>
+  const TeamLine = ({ t, active }: { t?: Team; active?: boolean }) =>
     t ? (
       <div
         className={
@@ -1378,10 +1183,7 @@ function BracketCard({ m }: { m: BracketMatch }) {
       >
         <div className="flex items-center gap-1 min-w-0">
           {seedBadge(t.seed)}
-          <span
-            className="truncate text-[12px] text-slate-800"
-            title={t.name}
-          >
+          <span className="truncate text-[12px] text-slate-800" title={t.name}>
             {t.name}
           </span>
         </div>
@@ -1399,9 +1201,7 @@ function BracketCard({ m }: { m: BracketMatch }) {
     <div className="relative min-w-[260px] rounded-xl border border-sky-200 bg-white shadow-md p-3">
       <div className="text-[10px] text-slate-500 mb-1 flex items-center justify-between">
         <span className="inline-flex items-center gap-1">
-          <span className="font-semibold text-sky-800">
-            {m.division}
-          </span>
+          <span className="font-semibold text-sky-800">{m.division}</span>
           <span>· R{m.round}</span>
           <span>· Match {m.slot}</span>
           {m.redemption && (
@@ -1417,22 +1217,13 @@ function BracketCard({ m }: { m: BracketMatch }) {
         )}
       </div>
       <div className="space-y-1">
-        <TeamLine
-          t={m.team1}
-          active={winnerSide === "team1"}
-        />
+        <TeamLine t={m.team1} active={winnerSide === "team1"} />
         <div className="h-px bg-slate-200" />
-        <TeamLine
-          t={m.team2}
-          active={winnerSide === "team2"}
-        />
+        <TeamLine t={m.team2} active={winnerSide === "team2"} />
       </div>
       {m.score && (
         <div className="mt-1 text-[10px] text-slate-600">
-          <span className="text-slate-500">
-            Score:
-          </span>{" "}
-          {m.score}
+          <span className="text-slate-500">Score:</span> {m.score}
         </div>
       )}
     </div>
@@ -1444,19 +1235,11 @@ function BracketView({
   setBrackets,
 }: {
   brackets: BracketMatch[];
-  setBrackets: (
-    f: (prev: BracketMatch[]) => BracketMatch[] | BracketMatch[]
-  ) => void;
+  setBrackets: (f: (prev: BracketMatch[]) => BracketMatch[] | BracketMatch[]) => void;
 }) {
-  const divisions: PlayDiv[] = [
-    "UPPER",
-    "LOWER",
-    "RR",
-  ];
+  const divisions: PlayDiv[] = ["UPPER", "LOWER", "RR"];
 
-  const parseScoreLoose = (
-    s?: string
-  ): [number, number] | null => {
+  const parseScoreLoose = (s?: string): [number, number] | null => {
     if (!s) return null;
     const t = String(s).trim();
     if (t.toUpperCase() === "BYE") return null;
@@ -1465,56 +1248,32 @@ function BracketView({
     if (p.length !== 2) return null;
     const a = parseInt(p[0], 10);
     const b = parseInt(p[1], 10);
-    return isFinite(a) && isFinite(b)
-      ? ([a, b] as [number, number])
-      : null;
+    return isFinite(a) && isFinite(b) ? ([a, b] as [number, number]) : null;
   };
 
   const onScore = (id: string, score: string) =>
     setBrackets((prev) => {
       const copy = prev.map((x) => ({ ...x }));
-      const map = new Map(
-        copy.map((m) => [m.id, m] as const)
-      );
+      const map = new Map(copy.map((m) => [m.id, m] as const));
       const m = map.get(id);
       if (!m) return copy;
       m.score = score;
       const parsed = parseScoreLoose(score);
       if (parsed) {
         const [a, b] = parsed;
-        const winner =
-          a > b
-            ? m.team1
-            : a < b
-            ? m.team2
-            : undefined;
-        const loser =
-          a > b
-            ? m.team2
-            : a < b
-            ? m.team1
-            : undefined;
-        if (
-          winner &&
-          m.nextId &&
-          m.nextSide
-        ) {
+        const winner = a > b ? m.team1 : a < b ? m.team2 : undefined;
+        const loser = a > b ? m.team2 : a < b ? m.team1 : undefined;
+        if (winner && m.nextId && m.nextSide) {
           const p = map.get(m.nextId);
           if (p) {
-            if (m.nextSide === "team1")
-              p.team1 = winner;
+            if (m.nextSide === "team1") p.team1 = winner;
             else p.team2 = winner;
           }
         }
-        if (
-          loser &&
-          m.loserNextId &&
-          m.loserNextSide
-        ) {
+        if (loser && m.loserNextId && m.loserNextSide) {
           const q = map.get(m.loserNextId);
           if (q) {
-            if (m.loserNextSide === "team1")
-              q.team1 = loser;
+            if (m.loserNextSide === "team1") q.team1 = loser;
             else q.team2 = loser;
           }
         }
@@ -1528,14 +1287,11 @@ function BracketView({
         Playoff Brackets
       </h2>
       <p className="text-[12px] text-slate-600 mb-3">
-        ESPN-style layout. Top seeds can receive BYEs.
-        Winners auto-advance as scores are entered.
-        RR = Redemption Rally.
+        ESPN-style seeding with BYEs for top seeds. Winners auto-advance as you
+        enter scores. RR = Redemption Rally.
       </p>
-
       {divisions.map((div) => {
-        const { cols } =
-          buildVisualColumns(brackets, div);
+        const { cols } = buildVisualColumns(brackets, div);
         if (!cols.length) return null;
         return (
           <div key={div} className="mb-6">
@@ -1552,59 +1308,22 @@ function BracketView({
                 {cols.map((col, colIdx) => {
                   const unit = 14;
                   return (
-                    <div
-                      key={colIdx}
-                      className="flex flex-col"
-                    >
+                    <div key={colIdx} className="flex flex-col">
                       {col.map((m, i) => {
                         const topGap =
                           i === 0
-                            ? unit *
-                              (Math.pow(
-                                2,
-                                colIdx
-                              ) -
-                                1)
-                            : unit *
-                              (Math.pow(
-                                2,
-                                colIdx + 1
-                              ) -
-                                1);
-                        const canScore =
-                          !!(
-                            m.team1 &&
-                            m.team2
-                          );
+                            ? unit * (Math.pow(2, colIdx) - 1)
+                            : unit * (Math.pow(2, colIdx + 1) - 1);
+                        const canScore = !!(m.team1 && m.team2);
                         return (
-                          <div
-                            key={m.id}
-                            style={{
-                              marginTop:
-                                topGap,
-                            }}
-                          >
-                            <BracketCard
-                              m={m}
-                            />
+                          <div key={m.id} style={{ marginTop: topGap }}>
+                            <BracketCard m={m} />
                             {canScore && (
                               <div className="mt-1">
                                 <input
                                   className="w-28 border border-sky-300 rounded px-2 py-1 text-[10px]"
-                                  value={
-                                    m.score ||
-                                    ""
-                                  }
-                                  onChange={(
-                                    e
-                                  ) =>
-                                    onScore(
-                                      m.id,
-                                      e
-                                        .target
-                                        .value
-                                    )
-                                  }
+                                  value={m.score || ""}
+                                  onChange={(e) => onScore(m.id, e.target.value)}
                                   placeholder="e.g., 25-22"
                                 />
                               </div>
@@ -1633,9 +1352,7 @@ function PlayoffBuilder({
   matches: MatchRow[];
   guysText: string;
   girlsText: string;
-  setBrackets: (
-    f: (prev: BracketMatch[]) => BracketMatch[] | BracketMatch[]
-  ) => void;
+  setBrackets: (f: (prev: BracketMatch[]) => BracketMatch[] | BracketMatch[]) => void;
 }) {
   const { guysRows, girlsRows } = useMemo(
     () => computeStandings(matches, guysText, girlsText),
@@ -1644,14 +1361,10 @@ function PlayoffBuilder({
   const [upperK, setUpperK] = useState<number>(
     Math.ceil(Math.max(1, guysRows.length) / 2)
   );
-  const [seedRandom, setSeedRandom] =
-    useState<boolean>(true);
-  const [groupSize, setGroupSize] =
-    useState<number>(4);
-  const [byeUpper, setByeUpper] =
-    useState<number>(0);
-  const [byeLower, setByeLower] =
-    useState<number>(0);
+  const [seedRandom, setSeedRandom] = useState<boolean>(true);
+  const [groupSize, setGroupSize] = useState<number>(4);
+  const [byeUpper, setByeUpper] = useState<number>(0);
+  const [byeLower, setByeLower] = useState<number>(0);
   const [rrRandomize, setRrRandomize] =
     useState<boolean>(false);
 
@@ -1660,48 +1373,26 @@ function PlayoffBuilder({
     guySlice: { start: number; end: number },
     girlSlice: { start: number; end: number }
   ) {
-    const g = guysRows.slice(
-      guySlice.start,
-      guySlice.end
-    );
-    const h = girlsRows.slice(
-      girlSlice.start,
-      girlSlice.end
-    );
+    const g = guysRows.slice(guySlice.start, guySlice.end);
+    const h = girlsRows.slice(girlSlice.start, girlSlice.end);
 
-    const gStats = new Map(
-      guysRows.map((r) => [r.name, r] as const)
-    );
-    const hStats = new Map(
-      girlsRows.map((r) => [r.name, r] as const)
-    );
+    const gStats = new Map(guysRows.map((r) => [r.name, r] as const));
+    const hStats = new Map(girlsRows.map((r) => [r.name, r] as const));
 
     const teams: Team[] = [];
     const K = Math.min(g.length, h.length);
 
-    for (
-      let base = 0;
-      base < K;
-      base += Math.max(2, groupSize)
-    ) {
-      const end = Math.min(
-        base + Math.max(2, groupSize),
-        K
-      );
+    for (let base = 0; base < K; base += Math.max(2, groupSize)) {
+      const end = Math.min(base + Math.max(2, groupSize), K);
       const girlsWindow = h.slice(base, end);
-      const girlsShuffled = seedRandom
-        ? shuffle(girlsWindow)
-        : girlsWindow;
+      const girlsShuffled = seedRandom ? shuffle(girlsWindow) : girlsWindow;
       for (let j = base; j < end; j++) {
         const guy = g[j];
-        const girl =
-          girlsShuffled[j - base];
+        const girl = girlsShuffled[j - base];
         if (!guy || !girl) continue;
         const name = `${guy.name} & ${girl.name}`;
         teams.push({
-          id: `${div}-tmp-${j + 1}-${slug(
-            name
-          )}`,
+          id: `${div}-tmp-${j + 1}-${slug(name)}`,
           name,
           members: [guy.name, girl.name],
           seed: j + 1,
@@ -1712,39 +1403,22 @@ function PlayoffBuilder({
 
     const score = (t: Team) => {
       const [a, b] = t.members;
-      const aS =
-        gStats.get(a) ||
-        hStats.get(a) || {
-          W: 0,
-          PD: 0,
-        };
-      const bS =
-        gStats.get(b) ||
-        hStats.get(b) || {
-          W: 0,
-          PD: 0,
-        };
-      return {
-        W: (aS.W || 0) + (bS.W || 0),
-        PD: (aS.PD || 0) + (bS.PD || 0),
-      };
+      const aS = gStats.get(a) || hStats.get(a) || { W: 0, PD: 0 };
+      const bS = gStats.get(b) || hStats.get(b) || { W: 0, PD: 0 };
+      return { W: (aS.W || 0) + (bS.W || 0), PD: (aS.PD || 0) + (bS.PD || 0) };
     };
 
     teams.sort((A, B) => {
       const sA = score(A);
       const sB = score(B);
       return (
-        sB.W - sA.W ||
-        sB.PD - sA.PD ||
-        A.name.localeCompare(B.name)
+        sB.W - sA.W || sB.PD - sA.PD || A.name.localeCompare(B.name)
       );
     });
 
     teams.forEach((t, i) => {
       t.seed = i + 1;
-      t.id = `${div}-${t.seed}-${slug(
-        t.name
-      )}`;
+      t.id = `${div}-${t.seed}-${slug(t.name)}`;
     });
 
     return teams;
@@ -1759,45 +1433,25 @@ function PlayoffBuilder({
     const lowerTeams = build(
       "LOWER",
       { start: upperK, end: guysRows.length },
-      {
-        start: upperK,
-        end: girlsRows.length,
-      }
+      { start: upperK, end: girlsRows.length }
     );
 
-    const upperMain = buildBracket(
-      "UPPER",
-      upperTeams,
-      byeUpper
-    );
-    const lowerMain = buildBracket(
-      "LOWER",
-      lowerTeams,
-      byeLower
-    );
-    setBrackets(() => [
-      ...upperMain,
-      ...lowerMain,
-    ]);
+    const upperMain = buildBracket("UPPER", upperTeams, byeUpper);
+    const lowerMain = buildBracket("LOWER", lowerTeams, byeLower);
+    setBrackets(() => [...upperMain, ...lowerMain]);
   }
 
   function buildCombinedRR() {
     setBrackets((prev) => {
       const main = prev.filter(
-        (b) =>
-          b.division === "UPPER" ||
-          b.division === "LOWER"
+        (b) => b.division === "UPPER" || b.division === "LOWER"
       );
-      const rrKeep = prev.filter(
-        (b) => b.division !== "RR"
-      );
-
+      const rrKeep = prev.filter((b) => b.division !== "RR");
       const losers: Team[] = [];
 
       const decided = main.filter(
         (m) =>
-          (m.round === 1 ||
-            m.round === 2) &&
+          (m.round === 1 || m.round === 2) &&
           m.team1 &&
           m.team2 &&
           typeof m.score === "string" &&
@@ -1808,14 +1462,8 @@ function PlayoffBuilder({
         const parsed = parseScore(m.score);
         if (!parsed) continue;
         const [a, b] = parsed;
-        const winner =
-          a > b
-            ? m.team1
-            : m.team2;
-        const loser =
-          a > b
-            ? m.team2
-            : m.team1;
+        const winner = a > b ? m.team1 : m.team2;
+        const loser = a > b ? m.team2 : m.team1;
         if (loser) {
           losers.push({
             id: `RR-carry-${losers.length + 1}`,
@@ -1825,17 +1473,10 @@ function PlayoffBuilder({
             division: "RR",
           });
         }
-        if (
-          winner &&
-          m.nextId &&
-          m.nextSide
-        ) {
-          const parent = main.find(
-            (x) => x.id === m.nextId
-          );
+        if (winner && m.nextId && m.nextSide) {
+          const parent = main.find((x) => x.id === m.nextId);
           if (parent) {
-            if (m.nextSide === "team1")
-              parent.team1 = winner;
+            if (m.nextSide === "team1") parent.team1 = winner;
             else parent.team2 = winner;
           }
         }
@@ -1843,27 +1484,16 @@ function PlayoffBuilder({
 
       let rrTeams: Team[] = [];
       if (rrRandomize) {
-        const pool = losers.flatMap(
-          (t) => t.members
-        );
-        const names = uniq(
-          pool
-        ).filter(Boolean);
-        const shuffled =
-          shuffle(names);
-        for (
-          let i = 0;
-          i < shuffled.length;
-          i += 2
-        ) {
+        const pool = losers.flatMap((t) => t.members);
+        const names = uniq(pool).filter(Boolean);
+        const shuffled = shuffle(names);
+        for (let i = 0; i < shuffled.length; i += 2) {
           const a = shuffled[i];
           const b = shuffled[i + 1];
           if (!a || !b) break;
           const name = `${a} & ${b}`;
           rrTeams.push({
-            id: `RR-${i / 2 + 1}-${slug(
-              name
-            )}`,
+            id: `RR-${i / 2 + 1}-${slug(name)}`,
             name,
             members: [a, b],
             seed: i / 2 + 1,
@@ -1874,11 +1504,7 @@ function PlayoffBuilder({
         rrTeams = losers;
       }
 
-      const rrBracket = buildBracket(
-        "RR",
-        rrTeams,
-        0
-      );
+      const rrBracket = buildBracket("RR", rrTeams, 0);
       return [...rrKeep, ...rrBracket];
     });
   }
@@ -1886,13 +1512,12 @@ function PlayoffBuilder({
   return (
     <section>
       <h3 className="text-[18px] font-semibold text-sky-900 mb-1">
-        Playoff & Redemption Setup
+        Playoff &amp; Redemption Setup
       </h3>
       <p className="text-[12px] text-slate-600 mb-2">
-        Build Upper/Lower brackets from standings.
-        Teams are seeded by combined W and PD. BYEs
-        can be given to top seeds. Redemption Rally
-        (RR) uses early-round losers.
+        Build Upper/Lower from standings (seeded by combined W + PD). Top seeds
+        can get BYEs. Redemption Rally uses early-round losers; partners can be
+        re-randomized.
       </p>
       <div className="grid md:grid-cols-2 gap-3 text-[13px]">
         <div className="space-y-2">
@@ -1904,12 +1529,7 @@ function PlayoffBuilder({
               min={1}
               value={upperK}
               onChange={(e) =>
-                setUpperK(
-                  clampN(
-                    +e.target.value || 1,
-                    1
-                  )
-                )
+                setUpperK(clampN(+e.target.value || 1, 1))
               }
             />
           </label>
@@ -1921,12 +1541,7 @@ function PlayoffBuilder({
               min={2}
               value={groupSize}
               onChange={(e) =>
-                setGroupSize(
-                  clampN(
-                    +e.target.value || 2,
-                    2
-                  )
-                )
+                setGroupSize(clampN(+e.target.value || 2, 2))
               }
             />
           </label>
@@ -1935,9 +1550,7 @@ function PlayoffBuilder({
               type="checkbox"
               checked={seedRandom}
               onChange={(e) =>
-                setSeedRandom(
-                  e.target.checked
-                )
+                setSeedRandom(e.target.checked)
               }
             />
             Randomize within window
@@ -1952,12 +1565,7 @@ function PlayoffBuilder({
               min={0}
               value={byeUpper}
               onChange={(e) =>
-                setByeUpper(
-                  clampN(
-                    +e.target.value || 0,
-                    0
-                  )
-                )
+                setByeUpper(clampN(+e.target.value || 0, 0))
               }
             />
           </label>
@@ -1969,12 +1577,7 @@ function PlayoffBuilder({
               min={0}
               value={byeLower}
               onChange={(e) =>
-                setByeLower(
-                  clampN(
-                    +e.target.value || 0,
-                    0
-                  )
-                )
+                setByeLower(clampN(+e.target.value || 0, 0))
               }
             />
           </label>
@@ -1983,9 +1586,7 @@ function PlayoffBuilder({
               type="checkbox"
               checked={rrRandomize}
               onChange={(e) =>
-                setRrRandomize(
-                  e.target.checked
-                )
+                setRrRandomize(e.target.checked)
               }
             />
             RR: re-randomize partners
@@ -1997,7 +1598,7 @@ function PlayoffBuilder({
           className="px-3 py-1.5 rounded-lg bg-emerald-600 text-white text-[13px] hover:bg-emerald-700 shadow-sm"
           onClick={onBuild}
         >
-          Build Upper & Lower
+          Build Upper &amp; Lower
         </button>
         <button
           className="px-3 py-1.5 rounded-lg bg-indigo-600 text-white text-[13px] hover:bg-indigo-700 shadow-sm"
@@ -2018,29 +1619,20 @@ export default function BlindDrawTourneyApp() {
   const [matches, setMatches] = useState<MatchRow[]>([]);
   const [brackets, setBrackets] = useState<BracketMatch[]>([]);
 
-  // Load autosave
   useEffect(() => {
     try {
-      const raw =
-        localStorage.getItem(
-          "sunnysports.autosave"
-        );
+      const raw = localStorage.getItem("sunnysports.autosave");
       if (!raw) return;
       const data = JSON.parse(raw);
-      if (typeof data.guysText === "string")
-        setGuysText(data.guysText);
-      if (typeof data.girlsText === "string")
-        setGirlsText(data.girlsText);
-      if (Array.isArray(data.matches))
-        setMatches(data.matches);
-      if (Array.isArray(data.brackets))
-        setBrackets(data.brackets);
+      if (typeof data.guysText === "string") setGuysText(data.guysText);
+      if (typeof data.girlsText === "string") setGirlsText(data.girlsText);
+      if (Array.isArray(data.matches)) setMatches(data.matches);
+      if (Array.isArray(data.brackets)) setBrackets(data.brackets);
     } catch {
-      // ignore bad state
+      // ignore
     }
   }, []);
 
-  // Persist autosave
   useEffect(() => {
     const snapshot = JSON.stringify({
       guysText,
@@ -2048,37 +1640,35 @@ export default function BlindDrawTourneyApp() {
       matches,
       brackets,
     });
-    localStorage.setItem(
-      "sunnysports.autosave",
-      snapshot
-    );
+    localStorage.setItem("sunnysports.autosave", snapshot);
   }, [guysText, girlsText, matches, brackets]);
 
   return (
     <main className="min-h-screen bg-gradient-to-b from-sky-200 via-sky-300 to-sky-400 text-slate-800 antialiased">
-      {/* Banner */}
+      {/* Header / Banner */}
       <header className="sticky top-0 z-30 bg-gradient-to-r from-sky-900 via-sky-800 to-sky-900 text-white shadow-2xl border-b border-sky-950/60 backdrop-blur">
-        <div className="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between gap-4">
-          <div className="flex items-center gap-3">
+        <div className="max-w-6xl mx-auto px-4 py-3 flex items-center gap-6">
+          {/* Left: Logo */}
+          <div className="flex items-center">
             <div className="scale-[1.15]">
               <SunnyLogo />
             </div>
-            <div className="hidden sm:flex flex-col leading-tight">
-              <span className="text-[10px] uppercase tracking-[0.16em] text-sky-300">
-                Tournament Control Panel
-              </span>
-              <span className="text-[12px] text-sky-100">
-                Blind draw · live pool standings ·
-                playoffs · redemption rally
-              </span>
-            </div>
           </div>
+
+          {/* Center: Tagline */}
+          <div className="flex-1 flex flex-col items-center text-center leading-tight">
+            <span className="text-[10px] uppercase tracking-[0.16em] text-sky-300">
+              Tournament Control Panel
+            </span>
+            <span className="text-[12px] text-sky-100">
+              Live blind draw · pool play · playoffs · redemption rally
+            </span>
+          </div>
+
+          {/* Right: Build + Autosave */}
           <div className="flex flex-col items-end text-[9px] leading-snug text-sky-100/85">
             <span>
-              Build:{" "}
-              <span className="font-semibold">
-                2025-11-08
-              </span>
+              Build: <span className="font-semibold">2025-11-08</span>
             </span>
             <span className="px-2 py-0.5 mt-0.5 rounded-full bg-sky-950/70 border border-sky-500 text-[8px] uppercase tracking-wide">
               Autosave On (local only)
@@ -2087,10 +1677,10 @@ export default function BlindDrawTourneyApp() {
         </div>
       </header>
 
-      {/* Layout */}
+      {/* Content */}
       <div className="max-w-6xl mx-auto px-4 py-6 space-y-6 text-[15px] leading-relaxed">
         {/* Leaderboard */}
-        <section className="bg-white/98 border-2 border-sky-900 rounded-2xl shadow-xl p-5">
+        <section className="bg-white border-2 border-sky-900 rounded-2xl shadow-xl p-5">
           <Leaderboard
             matches={matches}
             guysText={guysText}
@@ -2099,15 +1689,12 @@ export default function BlindDrawTourneyApp() {
         </section>
 
         {/* Matches */}
-        <section className="bg-white/98 border-2 border-sky-900 rounded-2xl shadow-xl p-5">
-          <MatchesView
-            matches={matches}
-            setMatches={setMatches}
-          />
+        <section className="bg-white border-2 border-sky-900 rounded-2xl shadow-xl p-5">
+          <MatchesView matches={matches} setMatches={setMatches} />
         </section>
 
         {/* Generator */}
-        <section className="bg-white/98 border-2 border-sky-900 rounded-2xl shadow-xl p-5">
+        <section className="bg-white border-2 border-sky-900 rounded-2xl shadow-xl p-5">
           <RoundGenerator
             guysText={guysText}
             girlsText={girlsText}
@@ -2116,54 +1703,46 @@ export default function BlindDrawTourneyApp() {
           />
         </section>
 
-        {/* Rosters */}
-        <section className="bg-white/98 border-2 border-sky-900 rounded-2xl shadow-xl p-5">
+        {/* Players */}
+        <section className="bg-white border-2 border-sky-900 rounded-2xl shadow-xl p-5">
           <h2 className="text-[19px] font-semibold text-sky-900 mb-2">
             Player Rosters
           </h2>
           <p className="text-[12px] text-slate-600 mb-3">
-            Paste or type players. One name per line.
-            Duplicate names are highlighted in red so
-            you can fix sign-up issues quickly.
+            One name per line. Duplicate entries are highlighted so you can fix
+            them quickly.
           </p>
           <div className="grid md:grid-cols-2 gap-4">
             <LinedTextarea
               id="guys"
               label="Guys"
               value={guysText}
-              onChange={(e) =>
-                setGuysText(e.target.value)
-              }
+              onChange={(e) => setGuysText(e.target.value)}
               placeholder="e.g. John Smith"
             />
             <LinedTextarea
               id="girls"
               label="Girls"
               value={girlsText}
-              onChange={(e) =>
-                setGirlsText(e.target.value)
-              }
+              onChange={(e) => setGirlsText(e.target.value)}
               placeholder="e.g. Jane Doe"
             />
           </div>
         </section>
 
         {/* Playoffs + Brackets */}
-        <section className="bg-white/98 border-2 border-sky-900 rounded-2xl shadow-xl p-5 space-y-4">
+        <section className="bg-white border-2 border-sky-900 rounded-2xl shadow-xl p-5 space-y-4">
           <PlayoffBuilder
             matches={matches}
             guysText={guysText}
             girlsText={girlsText}
             setBrackets={setBrackets}
           />
-          <BracketView
-            brackets={brackets}
-            setBrackets={setBrackets}
-          />
+          <BracketView brackets={brackets} setBrackets={setBrackets} />
         </section>
 
-        {/* Reset / info */}
-        <section className="bg-sky-50/95 border border-sky-300 rounded-xl p-3 text-[11px] text-sky-900 flex flex-wrap items-center gap-3">
+        {/* Reset / Info */}
+        <section className="bg-sky-50 border border-sky-300 rounded-xl p-3 text-[11px] text-sky-900 flex flex-wrap items-center gap-3">
           <button
             className="px-3 py-1.5 rounded-lg border border-red-500 bg-red-50 text-red-700 hover:bg-red-100 hover:border-red-600 text-[10px]"
             onClick={() => {
@@ -2172,9 +1751,7 @@ export default function BlindDrawTourneyApp() {
                   "Clear all players, matches and brackets saved in this browser?"
                 )
               ) {
-                localStorage.removeItem(
-                  "sunnysports.autosave"
-                );
+                localStorage.removeItem("sunnysports.autosave");
                 location.reload();
               }
             }}
@@ -2182,11 +1759,9 @@ export default function BlindDrawTourneyApp() {
             Reset App (clear autosave)
           </button>
           <span>
-            Data is stored{" "}
-            <strong>only on this device</strong>{" "}
-            via autosave. To let others view live
-            results, share your deployed URL; restrict
-            edit access on your machine.
+            Data is stored <strong>only</strong> in this browser via autosave.
+            To share results, send your Vercel URL; only your device should be
+            used for edits.
           </span>
         </section>
       </div>
