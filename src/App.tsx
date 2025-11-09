@@ -179,7 +179,7 @@ function SunnyLogo() {
         <div className="font-extrabold tracking-tight text-white text-[17px]">
           Sunny Sports Performance
         </div>
-        <div className="text-[12px] text-slate-600">
+        <div className="text-[12px] text-white">
           Blind Draw Tourney Control
         </div>
       </div>
