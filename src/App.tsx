@@ -7,7 +7,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
  *  - Revco Doubles
  *  - Revco Quads
  *
- * DOUBLES TAB (unchanged core logic)
+ * DOUBLES TAB
  * ✅ Guys/Girls text boxes with line numbers + duplicate highlighting + live counts
  * ✅ Strict no-repeat (partners/opponents) toggle inside Round Generator
  * ✅ Random round generation (1 guy + 1 girl / team) with imbalance handling:
@@ -20,14 +20,14 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
  * ✅ Brackets: ESPN-style layout with BYEs placed in correct rounds, winners auto-advance
  * ✅ Redemption Rally (RR): losers from Upper+Lower R1/R2; optional partner re-randomize
  *
- * QUADS TAB (new)
+ * QUADS TAB
  * ✅ Separate Guys/Girls rosters (Quads)
  * ✅ Quads Round Generator:
- *    - Prioritize 2 guys + 2 girls per team
+ *    - Prioritize 2 guys + 2 girls per team when possible
  *    - Leftover players → up to 2 triples teams if needed
  *    - Tries to avoid repeat opponents when strict mode on
  * ✅ Quads Matches & Results:
- *    - 1 set to 21, win by 2, **cap 25**
+ *    - 1 set to 21, win by 2, cap 25
  *    - Auto winner tint by score
  * ✅ Quads Leaderboard:
  *    - All players ranked by W/L/PD (using quads matches)
@@ -1652,8 +1652,8 @@ function QuadsRoundGenerator({
         </div>
       </div>
       <p className="text-[11px] text-slate-500 mt-2">
-        Quads engine prioritizes 2 guys + 2 girls per team. Leftover players form up to two Triples teams. Strict mode
-        avoids repeat opponents as much as possible.
+        Quads engine prioritizes 2 guys + 2 girls per team when possible. Leftover players form up to two Triples teams.
+        Strict mode avoids repeat opponents as much as possible.
       </p>
     </section>
   );
