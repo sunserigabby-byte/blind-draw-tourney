@@ -1,25 +1,40 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 
 /**
- * Sunny Sports Performance – Blind Draw Tourney (stable build with late PD penalties)
+ * Sunny Sports Performance – Blind Draw Tourney (tabbed build)
  *
+ * TABS
+ *  - Revco Doubles
+ *  - Revco Quads
+ *
+ * DOUBLES TAB (unchanged core logic)
  * ✅ Guys/Girls text boxes with line numbers + duplicate highlighting + live counts
  * ✅ Strict no-repeat (partners/opponents) toggle inside Round Generator
  * ✅ Random round generation (1 guy + 1 girl / team) with imbalance handling:
  *    - Ultimate Revco = 2 guys (blue)
  *    - Power Puff = 2 girls (pink)
  * ✅ Matches view: collapsible by round, delete-with-confirm, score input, auto-winner tint
- * ✅ Late attendance:
- *    - Everyone starts as Present
- *    - Per-player status: Present / Late (-10 PD) / Late (grace)
- *    - -10 PD applied ONLY to late (no grace) players in standings & playoff seeding
- *    - Matches with late players visually highlighted
  * ✅ Live Leaderboard (Guys & Girls) with W/L/PD (pool rules: to 21+, win by 2, no cap)
- * ✅ Autosave (rosters, matches, brackets, attendance) to localStorage
+ * ✅ Autosave (rosters, matches, brackets) to localStorage
  * ✅ Playoff Builder: split upper/lower, pair within buckets, then seed by combined W then PD
  * ✅ Brackets: ESPN-style layout with BYEs placed in correct rounds, winners auto-advance
  * ✅ Redemption Rally (RR): losers from Upper+Lower R1/R2; optional partner re-randomize
+ *
+ * QUADS TAB (new)
+ * ✅ Separate Guys/Girls rosters (Quads)
+ * ✅ Quads Round Generator:
+ *    - Prioritize 2 guys + 2 girls per team
+ *    - Leftover players → up to 2 triples teams if needed
+ *    - Tries to avoid repeat opponents when strict mode on
+ * ✅ Quads Matches & Results:
+ *    - 1 set to 21, win by 2, **cap 25**
+ *    - Auto winner tint by score
+ * ✅ Quads Leaderboard:
+ *    - All players ranked by W/L/PD (using quads matches)
+ * ✅ Quads Playoffs & punishments: placeholder card (coming later)
  */
+
+/* ========================= Types & helpers ========================= */
 
 type MatchRow = {
   id: string;
@@ -34,21 +49,21 @@ type MatchRow = {
 type PlayDiv = 'UPPER'|'LOWER'|'RR';
 
 interface Team {
-  id:string;
-  name:string;
-  members:[string,string];
-  seed:number;
-  division:PlayDiv;
+  id: string;
+  name: string;
+  members: string[];  // doubles = 2, quads = 4, RR can be mixed
+  seed: number;
+  division: PlayDiv;
 }
 
 interface BracketMatch {
-  id:string;
-  division:PlayDiv;
-  round:number;
-  slot:number;
-  team1?:Team;
-  team2?:Team;
-  score?:string;
+  id: string;
+  division: PlayDiv;
+  round: number;
+  slot: number;
+  team1?: Team;
+  team2?: Team;
+  score?: string;
   nextId?: string;
   nextSide?: 'team1'|'team2';
   team1SourceId?: string;
@@ -59,8 +74,17 @@ interface BracketMatch {
   redemption?: boolean;
 }
 
-/** Attendance: keyed by slug(name) */
-type Attendance = Record<string, { present: boolean; waivePenalty: boolean }>;
+/** QUADS pool-play match row */
+type QuadsMatchRow = {
+  id: string;
+  round: number;
+  court: number;
+  t1: string[];   // 3–4 names
+  t2: string[];   // 3–4 names
+  isTriple1?: boolean;
+  isTriple2?: boolean;
+  scoreText?: string;
+};
 
 const slug = (s:string)=> s.trim().toLowerCase().replace(/\s+/g,' ');
 const uniq = <T,>(arr:T[]) => Array.from(new Set(arr));
@@ -85,7 +109,7 @@ const courtFor = (division:PlayDiv, round:number, slot:number)=>{
   return pool[(slot-1) % pool.length];
 };
 
-// ===== Pool scoring helpers: one game to 21+, win by 2, no cap
+// ===== Generic score parsing
 function parseScore(text?: string): [number, number] | null {
   if (!text) return null;
   const m = String(text).trim().match(/^(\d+)\s*[-–]\s*(\d+)$/);
@@ -94,10 +118,19 @@ function parseScore(text?: string): [number, number] | null {
   if (!isFinite(a) || !isFinite(b)) return null;
   return [a, b];
 }
-function isValidPoolScore(a: number, b: number) {
+
+// Doubles pool: to 21+, win by 2, no cap
+function isValidDoublesScore(a: number, b: number) {
   const diff = Math.abs(a - b);
   const max = Math.max(a, b);
   return max >= 21 && diff >= 2;
+}
+
+// Quads pool: to 21, win by 2, cap 25
+function isValidQuadsScore(a: number, b: number) {
+  const diff = Math.abs(a - b);
+  const max = Math.max(a, b);
+  return max >= 21 && max <= 25 && diff >= 2;
 }
 
 /* ========================= Sunny Logo ========================= */
@@ -105,7 +138,7 @@ function isValidPoolScore(a: number, b: number) {
 function SunnyLogo(){
   return (
     <div className="flex items-center gap-3 select-none">
-      <svg width="40" height="40" viewBox="0 0 64 64" aria-hidden className="drop-shadow-sm">
+      <svg width="36" height="36" viewBox="0 0 64 64" aria-hidden className="drop-shadow-sm">
         <defs>
           <radialGradient id="sky" cx="50%" cy="40%" r="60%">
             <stop offset="0%" stopColor="#ffffff" />
@@ -134,14 +167,14 @@ function SunnyLogo(){
         <circle cx="32" cy="32" r="13.5" fill="none" stroke="#fde68a" strokeOpacity=".6" strokeWidth="1" />
       </svg>
       <div className="leading-tight">
-        <div className="font-extrabold tracking-tight text-sky-50 text-[17px]">Sunny Sports Performance</div>
+        <div className="font-extrabold tracking-tight text-sky-50 text-[16px]">Sunny Sports Performance</div>
         <div className="text-[11px] text-sky-100/90">Blind Draw Tourney</div>
       </div>
     </div>
   );
 }
 
-/* ========================= LinedTextarea ========================= */
+/* ========================= LinedTextarea (shared) ========================= */
 
 function LinedTextarea({
   label,
@@ -193,18 +226,13 @@ function LinedTextarea({
   const hasDupes = duplicateNames.length > 0;
 
   return (
-    <div className="block text-[13px]">
+    <div className="block text-sm">
       <div className="flex items-center justify-between mb-1">
-        <label htmlFor={id} className="font-medium text-slate-700">{label} (one per line)</label>
-        <span className="text-[11px] text-slate-600">
-          People: <span className="font-semibold">{nonEmptyCount}</span>
-        </span>
+        <label htmlFor={id}>{label} (one per line)</label>
+        <span className="text-[11px] text-slate-600">People: <span className="font-semibold">{nonEmptyCount}</span></span>
       </div>
 
-      <div
-        className={`relative border rounded-xl shadow-sm grid ${hasDupes ? 'ring-1 ring-red-300 border-red-400' : 'border-slate-200'}`}
-        style={{ gridTemplateColumns: 'auto 1fr' }}
-      >
+      <div className={`relative border rounded-xl shadow-sm grid bg-white ${hasDupes ? 'ring-1 ring-red-300 border-red-400' : 'border-slate-200'}`} style={{ gridTemplateColumns: 'auto 1fr' }}>
         {/* Line numbers */}
         <div
           ref={gutterRef}
@@ -213,14 +241,7 @@ function LinedTextarea({
           aria-hidden
         >
           {lines.map((_, i) => (
-            <div
-              key={i}
-              className={`leading-5 tabular-nums ${
-                isDupLine[i] ? 'bg-red-50 text-red-600 font-semibold' : 'text-slate-400'
-              }`}
-            >
-              {i + 1}
-            </div>
+            <div key={i} className={`leading-5 tabular-nums ${isDupLine[i] ? 'bg-red-50 text-red-600 font-semibold' : 'text-slate-400'}`}>{i + 1}</div>
           ))}
         </div>
 
@@ -228,17 +249,13 @@ function LinedTextarea({
         <div className="relative">
           <div className="absolute inset-0 overflow-hidden pointer-events-none rounded-r-xl" aria-hidden>
             {lines.map((_, i) => (
-              <div
-                key={i}
-                className={`h-5 ${isDupLine[i] ? 'bg-red-50' : ''}`}
-                style={{ lineHeight: '1.25rem' }}
-              />
+              <div key={i} className={`h-5 ${isDupLine[i] ? 'bg-red-50' : ''}`} style={{ lineHeight: '1.25rem' }} />
             ))}
           </div>
           <textarea
             id={id}
             ref={taRef}
-            className="w-full h-40 px-2 py-2 rounded-r-xl focus:outline-none bg-transparent relative z-10 leading-5 text-[13px]"
+            className="w-full h-40 px-2 py-2 rounded-r-xl focus:outline-none bg-transparent relative z-10 leading-5 text-[13px] text-slate-800"
             value={value}
             placeholder={placeholder || ''}
             onChange={(e) => {
@@ -268,141 +285,38 @@ function LinedTextarea({
   );
 }
 
-/* ========================= Attendance Panel ========================= */
-
-function AttendancePanel({
-  guysText,
-  girlsText,
-  attendance,
-  setAttendance,
-}: {
-  guysText:string;
-  girlsText:string;
-  attendance:Attendance;
-  setAttendance:(updater:(prev:Attendance)=>Attendance)=>void;
-}) {
-  const guys = useMemo(
-    () => uniq((guysText || '').split(/\r?\n/).map(s => s.trim()).filter(Boolean)),
-    [guysText]
-  );
-  const girls = useMemo(
-    () => uniq((girlsText || '').split(/\r?\n/).map(s => s.trim()).filter(Boolean)),
-    [girlsText]
-  );
-
-  type Mode = 'present'|'latePenalty'|'lateGrace';
-
-  const renderBlock = (names:string[], label:string) => (
-    <div className="bg-slate-50 rounded-lg p-3 border border-slate-200">
-      <h4 className="text-[11px] font-semibold text-slate-600 mb-1">{label} check-in</h4>
-      {names.length === 0 ? (
-        <p className="text-[11px] text-slate-500">No players listed yet.</p>
-      ) : (
-        <div className="max-h-40 overflow-auto">
-          <table className="w-full text-[11px]">
-            <tbody>
-              {names.map((name) => {
-                const key = slug(name);
-                const att = attendance[key] || { present:true, waivePenalty:false };
-                const value:Mode = att.present
-                  ? 'present'
-                  : (att.waivePenalty ? 'lateGrace' : 'latePenalty');
-                return (
-                  <tr key={key} className="border-t first:border-t-0">
-                    <td className="py-0.5 pr-2 align-middle whitespace-nowrap">{name}</td>
-                    <td className="py-0.5">
-                      <select
-                        className="w-full border rounded px-1 py-0.5 text-[11px]"
-                        value={value}
-                        onChange={(e)=>{
-                          const v = e.target.value as Mode;
-                          setAttendance(prev=>{
-                            const next = { ...prev };
-                            if(v==='present'){
-                              next[key] = { present:true, waivePenalty:false };
-                            }else if(v==='latePenalty'){
-                              next[key] = { present:false, waivePenalty:false };
-                            }else{
-                              next[key] = { present:false, waivePenalty:true };
-                            }
-                            return next;
-                          });
-                        }}
-                      >
-                        <option value="present">Present</option>
-                        <option value="latePenalty">Late (-10 PD)</option>
-                        <option value="lateGrace">Late (grace)</option>
-                      </select>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      )}
-    </div>
-  );
-
-  return (
-    <div className="mt-4">
-      <div className="flex items-center gap-2 mb-2 text-[11px] text-slate-600">
-        <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-amber-50 text-amber-800 border border-amber-200">
-          <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
-          Late players: -10 PD (unless grace)
-        </span>
-        <span>— this affects leaderboard & playoff seeding.</span>
-      </div>
-      <div className="grid md:grid-cols-2 gap-3">
-        {renderBlock(guys, 'Guys')}
-        {renderBlock(girls, 'Girls')}
-      </div>
-    </div>
-  );
-}
-
-/* ========================= Matches View ========================= */
+/* ========================= DOUBLES: Matches View ========================= */
 
 function MatchesView({
   matches,
   setMatches,
-  attendance,
 }:{
   matches:MatchRow[];
   setMatches:(f:(prev:MatchRow[])=>MatchRow[]|MatchRow[])=>void;
-  attendance:Attendance;
 }){
   const rounds = useMemo(()=> uniq(matches.map(m=>m.round)).sort((a,b)=>a-b), [matches]);
   const [open, setOpen] = useState(()=> new Set<number>(rounds.length? [rounds[rounds.length-1]] : []));
   const [confirmR, setConfirmR] = useState<number|null>(null);
+  useEffect(()=>{ if(rounds.length) setOpen(new Set([rounds[rounds.length-1]])); }, [matches.length]);
 
-  useEffect(()=>{
-    if(rounds.length) setOpen(new Set([rounds[rounds.length-1]]));
-  }, [matches.length]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  const update=(id:string, patch:Partial<MatchRow>)=>
-    setMatches(prev=> prev.map(m=> m.id===id? {...m, ...patch}: m));
-
+  const update=(id:string, patch:Partial<MatchRow>)=> setMatches(prev=> prev.map(m=> m.id===id? {...m, ...patch}: m));
   const requestDelete = (round:number) => { setConfirmR(round); };
-  const doDelete = (round:number) => {
-    setMatches(prev=> prev.filter(m=> m.round !== round));
-    setConfirmR(null);
-  };
+  const doDelete = (round:number) => { setMatches(prev=> prev.filter(m=> m.round !== round)); setConfirmR(null); };
 
   return (
-    <section className="bg-white/95 backdrop-blur rounded-2xl shadow-lg ring-2 ring-sky-200 p-6 border border-sky-200">
-      <h2 className="text-[20px] font-bold text-sky-800 mb-2 tracking-tight">Matches & Results</h2>
-      <div className="w-20 h-1 bg-sky-500 mx-auto rounded-full mb-4" />
+    <section className="bg-white backdrop-blur rounded-2xl shadow-lg ring-1 ring-sky-200 p-6 border border-sky-100">
+      <h2 className="text-[20px] font-bold text-sky-800 mb-2 tracking-tight">Matches & Results (Doubles)</h2>
+      <div className="w-24 h-1 bg-sky-500 mx-auto rounded-full mb-4" />
 
       {rounds.length===0 && (
         <p className="text-[13px] text-gray-600 max-w-lg mx-auto">
-          No matches yet. Generate rounds to begin.
+          No matches yet. Use the Round Generator to create blind-draw pool play.
         </p>
       )}
 
       <div className="mt-2 space-y-3">
         {rounds.map(r=> (
-          <div key={r} className="border rounded-xl overflow-hidden shadow-sm border-slate-200 bg-white">
+          <div key={r} className="border rounded-xl overflow-hidden shadow-sm bg-white">
             <div className="px-3 py-2 bg-slate-50/80 border-b flex justify-between items-center">
               <button
                 className="text-left font-medium text-[14px] text-slate-800"
@@ -459,72 +373,54 @@ function MatchesView({
                   <tbody>
                     {matches.filter(m=>m.round===r).sort((a,b)=>a.court-b.court).map((m,idx)=> {
                       const parsed = parseScore(m.scoreText);
-                      const valid = parsed ? isValidPoolScore(parsed[0], parsed[1]) : (m.scoreText ? false : true);
+                      const valid = parsed ? isValidDoublesScore(parsed[0], parsed[1]) : (m.scoreText ? false : true);
                       const t1Win = parsed && valid ? parsed[0] > parsed[1] : null; // auto-pick winner
-
-                      const players = [m.t1p1,m.t1p2,m.t2p1,m.t2p2];
-                      const lateInfo = players
-                        .map(name => ({ name, att: attendance[slug(name)] }))
-                        .filter(x => x.att && !x.att.present);
-                      const anyLate = lateInfo.length > 0;
 
                       return (
                         <tr
                           key={m.id}
                           className={
                             "border-t " +
-                            (idx%2? 'bg-slate-50/50 ' : '') +
-                            (m.tag==='ULTIMATE_REVCO'
-                              ? 'bg-blue-50/50 '
-                              : m.tag==='POWER_PUFF'
-                              ? 'bg-pink-50/50 '
-                              : '') +
-                            (anyLate ? 'bg-amber-50/70' : '')
+                            (idx%2? 'bg-slate-50/60 ' : '') +
+                            (m.tag==='ULTIMATE_REVCO' ? 'bg-blue-50/60' :
+                             m.tag==='POWER_PUFF' ? 'bg-pink-50/60' : '')
                           }
                         >
-                          <td className="py-1 px-2 tabular-nums align-top">{m.court}</td>
+                          <td className="py-1 px-2 tabular-nums">{m.court}</td>
 
                           {/* Team 1 cell tints green if T1 won */}
-                          <td className={`py-1 px-2 align-top ${t1Win===true ? 'bg-emerald-50' : ''}`}>
-                            <div className="flex flex-col gap-0.5">
-                              <div className="flex items-center gap-2">
-                                {m.tag==='ULTIMATE_REVCO' && (
-                                  <span className="inline-block text-[10px] px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 ring-1 ring-blue-200">
-                                    Ultimate Revco
-                                  </span>
-                                )}
-                                {m.tag==='POWER_PUFF' && (
-                                  <span className="inline-block text-[10px] px-2 py-0.5 rounded-full bg-pink-100 text-pink-700 ring-1 ring-pink-200">
-                                    Power Puff
-                                  </span>
-                                )}
-                                <span>{m.t1p1} &amp; {m.t1p2}</span>
-                              </div>
-                              {anyLate && (
-                                <span className="inline-flex items-center gap-1 text-[10px] text-amber-800">
-                                  <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
-                                  Late player in this match · consider make-up
+                          <td className={`py-1 px-2 ${t1Win===true ? 'bg-emerald-50' : ''}`}>
+                            <div className="flex items-center gap-2">
+                              {m.tag==='ULTIMATE_REVCO' && (
+                                <span className="inline-block text-[10px] px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 ring-1 ring-blue-200">
+                                  Ultimate Revco
                                 </span>
                               )}
+                              {m.tag==='POWER_PUFF' && (
+                                <span className="inline-block text-[10px] px-2 py-0.5 rounded-full bg-pink-100 text-pink-700 ring-1 ring-pink-200">
+                                  Power Puff
+                                </span>
+                              )}
+                              <span>{m.t1p1} &amp; {m.t1p2}</span>
                             </div>
                           </td>
 
                           {/* Team 2 cell tints green if T2 won */}
-                          <td className={`py-1 px-2 align-top ${t1Win===false ? 'bg-emerald-50' : ''}`}>
+                          <td className={`py-1 px-2 ${t1Win===false ? 'bg-emerald-50' : ''}`}>
                             {m.t2p1} &amp; {m.t2p2}
                           </td>
 
                           {/* Score input shows red while invalid, neutral when valid/empty */}
-                          <td className="py-1 px-2 align-top">
+                          <td className="py-1 px-2">
                             <input
                               className={
-                                "w-40 border rounded px-2 py-1 text-[13px] " +
+                                "w-40 border rounded px-2 py-1 text-[12px] " +
                                 (valid ? 'border-slate-300' : 'border-red-500 bg-red-50')
                               }
                               value={m.scoreText || ''}
                               onChange={(e)=>update(m.id,{scoreText:e.target.value})}
                               placeholder="win by 2 (e.g., 22-20)"
-                              title="Pool play: one game to 21+, must win by 2 (no cap)"
+                              title="Pool play (doubles): one game to 21+, must win by 2 (no cap)"
                             />
                           </td>
                         </tr>
@@ -541,7 +437,7 @@ function MatchesView({
   );
 }
 
-/* ========================= Round Generator ========================= */
+/* ========================= DOUBLES: Round Generator ========================= */
 
 function RoundGenerator({
   guysText,
@@ -571,11 +467,9 @@ function RoundGenerator({
         const A=slug(a),B=slug(b);
         if(!mp.has(A)) mp.set(A,new Set());
         if(!mp.has(B)) mp.set(B,new Set());
-        mp.get(A)!.add(B);
-        mp.get(B)!.add(A);
+        mp.get(A)!.add(B); mp.get(B)!.add(A);
       };
-      add(m.t1p1,m.t1p2);
-      add(m.t2p1,m.t2p2);
+      add(m.t1p1,m.t1p2); add(m.t2p1,m.t2p2);
     }
     return mp;
   };
@@ -664,20 +558,15 @@ function RoundGenerator({
         if(ok){ idx=i; found=true; break; }
       }
       const b = teamList.splice(found?idx:0,1)[0];
-
       // update opponent map so later pairings in this same round avoid repeats
-      [a.team[0],a.team[1]].forEach(A =>
-        [b.team[0],b.team[1]].forEach(B => {
-          const SA=slug(A), SB=slug(B);
-          opponentMap.get(SA)?.add(SB) || opponentMap.set(SA,new Set([SB]));
-        })
-      );
-      [b.team[0],b.team[1]].forEach(A =>
-        [a.team[0],a.team[1]].forEach(B => {
-          const SA=slug(A), SB=slug(B);
-          opponentMap.get(SA)?.add(SB) || opponentMap.set(SA,new Set([SB]));
-        })
-      );
+      [a.team[0],a.team[1]].forEach(A=>[b.team[0],b.team[1]].forEach(B=>{
+        const SA=slug(A), SB=slug(B);
+        opponentMap.get(SA)?.add(SB) || opponentMap.set(SA,new Set([SB]));
+      }));
+      [b.team[0],b.team[1]].forEach(A=>[a.team[0],a.team[1]].forEach(B=>{
+        const SA=slug(A), SB=slug(B);
+        opponentMap.get(SA)?.add(SB) || opponentMap.set(SA,new Set([SB]));
+      }));
 
       made.push({
         id: `${roundIdx}-${court}-${Date.now()}-${Math.random().toString(36).slice(2,7)}`,
@@ -688,7 +577,7 @@ function RoundGenerator({
         t2p1: b.team[0],
         t2p2: b.team[1],
         tag: a.tag || b.tag || null,
-        scoreText: ''
+        scoreText: '',
       });
     }
     return made;
@@ -710,12 +599,16 @@ function RoundGenerator({
   }
 
   return (
-    <section className="bg-white/95 backdrop-blur rounded-xl shadow ring-1 ring-slate-200 p-4">
+    <section className="bg-white/90 backdrop-blur rounded-xl shadow ring-1 ring-slate-200 p-4">
       <div className="flex items-center justify-between gap-3 flex-wrap">
-        <h3 className="text-[16px] font-semibold text-sky-800">Round Generator</h3>
-        <div className="flex items-center gap-3 text-[13px] flex-wrap">
+        <h3 className="text-[16px] font-semibold text-sky-800">Round Generator (Doubles)</h3>
+        <div className="flex items-center gap-3 text-[12px] flex-wrap">
           <label className="flex items-center gap-1">
-            <input type="checkbox" checked={strict} onChange={(e)=>setStrict(e.target.checked)} />
+            <input
+              type="checkbox"
+              checked={strict}
+              onChange={(e)=>setStrict(e.target.checked)}
+            />
             Strict no-repeat
           </label>
           <label className="flex items-center gap-1">
@@ -764,27 +657,25 @@ function RoundGenerator({
   );
 }
 
-/* ========================= Leaderboard ========================= */
+/* ========================= DOUBLES: Leaderboard ========================= */
 
 function Leaderboard({
   matches,
   guysText,
   girlsText,
-  attendance,
-}:{ 
+}:{
   matches:MatchRow[];
   guysText:string;
   girlsText:string;
-  attendance:Attendance;
 }){
   // Build player list from rosters (so zero-game players still appear)
   const guysList = useMemo(
-    () => Array.from(new Set((guysText||'').split(/\r?\n/).map(s=>s.trim()).filter(Boolean))),
-    [guysText]
+    ()=> Array.from(new Set((guysText||'').split(/\r?\n/).map(s=>s.trim()).filter(Boolean))),
+    [guysText],
   );
   const girlsList= useMemo(
-    () => Array.from(new Set((girlsText||'').split(/\r?\n/).map(s=>s.trim()).filter(Boolean))),
-    [girlsText]
+    ()=> Array.from(new Set((girlsText||'').split(/\r?\n/).map(s=>s.trim()).filter(Boolean))),
+    [girlsText],
   );
   const guysSet  = useMemo(()=> new Set(guysList.map(slug)), [guysList]);
   const girlsSet = useMemo(()=> new Set(girlsList.map(slug)), [girlsList]);
@@ -805,40 +696,29 @@ function Leaderboard({
     // Tally from valid pool scores
     for(const m of matches){
       const s = parseScore(m.scoreText); if(!s) continue;
-      const [a,b]=s; if(!isValidPoolScore(a,b)) continue;
+      const [a,b] = s;
+      if(!isValidDoublesScore(a,b)) continue;
       const t1=[m.t1p1,m.t1p2], t2=[m.t2p1,m.t2p2];
       const diff = Math.abs(a-b); const t1Won = a>b;
       const apply = (name:string, won:boolean)=>{
+        const key = name;
         const isGuy = guysSet.has(slug(name));
         const isGirl = girlsSet.has(slug(name));
         const map = isGuy ? g : isGirl ? h : g; // fallback to guys if unknown
-        const row = ensure(map, name);
+        const row = ensure(map, key);
         if(won){ row.W++; row.PD += diff; } else { row.L++; row.PD -= diff; }
       };
       for(const p of t1) apply(p, t1Won);
       for(const p of t2) apply(p, !t1Won);
     }
 
-    // Apply late penalties: -10 PD for Late (-10 PD) players (no grace)
-    const applyLatePenalties = (map:Map<string,Bucket>)=>{
-      for(const [name,row] of map.entries()){
-        const att = attendance[slug(name)];
-        if(att && !att.present && !att.waivePenalty){
-          row.PD -= 10;
-        }
-      }
-    };
-    applyLatePenalties(g);
-    applyLatePenalties(h);
-
-    const sortRows = (arr:Bucket[]) =>
+    const sortRows = (arr:Bucket[])=>
       arr.sort((x,y)=> y.W-x.W || y.PD-x.PD || x.name.localeCompare(y.name));
-
     return {
       guysRows: sortRows(Array.from(g.values())),
       girlsRows: sortRows(Array.from(h.values())),
     };
-  }, [matches, guysList, girlsList, guysSet, girlsSet, attendance]);
+  }, [matches, guysList, girlsList, guysSet, girlsSet]);
 
   const Table = ({title, rows}:{title:string; rows:Bucket[]})=> (
     <section className="bg-white/95 backdrop-blur rounded-xl shadow ring-1 ring-slate-200 p-4">
@@ -872,10 +752,9 @@ function Leaderboard({
 
   return (
     <section>
-      <h2 className="text-[18px] font-bold text-sky-900 mb-1">Leaderboard (Live)</h2>
+      <h2 className="text-[18px] font-bold text-sky-900 mb-1">Leaderboard (Doubles – Live)</h2>
       <p className="text-[11px] text-slate-500 mb-3">
-        Pool: one game to 21+, win by 2, no cap. W/L/PD auto-update as you type scores. Late players marked
-        as <strong>-10 PD</strong> unless you grant grace.
+        Pool (doubles): one game to 21+, win by 2, no cap. W/L/PD auto-update as you type scores.
       </p>
       <div className="grid md:grid-cols-2 gap-4">
         <Table title="Guys Standings" rows={guysRows} />
@@ -885,34 +764,28 @@ function Leaderboard({
   );
 }
 
-/* ========================= Playoffs: standings & bracket ========================= */
+/* ========================= DOUBLES: Playoffs & Brackets ========================= */
 
-function computeStandings(
-  matches:MatchRow[],
-  guysText:string,
-  girlsText:string,
-  attendance:Attendance
-){
+function computeStandings(matches:MatchRow[], guysText:string, girlsText:string){
   const guysList = Array.from(new Set((guysText||'').split(/\r?\n/).map(s=>s.trim()).filter(Boolean)));
   const girlsList= Array.from(new Set((girlsText||'').split(/\r?\n/).map(s=>s.trim()).filter(Boolean)));
   const guysSet  = new Set(guysList.map(slug));
   const girlsSet = new Set(girlsList.map(slug));
-
   type Bucket = { name:string; W:number; L:number; PD:number };
   const g = new Map<string,Bucket>(), h = new Map<string,Bucket>();
   const ensure=(map:Map<string,Bucket>, n:string)=>{
     if(!map.has(n)) map.set(n,{name:n,W:0,L:0,PD:0});
     return map.get(n)!;
   };
-
   for(const n of guysList) ensure(g,n);
   for(const n of girlsList) ensure(h,n);
-
   for(const m of matches){
     const s=parseScore(m.scoreText); if(!s) continue;
-    const [a,b]=s; if(!isValidPoolScore(a,b)) continue;
+    const [a,b]=s;
+    if(!isValidDoublesScore(a,b)) continue;
     const t1=[m.t1p1,m.t1p2], t2=[m.t2p1,m.t2p2];
-    const diff=Math.abs(a-b); const t1Won=a>b;
+    const diff=Math.abs(a-b);
+    const t1Won=a>b;
     const apply=(name:string,won:boolean)=>{
       const map = guysSet.has(slug(name))? g : h;
       const row=ensure(map,name);
@@ -921,26 +794,8 @@ function computeStandings(
     for(const p of t1) apply(p,t1Won);
     for(const p of t2) apply(p,!t1Won);
   }
-
-  // Apply late penalties
-  const applyLatePenalties = (map:Map<string,Bucket>)=>{
-    for(const [name,row] of map.entries()){
-      const att = attendance[slug(name)];
-      if(att && !att.present && !att.waivePenalty){
-        row.PD -= 10;
-      }
-    }
-  };
-  applyLatePenalties(g);
-  applyLatePenalties(h);
-
-  const sortRows=(arr:Bucket[]) =>
-    arr.sort((x,y)=> y.W-x.W || y.PD-x.PD || x.name.localeCompare(y.name));
-
-  return {
-    guysRows: sortRows(Array.from(g.values())),
-    girlsRows: sortRows(Array.from(h.values())),
-  };
+  const sortRows=(arr:Bucket[])=> arr.sort((x,y)=> y.W-x.W || y.PD-x.PD || x.name.localeCompare(y.name));
+  return { guysRows: sortRows(Array.from(g.values())), girlsRows: sortRows(Array.from(h.values())) };
 }
 
 function nextPow2(n:number){ let p=1; while(p<n) p<<=1; return p; }
@@ -948,7 +803,6 @@ function nextPow2(n:number){ let p=1; while(p<n) p<<=1; return p; }
 function buildBracket(division:PlayDiv, teams:Team[], topSeedByeCount:number = 0): BracketMatch[] {
   const N = teams.length; if (N === 0) return [];
   const size = nextPow2(N);
-
   function espnOrder(n:number): number[] {
     if (n === 1) return [1];
     if (n === 2) return [1,2];
@@ -961,7 +815,6 @@ function buildBracket(division:PlayDiv, teams:Team[], topSeedByeCount:number = 0
     }
     return out;
   }
-
   const order = espnOrder(size);
   const idxBySeed = new Map<number, number>();
   order.forEach((seed, idx)=> idxBySeed.set(seed, idx));
@@ -989,7 +842,7 @@ function buildBracket(division:PlayDiv, teams:Team[], topSeedByeCount:number = 0
       slot:(i/2)+1,
       team1:slots[i],
       team2:slots[i+1],
-      court:courtFor(division, round, (i/2)+1)
+      court:courtFor(division, round, (i/2)+1),
     };
     current.push(m);
   }
@@ -1004,7 +857,7 @@ function buildBracket(division:PlayDiv, teams:Team[], topSeedByeCount:number = 0
         division,
         round,
         slot:(i/2)+1,
-        court:courtFor(division, round, (i/2)+1)
+        court:courtFor(division, round, (i/2)+1),
       };
       const a = current[i], b = current[i+1];
       if(a){ a.nextId = parent.id; a.nextSide = 'team1'; parent.team1SourceId = a.id; }
@@ -1022,14 +875,12 @@ function buildBracket(division:PlayDiv, teams:Team[], topSeedByeCount:number = 0
     if(m.nextSide === 'team1') parent.team1 = team; else parent.team2 = team;
   };
 
-  // Auto-advance BYE seeds from round 1
   for(const m of matches.filter(x=> x.round===1)){
     const t1 = m.team1, t2 = m.team2;
     if(t1 && !t2 && byeSeeds.has(t1.seed)) advanceWinner(m, t1);
     if(t2 && !t1 && byeSeeds.has(t2.seed)) advanceWinner(m, t2);
   }
 
-  // Mark pure-bye leaves as BYE and hide them visually later
   for(const m of matches.filter(x=> x.round===1)){
     const onlyOne = (!!m.team1 && !m.team2) || (!m.team1 && !!m.team2);
     if(onlyOne){
@@ -1045,9 +896,7 @@ function buildBracket(division:PlayDiv, teams:Team[], topSeedByeCount:number = 0
 // Build visual columns from matches; hide pure BYE leaves
 function buildVisualColumns(brackets:BracketMatch[], division:PlayDiv){
   const list = brackets.filter(b=>b.division===division);
-  if(!list.length){
-    return { cols: [] as BracketMatch[][], rounds:0, size:0 };
-  }
+  if(list.length===0) return { cols: [] as BracketMatch[][], rounds: 0, size: 0 };
   const maxRound = Math.max(1, ...list.map(b=> b.round));
   const cols: BracketMatch[][] = [];
   for(let r=1;r<=maxRound;r++){
@@ -1073,7 +922,6 @@ function BracketCard({m}:{m:BracketMatch}){
   const parsed = (()=>{
     if(!m.score) return null;
     const t = String(m.score).trim();
-    if(!t.includes('-') && !t.includes('–')) return null;
     const sep = t.includes('–') ? '–' : '-';
     const p=t.split(sep).map(s=>s.trim());
     if(p.length!==2) return null;
@@ -1083,31 +931,30 @@ function BracketCard({m}:{m:BracketMatch}){
   const winnerSide: 'team1'|'team2'|null =
     parsed ? (parsed[0]>parsed[1] ? 'team1' : (parsed[0]<parsed[1] ? 'team2' : null)) : null;
 
-  const TeamLine = ({t,active,placeholder}:{t?:Team; active?:boolean; placeholder?:string})=> {
-    if(t){
-      return (
-        <div
-          className={
-            "flex items-center justify-between gap-1 rounded px-1.5 py-1 " +
-            (active? 'bg-emerald-50 ring-1 ring-emerald-200' : '')
-          }
-        >
-          <div className="flex items-center gap-1 min-w-0">
-            {seedBadge(t.seed)}
-            <span className="truncate" title={t.name}>{t.name}</span>
-          </div>
-        </div>
-      );
-    }
-    return (
-      <div className="flex items-center gap-1 text-slate-400 text-[11px] italic">
-        {placeholder || 'Waiting on previous match'}
+  const TeamLine = ({t,active,label}:{t?:Team; active?:boolean; label:'A'|'B'})=> t ? (
+    <div className={
+      "flex items-center justify-between gap-1 rounded px-1.5 py-1 " +
+      (active? 'bg-emerald-50 ring-1 ring-emerald-200' : '')
+    }>
+      <div className="flex items-center gap-1 min-w-0">
+        <span className="inline-flex items-center justify-center w-4 h-4 text-[10px] rounded-full bg-slate-100 text-slate-600">
+          {label}
+        </span>
+        {seedBadge(t.seed)}
+        <span className="truncate" title={t.name}>{t.name}</span>
       </div>
-    );
-  };
+    </div>
+  ) : (
+    <div className="flex items-center gap-1 text-slate-400">
+      <span className="inline-flex items-center justify-center w-4 h-4 text-[10px] rounded-full bg-slate-100 text-slate-400">
+        {label}
+      </span>
+      <em className="text-[11px]">Waiting on previous match</em>
+    </div>
+  );
 
   return (
-    <div className="relative min-w-[260px] rounded-xl border bg-white shadow-md p-3">
+    <div className="relative min-w-[280px] rounded-xl border bg-white shadow-md p-3">
       <div className="text-[11px] text-slate-500 mb-1 flex items-center justify-between">
         <span className="inline-flex items-center gap-1">
           <span className="font-medium text-slate-700">{m.division}</span>
@@ -1124,21 +971,13 @@ function BracketCard({m}:{m:BracketMatch}){
           </span>
         )}
       </div>
-      <div className="text-[13px] space-y-1">
-        <TeamLine
-          t={m.team1}
-          active={winnerSide==='team1'}
-          placeholder={m.team1SourceId ? 'Winner of previous match' : 'TBD'}
-        />
+      <div className="text-sm space-y-1">
+        <TeamLine t={m.team1} active={winnerSide==='team1'} label="A" />
         <div className="h-px bg-slate-200" />
-        <TeamLine
-          t={m.team2}
-          active={winnerSide==='team2'}
-          placeholder={m.team2SourceId ? 'Winner of previous match' : 'TBD'}
-        />
+        <TeamLine t={m.team2} active={winnerSide==='team2'} label="B" />
       </div>
-      {m.score !== undefined && m.score.trim()!=='' && (
-        <div className="mt-1 text-[11px] text-slate-600">
+      {m.score !== undefined && m.score !== 'BYE' && (
+        <div className="mt-1 text-xs text-slate-600">
           <span className="text-slate-500">Score:</span> {m.score}
         </div>
       )}
@@ -1154,7 +993,7 @@ function BracketCard({m}:{m:BracketMatch}){
 function BracketView({
   brackets,
   setBrackets,
-}:{ 
+}:{
   brackets:BracketMatch[];
   setBrackets:(f:(prev:BracketMatch[])=>BracketMatch[]|BracketMatch[])=>void;
 }){
@@ -1163,7 +1002,6 @@ function BracketView({
   function parseScoreLoose(s?:string): [number,number] | null {
     if(!s) return null;
     const txt = String(s).trim();
-    if(!txt.includes('-') && !txt.includes('–')) return null;
     const sep = txt.includes('–') ? '–' : '-';
     const parts = txt.split(sep).map(p=>p.trim());
     if(parts.length!==2) return null;
@@ -1183,26 +1021,22 @@ function BracketView({
       const loser  = a>b ? m.team2 : (a<b ? m.team1 : undefined);
       if(winner && m.nextId && m.nextSide){
         const p = map.get(m.nextId);
-        if(p){
-          if(m.nextSide==='team1') p.team1 = winner; else p.team2 = winner;
-        }
+        if(p){ if(m.nextSide==='team1') p.team1 = winner; else p.team2 = winner; }
       }
       if(loser && m.loserNextId && m.loserNextSide){
         const q = map.get(m.loserNextId);
-        if(q){
-          if(m.loserNextSide==='team1') q.team1 = loser; else q.team2 = loser;
-        }
+        if(q){ if(m.loserNextSide==='team1') q.team1 = loser; else q.team2 = loser; }
       }
     }
     return copy;
   });
 
   return (
-    <section className="bg-white/95 backdrop-blur rounded-2xl shadow-lg ring-1 ring-sky-100 p-6">
-      <h2 className="text-[20px] font-bold text-sky-800 mb-2 tracking-tight">Playoff Brackets</h2>
+    <section className="bg-white/95 backdrop-blur rounded-2xl shadow-lg ring-1 ring-sky-200 p-6">
+      <h2 className="text-[20px] font-bold text-sky-900 mb-2 tracking-tight">Playoff Brackets</h2>
       <p className="text-[11px] text-slate-500 mb-4">
-        ESPN-style seeding and BYEs. Quarterfinals → Semifinals → Final. Winners auto-advance. The <strong>RR</strong>{' '}
-        bracket combines UPPER+LOWER losers from R1/R2.
+        ESPN-style seeding and BYEs. Quarterfinals → Semifinals → Final. Winners auto-advance. The{' '}
+        <strong>RR</strong> bracket combines UPPER+LOWER losers from R1/R2.
       </p>
       {divisions.map(div=>{
         const cfg = buildVisualColumns(brackets, div);
@@ -1255,20 +1089,17 @@ function PlayoffBuilder({
   matches,
   guysText,
   girlsText,
-  attendance,
   setBrackets,
 }:{
   matches:MatchRow[];
   guysText:string;
   girlsText:string;
-  attendance:Attendance;
   setBrackets:(f:(prev:BracketMatch[])=>BracketMatch[]|BracketMatch[])=>void;
 }){
   const { guysRows, girlsRows } = useMemo(
-    ()=> computeStandings(matches, guysText, girlsText, attendance),
-    [matches, guysText, girlsText, attendance]
+    ()=> computeStandings(matches, guysText, girlsText),
+    [matches, guysText, girlsText],
   );
-
   const [upperK, setUpperK] = useState<number>(Math.ceil(Math.max(1, guysRows.length)/2));
   const [seedRandom, setSeedRandom] = useState<boolean>(true);
   const [groupSize, setGroupSize] = useState<number>(4); // randomized pairing window size
@@ -1278,7 +1109,7 @@ function PlayoffBuilder({
 
   // Build teams from buckets, then seed by COMBINED pool results (W first) then combined PD
   function build(div:PlayDiv, guySlice:{start:number,end:number}, girlSlice:{start:number,end:number}){
-    const g = guysRows.slice(guySlice.start, guySlice.end);
+    const g = guysRows.slice(guySlice.start, guySlice.end); // sorted by guys W/PD already
     const h = girlsRows.slice(girlSlice.start, girlSlice.end);
 
     // Helper: quick lookup of stats by name
@@ -1301,22 +1132,26 @@ function PlayoffBuilder({
           name,
           members:[guy?.name||'', girl?.name||''],
           seed:j+1,
-          division:div
+          division:div,
         });
       }
     }
 
+    // Rank by combined record (W first) then combined PD
     const score = (t:Team)=>{
-      const [a,b] = t.members;
-      const aS = gStats.get(a) || hStats.get(a) || {W:0,L:0,PD:0};
-      const bS = gStats.get(b) || hStats.get(b) || {W:0,L:0,PD:0};
-      return { W:(aS.W||0)+(bS.W||0), PD:(aS.PD||0)+(bS.PD||0) };
+      const stats = t.members.map(n => gStats.get(n) || hStats.get(n) || {W:0,L:0,PD:0});
+      const W = stats.reduce((s,v)=> s+(v.W||0), 0);
+      const PD= stats.reduce((s,v)=> s+(v.PD||0),0);
+      return { W, PD };
     };
     teams.sort((A,B)=>{
       const sA = score(A), sB = score(B);
       return (sB.W - sA.W) || (sB.PD - sA.PD) || A.name.localeCompare(B.name);
     });
-    teams.forEach((t,i)=>{ t.seed = i+1; t.id = `${div}-${t.seed}-${slug(t.name)}`; });
+    teams.forEach((t,i)=>{
+      t.seed = i+1;
+      t.id = `${div}-${t.seed}-${slug(t.name)}`;
+    });
 
     return teams;
   }
@@ -1340,9 +1175,8 @@ function PlayoffBuilder({
       const decided = main.filter(
         m=> (m.round===1 || m.round===2) &&
             m.team1 && m.team2 &&
-            typeof m.score==='string' && m.score.trim()
+            typeof m.score==='string' && m.score.trim(),
       );
-
       for (const m of decided) {
         const parsed = parseScore(m.score);
         if(!parsed) continue;
@@ -1355,7 +1189,7 @@ function PlayoffBuilder({
             name: loser.name,
             members: loser.members,
             seed: losers.length+1,
-            division:'RR'
+            division:'RR',
           });
         }
         // also auto-advance winner to next if wiring exists (safety)
@@ -1375,15 +1209,14 @@ function PlayoffBuilder({
         const names = uniq(pool).filter(Boolean);
         const shuffled = shuffle(names);
         for(let i=0;i<shuffled.length;i+=2){
-          const a = shuffled[i], b = shuffled[i+1];
-          if(!a || !b) break;
+          const a = shuffled[i], b = shuffled[i+1]; if(!a || !b) break;
           const name = `${a} & ${b}`;
           rrTeams.push({
             id:`RR-${i/2+1}-${slug(name)}`,
             name,
             members:[a,b],
             seed:(i/2)+1,
-            division:'RR'
+            division:'RR',
           });
         }
       }else{
@@ -1397,8 +1230,8 @@ function PlayoffBuilder({
 
   return (
     <section className="bg-white/95 backdrop-blur rounded-xl shadow ring-1 ring-slate-200 p-4">
-      <h3 className="text-[16px] font-semibold text-sky-800 mb-2">Playoff Setup</h3>
-      <div className="grid md:grid-cols-2 gap-3 text-[13px]">
+      <h3 className="text-[16px] font-semibold text-sky-800 mb-2">Playoff Setup (Doubles)</h3>
+      <div className="grid md:grid-cols-2 gap-3 text-[12px]">
         <div className="space-y-2">
           <label className="flex items-center gap-2">
             Upper size (per gender)
@@ -1475,137 +1308,668 @@ function PlayoffBuilder({
         </button>
       </div>
       <p className="text-[11px] text-slate-500 mt-2">
-        Upper/Lower teams are formed by pairing top halves of Guys/Girls and seeding by combined W then PD (including
-        any late penalties). BYEs are given to top seeds if configured. RR combines first/second-round losers (optionally
-        re-randomized).
+        Upper/Lower teams are formed by pairing top halves of Guys/Girls and seeding by combined W then PD. BYEs are given
+        to top seeds if configured. RR combines first/second-round losers (optionally re-randomized).
       </p>
     </section>
   );
 }
 
-/* ========================= App (layout + autosave) ========================= */
+/* ========================= QUADS: Matches View ========================= */
 
-export default function BlindDrawTourneyApp(){
-  const [guysText, setGuysText] = useState<string>("");
-  const [girlsText, setGirlsText] = useState<string>("");
-  const [matches, setMatches] = useState<MatchRow[]>([]);
-  const [brackets, setBrackets] = useState<BracketMatch[]>([]);
-  const [attendance, setAttendance] = useState<Attendance>({});
+function QuadsMatchesView({
+  matches,
+  setMatches,
+}:{
+  matches:QuadsMatchRow[];
+  setMatches:(f:(prev:QuadsMatchRow[])=>QuadsMatchRow[]|QuadsMatchRow[])=>void;
+}){
+  const rounds = useMemo(()=> uniq(matches.map(m=>m.round)).sort((a,b)=>a-b), [matches]);
+  const [open, setOpen] = useState(()=> new Set<number>(rounds.length? [rounds[rounds.length-1]] : []));
+  const [confirmR, setConfirmR] = useState<number|null>(null);
+  useEffect(()=>{ if(rounds.length) setOpen(new Set([rounds[rounds.length-1]])); }, [matches.length]);
 
-  // Autosave load
-  useEffect(()=>{
-    const raw = typeof window !== 'undefined'
-      ? localStorage.getItem('sunnysports.autosave')
-      : null;
-    if(!raw) return;
-    try{
-      const data = JSON.parse(raw);
-      if(typeof data.guysText==='string') setGuysText(data.guysText);
-      if(typeof data.girlsText==='string') setGirlsText(data.girlsText);
-      if(Array.isArray(data.matches)) setMatches(data.matches);
-      if(Array.isArray(data.brackets)) setBrackets(data.brackets);
-      if(data.attendance && typeof data.attendance==='object') setAttendance(data.attendance);
-    }catch{
-      // ignore
-    }
-  },[]);
-
-  // Autosave persist
-  useEffect(()=>{
-    if(typeof window === 'undefined') return;
-    const snapshot = JSON.stringify({guysText, girlsText, matches, brackets, attendance});
-    localStorage.setItem('sunnysports.autosave', snapshot);
-  },[guysText, girlsText, matches, brackets, attendance]);
+  const update=(id:string, patch:Partial<QuadsMatchRow>)=> setMatches(prev=> prev.map(m=> m.id===id? {...m, ...patch}: m));
+  const requestDelete = (round:number) => { setConfirmR(round); };
+  const doDelete = (round:number) => { setMatches(prev=> prev.filter(m=> m.round !== round)); setConfirmR(null); };
 
   return (
-    <main className="min-h-screen bg-gradient-to-b from-sky-200 via-sky-100 to-sky-50 text-slate-800 antialiased">
-      <header className="sticky top-0 z-10 bg-sky-800/95 backdrop-blur border-b border-sky-900/40 shadow-sm">
-        <div className="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between">
-          <SunnyLogo />
-          <div className="text-[11px] text-sky-100/80">build 2025-11-06_04</div>
+    <section className="bg-white backdrop-blur rounded-2xl shadow-lg ring-1 ring-sky-200 p-6 border border-sky-100">
+      <h2 className="text-[20px] font-bold text-sky-800 mb-2 tracking-tight">Matches & Results (Quads)</h2>
+      <div className="w-24 h-1 bg-sky-500 mx-auto rounded-full mb-4" />
+
+      {rounds.length===0 && (
+        <p className="text-[13px] text-gray-600 max-w-lg mx-auto">
+          No quads matches yet. Use the Quads Round Generator to create pool play.
+        </p>
+      )}
+
+      <div className="mt-2 space-y-3">
+        {rounds.map(r=> (
+          <div key={r} className="border rounded-xl overflow-hidden shadow-sm bg-white">
+            <div className="px-3 py-2 bg-slate-50/80 border-b flex justify-between items-center">
+              <button
+                className="text-left font-medium text-[14px] text-slate-800"
+                onClick={()=>{ const n=new Set(open); if(n.has(r)) n.delete(r); else n.add(r); setOpen(n); }}
+              >
+                Round {r}
+                <span className="ml-2 text-[11px] text-slate-500">
+                  {open.has(r)? 'Click to collapse' : 'Click to expand'}
+                </span>
+              </button>
+              <button
+                className="text-[11px] px-2 py-1 rounded bg-red-600 text-white hover:bg-red-700"
+                onClick={()=>requestDelete(r)}
+                title="Delete this entire round"
+              >
+                Delete Round
+              </button>
+            </div>
+
+            {/* Inline confirm bar */}
+            {confirmR===r && (
+              <div className="px-3 py-2 bg-red-50 border-b border-red-200 flex items-center justify-between text-[12px]">
+                <span className="text-red-700">
+                  Delete Round {r}? This will remove all matches and scores in this round.
+                </span>
+                <div className="flex items-center gap-2">
+                  <button
+                    className="px-2 py-1 rounded bg-red-600 text-white hover:bg-red-700 text-[11px]"
+                    onClick={()=>doDelete(r)}
+                  >
+                    Confirm
+                  </button>
+                  <button
+                    className="px-2 py-1 rounded border text-[11px]"
+                    onClick={()=>setConfirmR(null)}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {open.has(r) && (
+              <div className="overflow-x-auto">
+                <table className="min-w-full text-[13px]">
+                  <thead className="sticky top-0 bg-white/90 backdrop-blur">
+                    <tr className="text-left text-slate-600">
+                      <th className="py-1 px-2">Court</th>
+                      <th className="py-1 px-2">Team 1 (Quads/Triples)</th>
+                      <th className="py-1 px-2">Team 2 (Quads/Triples)</th>
+                      <th className="py-1 px-2">Score</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {matches.filter(m=>m.round===r).sort((a,b)=>a.court-b.court).map((m,idx)=> {
+                      const parsed = parseScore(m.scoreText);
+                      const valid = parsed ? isValidQuadsScore(parsed[0], parsed[1]) : (m.scoreText ? false : true);
+                      const t1Win = parsed && valid ? parsed[0] > parsed[1] : null; // auto-pick winner
+
+                      const labelTeam = (players:string[], isTriple?:boolean)=> (
+                        <div className="flex items-center gap-2">
+                          {isTriple && (
+                            <span className="inline-block text-[10px] px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 ring-1 ring-amber-200">
+                              Triples
+                            </span>
+                          )}
+                          <span>{players.join(', ')}</span>
+                        </div>
+                      );
+
+                      return (
+                        <tr
+                          key={m.id}
+                          className={
+                            "border-t " +
+                            (idx%2? 'bg-slate-50/60 ' : '')
+                          }
+                        >
+                          <td className="py-1 px-2 tabular-nums">{m.court}</td>
+
+                          {/* Team 1 cell tints green if T1 won */}
+                          <td className={`py-1 px-2 ${t1Win===true ? 'bg-emerald-50' : ''}`}>
+                            {labelTeam(m.t1, m.isTriple1)}
+                          </td>
+
+                          {/* Team 2 cell tints green if T2 won */}
+                          <td className={`py-1 px-2 ${t1Win===false ? 'bg-emerald-50' : ''}`}>
+                            {labelTeam(m.t2, m.isTriple2)}
+                          </td>
+
+                          {/* Score input (to 21, win by 2, cap 25) */}
+                          <td className="py-1 px-2">
+                            <input
+                              className={
+                                "w-40 border rounded px-2 py-1 text-[12px] " +
+                                (valid ? 'border-slate-300' : 'border-red-500 bg-red-50')
+                              }
+                              value={m.scoreText || ''}
+                              onChange={(e)=>update(m.id,{scoreText:e.target.value})}
+                              placeholder="to 21, cap 25 (e.g., 21-19)"
+                              title="Pool play (quads): one game to 21, win by 2, cap 25"
+                            />
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+/* ========================= QUADS: Round Generator ========================= */
+
+function QuadsRoundGenerator({
+  guysText,
+  girlsText,
+  matches,
+  setMatches,
+}:{
+  guysText:string;
+  girlsText:string;
+  matches:QuadsMatchRow[];
+  setMatches:(f:(prev:QuadsMatchRow[])=>QuadsMatchRow[]|QuadsMatchRow[])=>void;
+}){
+  const [strict, setStrict] = useState(true);
+  const [roundsToGen, setRoundsToGen] = useState(1);
+  const [startCourt, setStartCourt] = useState(1);
+
+  const guys = useMemo(()=> uniq((guysText||'').split(/\r?\n/).map(s=>s.trim()).filter(Boolean)),[guysText]);
+  const girls= useMemo(()=> uniq((girlsText||'').split(/\r?\n/).map(s=>s.trim()).filter(Boolean)),[girlsText]);
+
+  // Opponent map: track which *individuals* have already opposed each other
+  const buildOpponentMap = (history:QuadsMatchRow[])=>{
+    const mp = new Map<string, Set<string>>();
+    for(const m of history){
+      const t1=m.t1, t2=m.t2;
+      for(const a of t1) for(const b of t2){
+        const A=slug(a),B=slug(b);
+        if(!mp.has(A)) mp.set(A,new Set());
+        mp.get(A)!.add(B);
+      }
+      for(const a of t2) for(const b of t1){
+        const A=slug(a),B=slug(b);
+        if(!mp.has(A)) mp.set(A,new Set());
+        mp.get(A)!.add(B);
+      }
+    }
+    return mp;
+  };
+  const haventOpposedTeam = (mp:Map<string,Set<string>>, teamA:string[], teamB:string[])=>{
+    if(!strict) return true;
+    for(const a of teamA){
+      const set = mp.get(slug(a));
+      if(!set) continue;
+      for(const b of teamB){
+        if(set.has(slug(b))) return false;
+      }
+    }
+    return true;
+  };
+
+  function buildRound(roundIdx:number, history:QuadsMatchRow[]){
+    const G = shuffle(guys);
+    const H = shuffle(girls);
+
+    const opponentMap = buildOpponentMap(history);
+
+    const totalPlayers = G.length + H.length;
+    const maxQuadsByCounts = Math.min(Math.floor(G.length/2), Math.floor(H.length/2));
+
+    // choose #quads so leftover players form at most 2 triples (0,3,6 leftover)
+    let quadsToMake = maxQuadsByCounts;
+    for(let q=maxQuadsByCounts;q>=0;q--){
+      const leftover = totalPlayers - 4*q;
+      if(leftover===0 || leftover===3 || leftover===6){
+        quadsToMake = q;
+        break;
+      }
+    }
+
+    const teams: { members:string[]; isTriple:boolean }[] = [];
+    let gIdx=0, hIdx=0;
+
+    // Build full quads: 2 guys + 2 girls when possible
+    for(let i=0;i<quadsToMake;i++){
+      const tGuys = G.slice(gIdx,gIdx+2);
+      const tGirls= H.slice(hIdx,hIdx+2);
+      gIdx+=2; hIdx+=2;
+      teams.push({ members:[...tGuys,...tGirls], isTriple:false });
+    }
+
+    // Leftovers → triples (3 or 6 players → 1 or 2 triples)
+    const leftovers = [...G.slice(gIdx), ...H.slice(hIdx)];
+    for(let i=0;i+2<leftovers.length;i+=3){
+      const t = leftovers.slice(i,i+3);
+      teams.push({ members:t, isTriple:true });
+    }
+
+    // Pair teams into matches, 2 teams per court, try to avoid repeat opponents
+    const teamList = teams.slice();
+    const made: QuadsMatchRow[] = [];
+    let court = startCourt;
+
+    while(teamList.length>=2){
+      const a = teamList.shift()!;
+      let idx=0, found=false;
+      for(let i=0;i<teamList.length;i++){
+        const b = teamList[i];
+        if(haventOpposedTeam(opponentMap,a.members,b.members)){
+          idx=i; found=true; break;
+        }
+      }
+      const b = teamList.splice(found?idx:0,1)[0];
+
+      // update opponent map
+      for(const A of a.members){
+        const SA=slug(A);
+        const set = opponentMap.get(SA) || new Set<string>();
+        for(const B of b.members) set.add(slug(B));
+        opponentMap.set(SA,set);
+      }
+      for(const A of b.members){
+        const SA=slug(A);
+        const set = opponentMap.get(SA) || new Set<string>();
+        for(const B of a.members) set.add(slug(B));
+        opponentMap.set(SA,set);
+      }
+
+      made.push({
+        id: `${roundIdx}-${court}-${Date.now()}-${Math.random().toString(36).slice(2,7)}`,
+        round: roundIdx,
+        court: court++,
+        t1: a.members,
+        t2: b.members,
+        isTriple1: a.isTriple,
+        isTriple2: b.isTriple,
+        scoreText: '',
+      });
+    }
+
+    return made;
+  }
+
+  function onGenerate(){
+    const n = clampN(roundsToGen, 1);
+    const out: QuadsMatchRow[] = [];
+    let history = matches.slice();
+    const currentMax = history.reduce((mx,m)=> Math.max(mx,m.round),0) || 0;
+    for(let i=1;i<=n;i++){
+      const roundIdx = currentMax + i;
+      const one = buildRound(roundIdx, history);
+      out.push(...one);
+      history = history.concat(one);
+    }
+    setMatches(prev=> (Array.isArray(prev)? prev:[]).concat(out));
+  }
+
+  return (
+    <section className="bg-white/90 backdrop-blur rounded-xl shadow ring-1 ring-slate-200 p-4">
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <h3 className="text-[16px] font-semibold text-sky-800">Round Generator (Quads)</h3>
+        <div className="flex items-center gap-3 text-[12px] flex-wrap">
+          <label className="flex items-center gap-1">
+            <input
+              type="checkbox"
+              checked={strict}
+              onChange={(e)=>setStrict(e.target.checked)}
+            />
+            Strict no-repeat (opponents)
+          </label>
+          <label className="flex items-center gap-1">
+            Rounds
+            <input
+              type="number"
+              min={1}
+              value={roundsToGen}
+              onChange={(e)=>setRoundsToGen(clampN(+e.target.value||1,1))}
+              className="w-16 border rounded px-2 py-1"
+            />
+          </label>
+          <label className="flex items-center gap-1">
+            Start court
+            <input
+              type="number"
+              min={1}
+              value={startCourt}
+              onChange={(e)=>setStartCourt(clampN(+e.target.value||1,1))}
+              className="w-16 border rounded px-2 py-1"
+            />
+          </label>
+          <button
+            className="px-3 py-1.5 rounded-lg bg-blue-600 text-white hover:bg-blue-700 shadow-sm active:scale-[.99]"
+            onClick={onGenerate}
+          >
+            Generate
+          </button>
+        </div>
+      </div>
+      <p className="text-[11px] text-slate-500 mt-2">
+        Quads engine prioritizes 2 guys + 2 girls per team. Leftover players form up to two Triples teams. Strict mode
+        avoids repeat opponents as much as possible.
+      </p>
+    </section>
+  );
+}
+
+/* ========================= QUADS: Leaderboard ========================= */
+
+function QuadsLeaderboard({
+  matches,
+  guysText,
+  girlsText,
+}:{
+  matches:QuadsMatchRow[];
+  guysText:string;
+  girlsText:string;
+}){
+  const guysList = useMemo(
+    ()=> Array.from(new Set((guysText||'').split(/\r?\n/).map(s=>s.trim()).filter(Boolean))),
+    [guysText],
+  );
+  const girlsList= useMemo(
+    ()=> Array.from(new Set((girlsText||'').split(/\r?\n/).map(s=>s.trim()).filter(Boolean))),
+    [girlsText],
+  );
+  const guysSet  = useMemo(()=> new Set(guysList.map(slug)), [guysList]);
+  const girlsSet = useMemo(()=> new Set(girlsList.map(slug)), [girlsList]);
+
+  type Bucket = { name:string; W:number; L:number; PD:number };
+  const baseStats = () => new Map<string, Bucket>();
+  const ensure = (map:Map<string,Bucket>, n:string)=>{
+    if(!map.has(n)) map.set(n,{name:n, W:0, L:0, PD:0});
+    return map.get(n)!;
+  };
+
+  const { guysRows, girlsRows } = useMemo(()=>{
+    const g = baseStats(); const h = baseStats();
+    for(const n of guysList) ensure(g, n);
+    for(const n of girlsList) ensure(h, n);
+
+    for(const m of matches){
+      const s = parseScore(m.scoreText); if(!s) continue;
+      const [a,b] = s;
+      if(!isValidQuadsScore(a,b)) continue;
+      const diff = Math.abs(a-b);
+      const t1Won = a>b;
+      const t1 = m.t1;
+      const t2 = m.t2;
+
+      const apply = (name:string, won:boolean)=>{
+        const key = name;
+        const isGuy = guysSet.has(slug(name));
+        const isGirl = girlsSet.has(slug(name));
+        const map = isGuy ? g : isGirl ? h : g;
+        const row = ensure(map, key);
+        if(won){ row.W++; row.PD += diff; } else { row.L++; row.PD -= diff; }
+      };
+
+      for(const p of t1) apply(p, t1Won);
+      for(const p of t2) apply(p, !t1Won);
+    }
+
+    const sortRows = (arr:Bucket[])=>
+      arr.sort((x,y)=> y.W-x.W || y.PD-x.PD || x.name.localeCompare(y.name));
+    return {
+      guysRows: sortRows(Array.from(g.values())),
+      girlsRows: sortRows(Array.from(h.values())),
+    };
+  }, [matches, guysList, girlsList, guysSet, girlsSet]);
+
+  const Table = ({title, rows}:{title:string; rows:Bucket[]})=> (
+    <section className="bg-white/95 backdrop-blur rounded-xl shadow ring-1 ring-slate-200 p-4">
+      <h3 className="text-[15px] font-semibold text-sky-800 mb-2">{title}</h3>
+      <div className="overflow-x-auto">
+        <table className="min-w-full text-[13px]">
+          <thead>
+            <tr className="text-left text-slate-600">
+              <th className="py-1 px-2">#</th>
+              <th className="py-1 px-2">Player</th>
+              <th className="py-1 px-2">W</th>
+              <th className="py-1 px-2">L</th>
+              <th className="py-1 px-2">PD</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r,i)=> (
+              <tr key={r.name} className="border-t">
+                <td className="py-1 px-2 tabular-nums">{i+1}</td>
+                <td className="py-1 px-2">{r.name}</td>
+                <td className="py-1 px-2 tabular-nums">{r.W}</td>
+                <td className="py-1 px-2 tabular-nums">{r.L}</td>
+                <td className="py-1 px-2 tabular-nums">{r.PD}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+
+  return (
+    <section>
+      <h2 className="text-[18px] font-bold text-sky-900 mb-1">Leaderboard (Quads – Live)</h2>
+      <p className="text-[11px] text-slate-500 mb-3">
+        Pool (quads): one game to 21, win by 2, cap 25. W/L/PD auto-update as you type scores.
+      </p>
+      <div className="grid md:grid-cols-2 gap-4">
+        <Table title="Guys Standings (Quads)" rows={guysRows} />
+        <Table title="Girls Standings (Quads)" rows={girlsRows} />
+      </div>
+    </section>
+  );
+}
+
+/* ========================= APP SHELL: Tabs + autosave ========================= */
+
+type TabKey = 'DOUBLES' | 'QUADS';
+
+export default function BlindDrawTourneyApp(){
+  const [activeTab, setActiveTab] = useState<TabKey>('DOUBLES');
+
+  // Doubles state
+  const [dGuysText, setDGuysText] = useState<string>("");
+  const [dGirlsText, setDGirlsText] = useState<string>("");
+  const [dMatches, setDMatches] = useState<MatchRow[]>([]);
+  const [dBrackets, setDBrackets] = useState<BracketMatch[]>([]);
+
+  // Quads state
+  const [qGuysText, setQGuysText] = useState<string>("");
+  const [qGirlsText, setQGirlsText] = useState<string>("");
+  const [qMatches, setQMatches] = useState<QuadsMatchRow[]>([]);
+  const [qBrackets, setQBrackets] = useState<BracketMatch[]>([]); // reserved for future quads playoffs
+
+  // Autosave – support old structure (doubles only) + new quads fields
+  useEffect(()=>{
+    try{
+      const raw = localStorage.getItem('sunnysports.autosave');
+      if(!raw) return;
+      const data = JSON.parse(raw);
+      // legacy keys → doubles
+      if(typeof data.guysText==='string') setDGuysText(data.guysText);
+      if(typeof data.girlsText==='string') setDGirlsText(data.girlsText);
+      if(Array.isArray(data.matches)) setDMatches(data.matches);
+      if(Array.isArray(data.brackets)) setDBrackets(data.brackets);
+      // new quads keys
+      if(typeof data.qGuysText==='string') setQGuysText(data.qGuysText);
+      if(typeof data.qGirlsText==='string') setQGirlsText(data.qGirlsText);
+      if(Array.isArray(data.qMatches)) setQMatches(data.qMatches);
+      if(Array.isArray(data.qBrackets)) setQBrackets(data.qBrackets);
+      if(data.activeTab==='QUADS' || data.activeTab==='DOUBLES') setActiveTab(data.activeTab);
+    }catch{/* ignore */}
+  },[]);
+
+  useEffect(()=>{
+    const snapshot = JSON.stringify({
+      guysText: dGuysText,
+      girlsText: dGirlsText,
+      matches: dMatches,
+      brackets: dBrackets,
+      qGuysText,
+      qGirlsText,
+      qMatches,
+      qBrackets,
+      activeTab,
+    });
+    localStorage.setItem('sunnysports.autosave', snapshot);
+  },[dGuysText, dGirlsText, dMatches, dBrackets, qGuysText, qGirlsText, qMatches, qBrackets, activeTab]);
+
+  return (
+    <main className="min-h-screen bg-gradient-to-b from-sky-800 via-sky-700 to-sky-500 text-slate-800 antialiased">
+      <header className="sticky top-0 z-10 bg-sky-900/90 backdrop-blur border-b border-sky-700 shadow-sm">
+        <div className="max-w-6xl mx-auto px-4 py-3 flex flex-col md:flex-row md:items-center md:justify-between gap-2">
+          <div className="flex items-center justify-between gap-3">
+            <SunnyLogo />
+          </div>
+          <div className="text-[11px] text-sky-100/80 md:text-right">
+            <div className="font-medium">Tournament Control Panel</div>
+            <div>Live blind draw · pool play · playoffs · redemption rally</div>
+          </div>
+        </div>
+        {/* Tabs */}
+        <div className="border-t border-sky-700 bg-sky-900/80">
+          <div className="max-w-6xl mx-auto px-4 py-1.5 flex gap-2 text-[13px]">
+            <button
+              className={
+                "px-3 py-1 rounded-t-md border-b-2 " +
+                (activeTab==='DOUBLES'
+                  ? "bg-white text-sky-900 border-sky-400"
+                  : "bg-transparent text-sky-100/80 border-transparent hover:bg-sky-800/60")
+              }
+              onClick={()=>setActiveTab('DOUBLES')}
+            >
+              Revco Doubles
+            </button>
+            <button
+              className={
+                "px-3 py-1 rounded-t-md border-b-2 " +
+                (activeTab==='QUADS'
+                  ? "bg-white text-sky-900 border-sky-400"
+                  : "bg-transparent text-sky-100/80 border-transparent hover:bg-sky-800/60")
+              }
+              onClick={()=>setActiveTab('QUADS')}
+            >
+              Revco Quads
+            </button>
+          </div>
         </div>
       </header>
 
       <div className="max-w-6xl mx-auto px-4 py-6 space-y-6">
-        {/* Leaderboard first */}
-        <Leaderboard
-          matches={matches}
-          guysText={guysText}
-          girlsText={girlsText}
-          attendance={attendance}
-        />
+        {activeTab==='DOUBLES' ? (
+          <>
+            {/* Leaderboard first */}
+            <Leaderboard matches={dMatches} guysText={dGuysText} girlsText={dGirlsText} />
 
-        {/* Matches view */}
-        <MatchesView
-          matches={matches}
-          setMatches={setMatches}
-          attendance={attendance}
-        />
+            {/* Matches view */}
+            <MatchesView matches={dMatches} setMatches={setDMatches} />
 
-        {/* Round generator */}
-        <RoundGenerator
-          guysText={guysText}
-          girlsText={girlsText}
-          matches={matches}
-          setMatches={setMatches}
-        />
-
-        {/* Rosters + Attendance */}
-        <section className="bg-white/95 backdrop-blur rounded-xl shadow ring-1 ring-slate-200 p-4">
-          <h2 className="text-[16px] font-semibold text-sky-800 mb-2">Players</h2>
-          <div className="grid md:grid-cols-2 gap-4">
-            <LinedTextarea
-              id="guys"
-              label="Guys"
-              value={guysText}
-              onChange={(e)=>setGuysText(e.target.value)}
-              placeholder="One name per line"
+            {/* Round generator */}
+            <RoundGenerator
+              guysText={dGuysText}
+              girlsText={dGirlsText}
+              matches={dMatches}
+              setMatches={setDMatches}
             />
-            <LinedTextarea
-              id="girls"
-              label="Girls"
-              value={girlsText}
-              onChange={(e)=>setGirlsText(e.target.value)}
-              placeholder="One name per line"
-            />
-          </div>
-          <AttendancePanel
-            guysText={guysText}
-            girlsText={girlsText}
-            attendance={attendance}
-            setAttendance={setAttendance}
-          />
-        </section>
 
-        {/* Playoffs */}
-        <PlayoffBuilder
-          matches={matches}
-          guysText={guysText}
-          girlsText={girlsText}
-          attendance={attendance}
-          setBrackets={setBrackets}
-        />
-        <BracketView
-          brackets={brackets}
-          setBrackets={setBrackets}
-        />
+            {/* Rosters */}
+            <section className="bg-white/95 backdrop-blur rounded-xl shadow ring-1 ring-slate-200 p-4">
+              <h2 className="text-[16px] font-semibold text-sky-800 mb-2">Players (Doubles)</h2>
+              <div className="grid md:grid-cols-2 gap-4">
+                <LinedTextarea
+                  id="d-guys"
+                  label="Guys – Doubles"
+                  value={dGuysText}
+                  onChange={(e)=>setDGuysText(e.target.value)}
+                  placeholder="One name per line"
+                />
+                <LinedTextarea
+                  id="d-girls"
+                  label="Girls – Doubles"
+                  value={dGirlsText}
+                  onChange={(e)=>setDGirlsText(e.target.value)}
+                  placeholder="One name per line"
+                />
+              </div>
+            </section>
+
+            {/* Playoffs */}
+            <PlayoffBuilder
+              matches={dMatches}
+              guysText={dGuysText}
+              girlsText={dGirlsText}
+              setBrackets={setDBrackets}
+            />
+            <BracketView brackets={dBrackets} setBrackets={setDBrackets} />
+          </>
+        ) : (
+          <>
+            {/* QUADS TAB CONTENT */}
+            <QuadsLeaderboard matches={qMatches} guysText={qGuysText} girlsText={qGirlsText} />
+
+            <QuadsMatchesView matches={qMatches} setMatches={setQMatches} />
+
+            <QuadsRoundGenerator
+              guysText={qGuysText}
+              girlsText={qGirlsText}
+              matches={qMatches}
+              setMatches={setQMatches}
+            />
+
+            <section className="bg-white/95 backdrop-blur rounded-xl shadow ring-1 ring-slate-200 p-4">
+              <h2 className="text-[16px] font-semibold text-sky-800 mb-2">Players (Quads)</h2>
+              <p className="text-[11px] text-slate-500 mb-2">
+                These rosters are <strong>separate</strong> from the doubles tab so you can run quads-only events or mix.
+              </p>
+              <div className="grid md:grid-cols-2 gap-4">
+                <LinedTextarea
+                  id="q-guys"
+                  label="Guys – Quads"
+                  value={qGuysText}
+                  onChange={(e)=>setQGuysText(e.target.value)}
+                  placeholder="One name per line"
+                />
+                <LinedTextarea
+                  id="q-girls"
+                  label="Girls – Quads"
+                  value={qGirlsText}
+                  onChange={(e)=>setQGirlsText(e.target.value)}
+                  placeholder="One name per line"
+                />
+              </div>
+            </section>
+
+            {/* Quads playoffs placeholder for now */}
+            <section className="bg-white/95 backdrop-blur rounded-xl shadow ring-1 ring-slate-200 p-4">
+              <h2 className="text-[16px] font-semibold text-sky-800 mb-1">Playoffs & Punishments (Quads)</h2>
+              <p className="text-[12px] text-slate-600 mb-1">
+                Coming next: single-elim quads brackets, loser punishment randomizer, and manual drag-and-drop team
+                builder based on quads standings.
+              </p>
+              <p className="text-[11px] text-slate-500">
+                For now, you can still use the quads leaderboard to seed teams manually.
+              </p>
+            </section>
+          </>
+        )}
 
         {/* Data & backup */}
-        <section className="bg-white/80 rounded-lg p-3 text-[11px] text-slate-600 border border-slate-200">
+        <section className="bg-white/80 rounded-lg p-3 text-[11px] text-slate-600">
           <div className="flex items-center gap-2 flex-wrap">
             <button
-              className="px-2 py-1 border rounded bg-slate-50 hover:bg-slate-100"
-              onClick={()=>{
-                if(typeof window==='undefined') return;
-                if(confirm('Reset app and clear autosaved data?')){
-                  localStorage.removeItem('sunnysports.autosave');
-                  location.reload();
-                }
-              }}
+              className="px-2 py-1 border rounded text-[11px]"
+              onClick={()=>{ localStorage.removeItem('sunnysports.autosave'); location.reload(); }}
             >
               Reset App (clear autosave)
             </button>
-            <span>Autosave is on. Export/Import removed per your request.</span>
+            <span>Autosave is on for both tabs. Export/Import removed per your request.</span>
           </div>
         </section>
       </div>
