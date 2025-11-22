@@ -2238,43 +2238,147 @@ function QuadsPlayoffBuilder({
 
   type Mode = 'COMBINED' | 'SPLIT';
   const [mode, setMode] = useState<Mode>('COMBINED');
-
-  // COMBINED: total players from the combined leaderboard
-  const [totalPlayers, setTotalPlayers] = useState<number>(16);
-
-  // SPLIT: top K guys + top K girls
-  const [perGender, setPerGender] = useState<number>(4);
-
-  // Randomize within each batch of 8 before forming teams
+  const [totalPlayers, setTotalPlayers] = useState<number>(16); // combined mode
+  const [perGender, setPerGender] = useState<number>(4);        // split mode
   const [seedRandom, setSeedRandom] = useState<boolean>(true);
 
-  const onBuild = () => {
-    let pool: QuadsPlayerRow[] = [];
+  // NEW: manual team editing state
+  const [selectedPool, setSelectedPool] = useState<QuadsPlayerRow[]>([]);
+  const [editTeams, setEditTeams] = useState<{ id: string; members: string[] }[]>([]);
 
+  // Helper: compute playoff pool based on current mode/settings
+  const buildPool = (): QuadsPlayerRow[] => {
     if (mode === 'COMBINED') {
-      const n = clampN(totalPlayers, 8);
+      const n = clampN(totalPlayers, 4);
       const limited = Math.min(n, allRows.length);
-      pool = allRows.slice(0, limited);
+      return allRows.slice(0, limited);
     } else {
-      const k = clampN(perGender, 4);
+      const k = clampN(perGender, 1);
       const guysSel = guysRows.slice(0, k).map((r) => ({ ...r, gender: 'M' as const }));
       const girlsSel = girlsRows.slice(0, k).map((r) => ({ ...r, gender: 'F' as const }));
-      pool = [...guysSel, ...girlsSel];
+      return [...guysSel, ...girlsSel];
     }
+  };
 
-    if (pool.length < 8) {
-      alert('Not enough players to build a quads playoff bracket. You need at least 8.');
+  // STEP 1: generate teams (auto) and open editor
+  const onGenerateTeams = () => {
+    let pool = buildPool();
+
+    if (pool.length < 4) {
+      alert('Not enough players to build a quads bracket.');
       return;
     }
 
-    // Build teams using batch-of-8 logic (top 8 with 3rd, 2nd with 4th, etc.)
-    const teams = buildQuadsPlayoffTeams(pool, seedRandom);
-    if (!teams.length) return; // helper already alerted if configuration is invalid
+    if (seedRandom) {
+      pool = shuffle(pool);
+    }
 
-    // One big quads bracket in UPPER division
-    const bracket = buildBracket('UPPER', teams, 0);
+    // Use your existing helper so you keep the "top 8 mixed with 3rd batch of 8"
+    // & gender-balancing logic exactly as before.
+    const teams = buildQuadsPlayoffTeams(pool);
+    if (!teams.length) {
+      // buildQuadsPlayoffTeams already alerts if total % 4 !== 0
+      return;
+    }
+
+    // Convert to editable teams: always 4 slots per team (pad if needed)
+    const editable = teams.map((t) => ({
+      id: t.id,
+      members: [...t.members, '', '', '', ''].slice(0, 4),
+    }));
+
+    setSelectedPool(pool);
+    setEditTeams(editable);
+  };
+
+  // STEP 2: build bracket from the edited teams
+  const onBuildBracketFromTeams = () => {
+    if (!editTeams.length) {
+      alert('Generate teams first, then adjust them, then build the bracket.');
+      return;
+    }
+
+    // Require each team to have 4 players filled
+    const incomplete = editTeams.some(
+      (t) => t.members.filter((m) => m && m.trim()).length !== 4
+    );
+    if (incomplete) {
+      alert('Every team must have 4 players filled in before building the bracket.');
+      return;
+    }
+
+    // Map player → stats (W, PD) from quads pool standings
+    const statMap = new Map<string, { W: number; PD: number }>();
+    guysRows.forEach((r) => statMap.set(r.name, { W: r.W, PD: r.PD }));
+    girlsRows.forEach((r) => statMap.set(r.name, { W: r.W, PD: r.PD }));
+
+    // Convert edited teams into seeded Team objects (one big bracket, division="UPPER")
+    const scored = editTeams.map((t, idx) => {
+      const members = t.members.map((m) => m.trim()).filter(Boolean);
+      const W = members.reduce((s, n) => s + (statMap.get(n)?.W ?? 0), 0);
+      const PD = members.reduce((s, n) => s + (statMap.get(n)?.PD ?? 0), 0);
+      const name = members.join(' / ') || `Team ${idx + 1}`;
+      return {
+        team: {
+          id: `Q-temp-${idx}`,
+          name,
+          members,
+          seed: 0,
+          division: 'UPPER' as PlayDiv,
+        } as Team,
+        W,
+        PD,
+      };
+    });
+
+    // Seed by combined W, then PD, then name
+    scored.sort(
+      (a, b) =>
+        b.W - a.W ||
+        b.PD - a.PD ||
+        a.team.name.localeCompare(b.team.name)
+    );
+
+    scored.forEach((entry, i) => {
+      entry.team.seed = i + 1;
+      entry.team.id = `Q-${entry.team.seed}-${slug(entry.team.name)}`;
+    });
+
+    const finalTeams = scored.map((s) => s.team);
+    const bracket = buildBracket('UPPER', finalTeams, 0);
     setBrackets(() => bracket);
   };
+
+  const clearTeams = () => {
+    setSelectedPool([]);
+    setEditTeams([]);
+  };
+
+  const handleMemberChange = (teamIdx: number, slotIdx: number, value: string) => {
+    setEditTeams((prev) =>
+      prev.map((t, i) =>
+        i === teamIdx
+          ? {
+              ...t,
+              members: t.members.map((m, j) => (j === slotIdx ? value : m)),
+            }
+          : t
+      )
+    );
+  };
+
+  // Convenience: list of names for dropdowns
+  const poolNames = selectedPool.map((p) => p.name);
+
+  // Simple duplicate detector (not blocking, just for a warning)
+  const allChosenNames = editTeams.flatMap((t) => t.members.filter(Boolean));
+  const dupNames = Array.from(
+    new Set(
+      allChosenNames.filter(
+        (name, idx) => allChosenNames.indexOf(name) !== idx
+      )
+    )
+  );
 
   return (
     <section className="bg-white/95 backdrop-blur rounded-xl shadow ring-1 ring-slate-200 p-4">
@@ -2282,11 +2386,12 @@ function QuadsPlayoffBuilder({
         Playoff Builder (Quads)
       </h2>
       <p className="text-[11px] text-slate-500 mb-3">
-        Uses quads pool-play W/L/PD to seed one big bracket. Teams are formed from ranking batches of 8
-        (top 8 with 3rd batch of 8, 2nd batch with 4th batch of 8, and so on) so that each team has a mix
-        of higher and lower ranked players.
+        Uses quads pool-play W/L/PD to seed teams. You can auto-build teams and
+        then manually tweak who&apos;s on each quads team before creating{" "}
+        <strong>one big bracket</strong>.
       </p>
 
+      {/* STEP 0 – selection settings */}
       <div className="grid md:grid-cols-2 gap-4 text-[12px]">
         <div className="space-y-2">
           <div className="flex flex-col gap-1">
@@ -2298,15 +2403,15 @@ function QuadsPlayoffBuilder({
                 onChange={() => setMode('COMBINED')}
               />
               <span>
-                Combined leaderboard – top{' '}
+                Combined leaderboard – top{" "}
                 <input
                   type="number"
-                  min={8}
-                  step={8}
+                  min={4}
+                  step={4}
                   className="w-16 border rounded px-1 py-0.5 mx-1"
                   value={totalPlayers}
                   onChange={(e) =>
-                    setTotalPlayers(clampN(+e.target.value || 8, 8))
+                    setTotalPlayers(clampN(+e.target.value || 4, 4))
                   }
                 />
                 players (any gender)
@@ -2319,17 +2424,16 @@ function QuadsPlayoffBuilder({
                 onChange={() => setMode('SPLIT')}
               />
               <span>
-                Top{' '}
+                Top{" "}
                 <input
                   type="number"
-                  min={4}
-                  step={4}
+                  min={1}
                   className="w-12 border rounded px-1 py-0.5 mx-1"
                   value={perGender}
                   onChange={(e) =>
-                    setPerGender(clampN(+e.target.value || 4, 4))
+                    setPerGender(clampN(+e.target.value || 1, 1))
                   }
-                />{' '}
+                />{" "}
                 guys + top {perGender} girls
               </span>
             </label>
@@ -2341,45 +2445,150 @@ function QuadsPlayoffBuilder({
               checked={seedRandom}
               onChange={(e) => setSeedRandom(e.target.checked)}
             />
-            Randomize within each batch of 8 before forming teams
+            Randomize within the selected pool before forming teams
           </label>
+
+          <div className="flex items-center gap-2 mt-2">
+            <button
+              className="px-3 py-1.5 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 shadow-sm text-[13px]"
+              onClick={onGenerateTeams}
+            >
+              Generate Teams for Editing
+            </button>
+            {editTeams.length > 0 && (
+              <button
+                className="px-2 py-1 rounded border text-[11px]"
+                onClick={clearTeams}
+              >
+                Clear Teams
+              </button>
+            )}
+          </div>
         </div>
 
         <div className="space-y-1 text-[11px] text-slate-600">
           <div>
             <span className="font-semibold">Quads standings snapshot:</span>
             <div className="mt-1">
-              Guys on board: <span className="font-medium">{guysRows.length}</span>
+              Guys on board:{" "}
+              <span className="font-medium">{guysRows.length}</span>
             </div>
             <div>
-              Girls on board: <span className="font-medium">{girlsRows.length}</span>
+              Girls on board:{" "}
+              <span className="font-medium">{girlsRows.length}</span>
             </div>
             <div>
-              Combined players: <span className="font-medium">{allRows.length}</span>
+              Combined players:{" "}
+              <span className="font-medium">{allRows.length}</span>
             </div>
           </div>
           <p className="mt-2">
-            Tip: choose a total number of playoff players that&apos;s a <strong>multiple of 8</strong>{' '}
-            (8, 16, 24, 32, ...) so the batches-of-8 pairing (1st+3rd, 2nd+4th, etc.) works cleanly.
+            Tip: choose a total number of players that&apos;s a multiple of 4
+            (e.g., 16, 20, 24, 28, 32) so playoffs are all quads with no triples.
           </p>
+          {selectedPool.length > 0 && (
+            <p className="mt-2">
+              Current playoff pool:{" "}
+              <span className="font-semibold">{selectedPool.length}</span>{" "}
+              players selected.
+            </p>
+          )}
         </div>
       </div>
 
-      <div className="mt-3 flex items-center gap-2">
-        <button
-          className="px-3 py-1.5 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 shadow-sm text-[13px]"
-          onClick={onBuild}
-        >
-          Build Quads Playoff Bracket
-        </button>
-      </div>
-      <p className="text-[11px] text-slate-500 mt-2">
-        Bracket uses the existing ESPN-style layout (1 big UPPER bracket). Enter playoff scores directly in the bracket
-        grid. You can still decide in real life whether early rounds are one set to 25 and semis/finals are match play.
+      {/* STEP 1 – show selected pool (optional mini list) */}
+      {selectedPool.length > 0 && (
+        <div className="mt-4 border-t pt-3 text-[11px] text-slate-600">
+          <div className="font-semibold mb-1">
+            Step 1: Selected playoff players ({selectedPool.length})
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {selectedPool.map((p) => (
+              <span
+                key={p.name}
+                className="px-2 py-0.5 rounded-full bg-slate-100 text-slate-800 border border-slate-200"
+              >
+                {p.name}{" "}
+                <span className="text-[10px] text-slate-500">
+                  ({p.gender} · {p.W}-{p.L} · PD {p.PD})
+                </span>
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* STEP 2 – Team editor */}
+      {editTeams.length > 0 && (
+        <div className="mt-4 border-t pt-3">
+          <div className="flex items-center justify-between gap-2 mb-2">
+            <div className="text-[12px] font-semibold text-slate-700">
+              Step 2: Edit quads teams before building the bracket
+            </div>
+            <button
+              className="px-3 py-1.5 rounded-lg bg-sky-600 text-white hover:bg-sky-700 shadow-sm text-[12px]"
+              onClick={onBuildBracketFromTeams}
+            >
+              Build Bracket from Teams
+            </button>
+          </div>
+
+          {dupNames.length > 0 && (
+            <div className="mb-2 text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1">
+              Warning: some players appear on multiple teams:{" "}
+              <span className="font-medium">{dupNames.join(', ')}</span>. This
+              is allowed, but double-check before starting playoffs.
+            </div>
+          )}
+
+          <div className="grid md:grid-cols-2 gap-3 text-[12px]">
+            {editTeams.map((team, tIdx) => (
+              <div
+                key={team.id || tIdx}
+                className="border rounded-lg p-2 bg-slate-50/60"
+              >
+                <div className="font-semibold text-slate-700 mb-1">
+                  Team {tIdx + 1}
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  {team.members.map((member, mIdx) => (
+                    <div key={mIdx} className="flex flex-col gap-1">
+                      <span className="text-[10px] text-slate-500">
+                        Player {mIdx + 1}
+                      </span>
+                      <select
+                        className="border rounded px-1 py-1 text-[12px] bg-white"
+                        value={member}
+                        onChange={(e) =>
+                          handleMemberChange(tIdx, mIdx, e.target.value)
+                        }
+                      >
+                        <option value="">— choose —</option>
+                        {poolNames.map((name) => (
+                          <option key={name} value={name}>
+                            {name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Final note */}
+      <p className="text-[11px] text-slate-500 mt-3">
+        Once the bracket is built, it will appear in the main Playoff Brackets
+        section below (as a single UPPER bracket). Enter playoff scores directly
+        in the bracket grid as usual.
       </p>
     </section>
   );
 }
+
 
 
 /* ========================= APP SHELL: Tabs + autosave ========================= */
