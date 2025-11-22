@@ -1464,150 +1464,402 @@ function QuadsMatchesView({
   );
 }
 
-/* ========================= QUADS: Round Generator ========================= */
-
 function QuadsRoundGenerator({
   guysText,
   girlsText,
   matches,
   setMatches,
-}:{
-  guysText:string;
-  girlsText:string;
-  matches:QuadsMatchRow[];
-  setMatches:(f:(prev:QuadsMatchRow[])=>QuadsMatchRow[]|QuadsMatchRow[])=>void;
-}){
+}: {
+  guysText: string;
+  girlsText: string;
+  matches: QuadsMatchRow[];
+  setMatches: (f: (prev: QuadsMatchRow[]) => QuadsMatchRow[] | QuadsMatchRow[]) => void;
+}) {
   const [strict, setStrict] = useState(true);
   const [roundsToGen, setRoundsToGen] = useState(1);
   const [startCourt, setStartCourt] = useState(1);
 
-  const guys = useMemo(()=> uniq((guysText||'').split(/\r?\n/).map(s=>s.trim()).filter(Boolean)),[guysText]);
-  const girls= useMemo(()=> uniq((girlsText||'').split(/\r?\n/).map(s=>s.trim()).filter(Boolean)),[girlsText]);
+  const guys = useMemo(
+    () => uniq((guysText || "").split(/\r?\n/).map((s) => s.trim()).filter(Boolean)),
+    [guysText]
+  );
+  const girls = useMemo(
+    () => uniq((girlsText || "").split(/\r?\n/).map((s) => s.trim()).filter(Boolean)),
+    [girlsText]
+  );
 
-  // Opponent map: track which *individuals* have already opposed each other
-  const buildOpponentMap = (history:QuadsMatchRow[])=>{
-    const mp = new Map<string, Set<string>>();
-    for(const m of history){
-      const t1=m.t1, t2=m.t2;
-      for(const a of t1) for(const b of t2){
-        const A=slug(a),B=slug(b);
-        if(!mp.has(A)) mp.set(A,new Set());
-        mp.get(A)!.add(B);
+  // ======= History maps for partners & opponents (with counts) =======
+
+  type CountMap = Map<string, Map<string, number>>;
+
+  const buildPartnerMap = (history: QuadsMatchRow[]): CountMap => {
+    const mp: CountMap = new Map();
+    const addPair = (a: string, b: string) => {
+      const A = slug(a);
+      const B = slug(b);
+      if (!mp.has(A)) mp.set(A, new Map());
+      if (!mp.has(B)) mp.set(B, new Map());
+      const rowA = mp.get(A)!;
+      const rowB = mp.get(B)!;
+      rowA.set(B, (rowA.get(B) || 0) + 1);
+      rowB.set(A, (rowB.get(A) || 0) + 1);
+    };
+
+    for (const m of history) {
+      const t1 = m.t1;
+      const t2 = m.t2;
+      // teammates
+      for (let i = 0; i < t1.length; i++) {
+        for (let j = i + 1; j < t1.length; j++) addPair(t1[i], t1[j]);
       }
-      for(const a of t2) for(const b of t1){
-        const A=slug(a),B=slug(b);
-        if(!mp.has(A)) mp.set(A,new Set());
-        mp.get(A)!.add(B);
+      for (let i = 0; i < t2.length; i++) {
+        for (let j = i + 1; j < t2.length; j++) addPair(t2[i], t2[j]);
       }
     }
     return mp;
   };
-  const haventOpposedTeam = (mp:Map<string,Set<string>>, teamA:string[], teamB:string[])=>{
-    if(!strict) return true;
-    for(const a of teamA){
-      const set = mp.get(slug(a));
-      if(!set) continue;
-      for(const b of teamB){
-        if(set.has(slug(b))) return false;
+
+  const buildOpponentMap = (history: QuadsMatchRow[]): CountMap => {
+    const mp: CountMap = new Map();
+    const addOpp = (a: string, b: string) => {
+      const A = slug(a);
+      const B = slug(b);
+      if (!mp.has(A)) mp.set(A, new Map());
+      const rowA = mp.get(A)!;
+      rowA.set(B, (rowA.get(B) || 0) + 1);
+    };
+
+    for (const m of history) {
+      const t1 = m.t1;
+      const t2 = m.t2;
+      for (const a of t1) for (const b of t2) addOpp(a, b);
+      for (const a of t2) for (const b of t1) addOpp(a, b);
+    }
+    return mp;
+  };
+
+  const haventTeamedTooMuch = (mp: CountMap, team: string[], maxTimes: number) => {
+    if (!strict) return true;
+    for (let i = 0; i < team.length; i++) {
+      for (let j = i + 1; j < team.length; j++) {
+        const A = slug(team[i]);
+        const B = slug(team[j]);
+        const row = mp.get(A);
+        const count = row?.get(B) || 0;
+        if (count >= maxTimes) return false;
       }
     }
     return true;
   };
 
-  function buildRound(roundIdx:number, history:QuadsMatchRow[]){
-    const G = shuffle(guys);
-    const H = shuffle(girls);
-
-    const opponentMap = buildOpponentMap(history);
-
-    const totalPlayers = G.length + H.length;
-    const maxQuadsByCounts = Math.min(Math.floor(G.length/2), Math.floor(H.length/2));
-
-    // choose #quads so leftover players form at most 2 triples (0,3,6 leftover)
-    let quadsToMake = maxQuadsByCounts;
-    for(let q=maxQuadsByCounts;q>=0;q--){
-      const leftover = totalPlayers - 4*q;
-      if(leftover===0 || leftover===3 || leftover===6){
-        quadsToMake = q;
-        break;
+  const haventOpposedTooMuch = (mp: CountMap, teamA: string[], teamB: string[], maxTimes: number) => {
+    if (!strict) return true;
+    for (const a of teamA) {
+      const row = mp.get(slug(a));
+      if (!row) continue;
+      for (const b of teamB) {
+        const count = row.get(slug(b)) || 0;
+        if (count >= maxTimes) return false;
       }
     }
+    return true;
+  };
 
-    const teams: { members:string[]; isTriple:boolean }[] = [];
-    let gIdx=0, hIdx=0;
+  const bumpPartners = (mp: CountMap, team: string[]) => {
+    for (let i = 0; i < team.length; i++) {
+      for (let j = i + 1; j < team.length; j++) {
+        const A = slug(team[i]);
+        const B = slug(team[j]);
+        if (!mp.has(A)) mp.set(A, new Map());
+        if (!mp.has(B)) mp.set(B, new Map());
+        const rowA = mp.get(A)!;
+        const rowB = mp.get(B)!;
+        rowA.set(B, (rowA.get(B) || 0) + 1);
+        rowB.set(A, (rowB.get(A) || 0) + 1);
+      }
+    }
+  };
 
-    // Build full quads: 2 guys + 2 girls when possible
-    for(let i=0;i<quadsToMake;i++){
-      const tGuys = G.slice(gIdx,gIdx+2);
-      const tGirls= H.slice(hIdx,hIdx+2);
-      gIdx+=2; hIdx+=2;
-      teams.push({ members:[...tGuys,...tGirls], isTriple:false });
+  const bumpOpponents = (mp: CountMap, teamA: string[], teamB: string[]) => {
+    for (const a of teamA) {
+      const A = slug(a);
+      if (!mp.has(A)) mp.set(A, new Map());
+      const rowA = mp.get(A)!;
+      for (const b of teamB) {
+        const B = slug(b);
+        rowA.set(B, (rowA.get(B) || 0) + 1);
+      }
+    }
+    for (const b of teamB) {
+      const B = slug(b);
+      if (!mp.has(B)) mp.set(B, new Map());
+      const rowB = mp.get(B)!;
+      for (const a of teamA) {
+        const A = slug(a);
+        rowB.set(A, (rowB.get(A) || 0) + 1);
+      }
+    }
+  };
+
+  // ======= Gender composition helpers (NEW SMART LOGIC) =======
+
+  const chooseQuadComposition = (remainingM: number, remainingF: number, teamsLeft: number) => {
+    const size = 4;
+
+    // If we still have enough girls to give at least 1 girl
+    // to every remaining team, then NEVER use a 0F team.
+    if (remainingF >= teamsLeft) {
+      // Max girls we can use on THIS team while still leaving
+      // at least 1 girl for each of the other (teamsLeft - 1) teams.
+      const maxFWeCanUse = Math.min(size, remainingF - (teamsLeft - 1));
+
+      // Prefer 2 girls if possible, otherwise 1,
+      // but never exceed the safe max.
+      let targetF = 2;
+      if (maxFWeCanUse < 2) targetF = Math.max(1, maxFWeCanUse);
+
+      const needF = targetF;
+      const needM = size - needF;
+      return { needM, needF };
     }
 
-    // Leftovers → triples (3 or 6 players → 1 or 2 triples)
-    const leftovers = [...G.slice(gIdx), ...H.slice(hIdx)];
-    for(let i=0;i+2<leftovers.length;i+=3){
-      const t = leftovers.slice(i,i+3);
-      teams.push({ members:t, isTriple:true });
+    // At this point, remainingF < teamsLeft:
+    // it's *impossible* to give every team a girl,
+    // so some teams will be all guys (or all girls) no matter what.
+    // We still try to keep mixes where we can.
+
+    // Ideal when we have enough of both: 2M2F
+    if (remainingM >= 2 && remainingF >= 2) {
+      return { needM: 2, needF: 2 };
     }
 
-    // Pair teams into matches, 2 teams per court, try to avoid repeat opponents
+    // If one gender is majority, lean 3+1
+    if (remainingM > remainingF && remainingM >= 3 && remainingF >= 1) {
+      return { needM: 3, needF: 1 };
+    }
+    if (remainingF > remainingM && remainingF >= 3 && remainingM >= 1) {
+      return { needM: 1, needF: 3 };
+    }
+
+    // If we're basically out of one gender, we have to go 4 of the other
+    if (remainingF === 0 && remainingM >= 4) {
+      return { needM: 4, needF: 0 };
+    }
+    if (remainingM === 0 && remainingF >= 4) {
+      return { needM: 0, needF: 4 };
+    }
+
+    // Fallbacks
+    if (remainingM >= 3 && remainingF >= 1) return { needM: 3, needF: 1 };
+    if (remainingF >= 3 && remainingM >= 1) return { needM: 1, needF: 3 };
+
+    // Absolute last resort: just use what's available, majority first
+    const useM = Math.min(size, remainingM);
+    const useF = size - useM;
+    return { needM: useM, needF: useF };
+  };
+
+  const chooseTripleComposition = (remainingM: number, remainingF: number, teamsLeft: number) => {
+    const size = 3;
+
+    // If we can still give ≥1 girl to every remaining team,
+    // don't make a 0F team yet.
+    if (remainingF >= teamsLeft) {
+      const maxFWeCanUse = Math.min(size, remainingF - (teamsLeft - 1));
+      // Prefer 2F if possible, else 1F, but stay within maxFWeCanUse
+      let targetF = 2;
+      if (maxFWeCanUse < 2) targetF = Math.max(1, maxFWeCanUse);
+
+      const needF = targetF;
+      const needM = size - needF;
+      return { needM, needF };
+    }
+
+    // Otherwise, we don't have enough girls to keep every team mixed.
+
+    // Best: 2+1 mix
+    if (remainingM >= 2 && remainingF >= 1) return { needM: 2, needF: 1 };
+    if (remainingF >= 2 && remainingM >= 1) return { needM: 1, needF: 2 };
+
+    // Then 3 of whichever is left
+    if (remainingM >= 3) return { needM: 3, needF: 0 };
+    if (remainingF >= 3) return { needM: 0, needF: 3 };
+
+    // Fallback
+    const useM = Math.min(size, remainingM);
+    const useF = size - useM;
+    return { needM: useM, needF: useF };
+  };
+
+  // ======= Build a single round =======
+
+  function buildRound(roundIdx: number, history: QuadsMatchRow[]) {
+    const guysPool = shuffle(guys);
+    const girlsPool = shuffle(girls);
+
+    let remainingM = guysPool.length;
+    let remainingF = girlsPool.length;
+
+    const totalPlayers = remainingM + remainingF;
+
+    // Decide how many quads vs triples so that everyone plays.
+    let numQuads: number;
+    let numTriples: number;
+
+    if (totalPlayers < 3) {
+      // Not enough to form a match
+      return [] as QuadsMatchRow[];
+    }
+
+    if (totalPlayers % 4 === 0) {
+      // Perfect quads
+      numQuads = totalPlayers / 4;
+      numTriples = 0;
+    } else {
+      // General case: greedily make as many quads as we can,
+      // then cover leftovers with triples.
+      numQuads = Math.floor(totalPlayers / 4);
+      let leftover = totalPlayers - numQuads * 4;
+
+      // Try to adjust so leftover is 0 or multiple of 3 if possible
+      // (we don't want leftover 1 or 2)
+      while (leftover === 1 || leftover === 2) {
+        if (numQuads === 0) break;
+        numQuads -= 1;
+        leftover = totalPlayers - numQuads * 4;
+      }
+
+      numTriples = leftover > 0 ? leftover / 3 : 0;
+    }
+
+    const totalTeams = numQuads + numTriples;
+    const teams: { members: string[]; isTriple: boolean }[] = [];
+
+    const partnerMap = buildPartnerMap(history);
+    const opponentMap = buildOpponentMap(history);
+    const MAX_PARTNER_TIMES = 2;
+    const MAX_OPP_TIMES = 2;
+
+    let teamsLeftForGender = totalTeams;
+
+    // Helper to grab players while respecting partner history as much as possible
+    const takePlayers = (
+      needM: number,
+      needF: number,
+      guysArr: string[],
+      girlsArr: string[]
+    ): string[] => {
+      const team: string[] = [];
+
+      // Take girls first
+      for (let i = 0; i < needF; i++) {
+        if (!girlsArr.length) break;
+        team.push(girlsArr.shift()!);
+        remainingF--;
+      }
+
+      // Then guys
+      for (let i = 0; i < needM; i++) {
+        if (!guysArr.length) break;
+        team.push(guysArr.shift()!);
+        remainingM--;
+      }
+
+      // If we fell short due to running out of one gender, top up with whatever is left
+      while (team.length < needM + needF) {
+        if (guysArr.length) {
+          team.push(guysArr.shift()!);
+          remainingM--;
+        } else if (girlsArr.length) {
+          team.push(girlsArr.shift()!);
+          remainingF--;
+        } else {
+          break;
+        }
+      }
+
+      return team;
+    };
+
+    // Build all teams (quads then triples)
+    for (let q = 0; q < numQuads; q++) {
+      const { needM, needF } = chooseQuadComposition(remainingM, remainingF, teamsLeftForGender);
+      const team = takePlayers(needM, needF, guysPool, girlsPool);
+
+      // If strict mode is on and teammates already together >=2 times,
+      // we don't have a trivial fix here, but we at least tried with counts.
+      if (haventTeamedTooMuch(partnerMap, team, MAX_PARTNER_TIMES)) {
+        bumpPartners(partnerMap, team);
+      }
+
+      teams.push({ members: team, isTriple: false });
+      teamsLeftForGender--;
+    }
+
+    for (let t = 0; t < numTriples; t++) {
+      const { needM, needF } = chooseTripleComposition(remainingM, remainingF, teamsLeftForGender);
+      const team = takePlayers(needM, needF, guysPool, girlsPool);
+
+      if (haventTeamedTooMuch(partnerMap, team, MAX_PARTNER_TIMES)) {
+        bumpPartners(partnerMap, team);
+      }
+
+      teams.push({ members: team, isTriple: true });
+      teamsLeftForGender--;
+    }
+
+    // Now pair teams into matches, avoiding repeat opponents when possible
     const teamList = teams.slice();
     const made: QuadsMatchRow[] = [];
     let court = startCourt;
 
-    while(teamList.length>=2){
+    while (teamList.length >= 2) {
       const a = teamList.shift()!;
-      let idx=0, found=false;
-      for(let i=0;i<teamList.length;i++){
+      let chosenIdx = 0;
+      let found = false;
+
+      for (let i = 0; i < teamList.length; i++) {
         const b = teamList[i];
-        if(haventOpposedTeam(opponentMap,a.members,b.members)){
-          idx=i; found=true; break;
+        if (haventOpposedTooMuch(opponentMap, a.members, b.members, MAX_OPP_TIMES)) {
+          chosenIdx = i;
+          found = true;
+          break;
         }
       }
-      const b = teamList.splice(found?idx:0,1)[0];
 
-      // update opponent map
-      for(const A of a.members){
-        const SA=slug(A);
-        const set = opponentMap.get(SA) || new Set<string>();
-        for(const B of b.members) set.add(slug(B));
-        opponentMap.set(SA,set);
-      }
-      for(const A of b.members){
-        const SA=slug(A);
-        const set = opponentMap.get(SA) || new Set<string>();
-        for(const B of a.members) set.add(slug(B));
-        opponentMap.set(SA,set);
-      }
+      const b = teamList.splice(found ? chosenIdx : 0, 1)[0];
+
+      bumpOpponents(opponentMap, a.members, b.members);
 
       made.push({
-        id: `${roundIdx}-${court}-${Date.now()}-${Math.random().toString(36).slice(2,7)}`,
+        id: `${roundIdx}-${court}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
         round: roundIdx,
         court: court++,
         t1: a.members,
         t2: b.members,
         isTriple1: a.isTriple,
         isTriple2: b.isTriple,
-        scoreText: '',
+        scoreText: "",
       });
     }
 
     return made;
   }
 
-  function onGenerate(){
+  function onGenerate() {
     const n = clampN(roundsToGen, 1);
     const out: QuadsMatchRow[] = [];
     let history = matches.slice();
-    const currentMax = history.reduce((mx,m)=> Math.max(mx,m.round),0) || 0;
-    for(let i=1;i<=n;i++){
+    const currentMax = history.reduce((mx, m) => Math.max(mx, m.round), 0) || 0;
+
+    for (let i = 1; i <= n; i++) {
       const roundIdx = currentMax + i;
       const one = buildRound(roundIdx, history);
       out.push(...one);
       history = history.concat(one);
     }
-    setMatches(prev=> (Array.isArray(prev)? prev:[]).concat(out));
+
+    setMatches((prev) => (Array.isArray(prev) ? prev : []).concat(out));
   }
 
   return (
@@ -1619,9 +1871,9 @@ function QuadsRoundGenerator({
             <input
               type="checkbox"
               checked={strict}
-              onChange={(e)=>setStrict(e.target.checked)}
+              onChange={(e) => setStrict(e.target.checked)}
             />
-            Strict no-repeat (opponents)
+            Strict: limit repeat partners/opponents
           </label>
           <label className="flex items-center gap-1">
             Rounds
@@ -1629,7 +1881,7 @@ function QuadsRoundGenerator({
               type="number"
               min={1}
               value={roundsToGen}
-              onChange={(e)=>setRoundsToGen(clampN(+e.target.value||1,1))}
+              onChange={(e) => setRoundsToGen(clampN(+e.target.value || 1, 1))}
               className="w-16 border rounded px-2 py-1"
             />
           </label>
@@ -1639,7 +1891,7 @@ function QuadsRoundGenerator({
               type="number"
               min={1}
               value={startCourt}
-              onChange={(e)=>setStartCourt(clampN(+e.target.value||1,1))}
+              onChange={(e) => setStartCourt(clampN(+e.target.value || 1, 1))}
               className="w-16 border rounded px-2 py-1"
             />
           </label>
@@ -1652,8 +1904,9 @@ function QuadsRoundGenerator({
         </div>
       </div>
       <p className="text-[11px] text-slate-500 mt-2">
-        Quads engine prioritizes 2 guys + 2 girls per team. Leftover players form up to two Triples teams. Strict mode
-        avoids repeat opponents as much as possible.
+        Quads engine always uses all players. If total players is divisible by 4, it makes only quads. Otherwise it uses
+        a mix of quads + triples. It prioritizes 2 guys/2 girls, then 3+1, and only makes all-one-gender teams when
+        mathematically necessary. Strict mode tries to avoid repeating partners and opponents more than a couple of times.
       </p>
     </section>
   );
