@@ -892,79 +892,104 @@ function computeQuadsStandingsFull(
   return { guysRows, girlsRows, allRows };
 }
 
-function buildQuadsPlayoffTeams(players: QuadsPlayerRow[]): Team[] {
-  if (players.length < 4) return [];
-
-  // For now: require total players divisible by 4 (pure quads, no triples in playoffs)
-  if (players.length % 4 !== 0) {
-    alert('Total selected playoff players must be divisible by 4 (all quads, no triples).');
+function buildQuadsPlayoffTeams(players: QuadsPlayerRow[], seedRandom: boolean): Team[] {
+  // Need at least 8, and a multiple of 8 so we can work in batches of eight
+  if (players.length < 8 || players.length % 8 !== 0) {
+    alert(
+      'For quads playoffs, please choose a number of players that is a multiple of 8 (8, 16, 24, 32, ...).'
+    );
     return [];
   }
 
-  let males = shuffle(players.filter((p) => p.gender === 'M'));
-  let females = shuffle(players.filter((p) => p.gender === 'F'));
+  // Sort by W, then PD, then name (best → worst)
+  const sorted = players
+    .slice()
+    .sort(
+      (x, y) =>
+        y.W - x.W ||
+        y.PD - x.PD ||
+        x.name.localeCompare(y.name)
+    );
 
-  let remainingM = males.length;
-  let remainingF = females.length;
-  const totalPlayers = remainingM + remainingF;
-  const numTeams = totalPlayers / 4;
+  const batchSize = 8;
+
+  // Optionally randomize *within each batch of 8*, but keep batch boundaries
+  const batches: QuadsPlayerRow[][] = [];
+  for (let i = 0; i < sorted.length; i += batchSize) {
+    let batch = sorted.slice(i, i + batchSize);
+    if (seedRandom) {
+      batch = shuffle(batch);
+    }
+    batches.push(batch);
+  }
 
   const teamsPlayers: QuadsPlayerRow[][] = [];
 
-  for (let t = 0; t < numTeams; t++) {
-    const teamsLeft = numTeams - t;
-
-    // Try to give each team at least 1 girl when possible
-    let needF = 2;
-    if (remainingF < teamsLeft) {
-      // not enough girls to give 2 to every remaining team
-      needF = remainingF > 0 ? 1 : 0;
+  // Helper: pair two equal-length batches of size 4, 8, 12, ...
+  // Each team gets 2 from A and 2 from B, using top+bottom from each.
+  const pairBatches = (A: QuadsPlayerRow[], B: QuadsPlayerRow[]) => {
+    const len = Math.min(A.length, B.length);
+    if (len < 2) return;
+    // len is typically 8 here
+    const half = Math.floor(len / 2);
+    for (let i = 0; i < half; i++) {
+      const members = [A[i], A[len - 1 - i], B[i], B[len - 1 - i]];
+      teamsPlayers.push(members);
     }
-    if (remainingF === 0) needF = 0;
-    if (remainingF >= 4 && remainingM === 0) needF = 4;
+  };
 
-    let needM = 4 - needF;
+  // Process batches in groups of 4: [b0,b1,b2,b3], [b4,b5,b6,b7], ...
+  // Within each group of 4:
+  //   - pair b0 with b2  (top batch with 3rd batch)
+  //   - pair b1 with b3  (2nd batch with 4th batch)
+  for (let groupStart = 0; groupStart < batches.length; ) {
+    const remaining = batches.length - groupStart;
 
-    // Adjust if we don't have enough guys
-    if (remainingM < needM) {
-      needM = remainingM;
-      needF = 4 - needM;
+    if (remaining >= 4) {
+      const b0 = batches[groupStart];
+      const b1 = batches[groupStart + 1];
+      const b2 = batches[groupStart + 2];
+      const b3 = batches[groupStart + 3];
+
+      // 1st with 3rd, 2nd with 4th
+      pairBatches(b0, b2);
+      pairBatches(b1, b3);
+
+      groupStart += 4;
+    } else if (remaining === 3) {
+      // 3 batches: try to follow the spirit:
+      // - pair 1st with 3rd
+      // - split the middle batch into two halves and mix those
+      const b0 = batches[groupStart];
+      const b1 = batches[groupStart + 1];
+      const b2 = batches[groupStart + 2];
+
+      pairBatches(b0, b2);
+
+      const mid = Math.floor(b1.length / 2);
+      const A = b1.slice(0, mid);
+      const B = b1.slice(mid);
+      pairBatches(A, B);
+
+      groupStart += 3;
+    } else if (remaining === 2) {
+      // 2 batches: pair them directly
+      const b0 = batches[groupStart];
+      const b1 = batches[groupStart + 1];
+      pairBatches(b0, b1);
+      groupStart += 2;
+    } else {
+      // 1 batch of 8 by itself: split into top 4 & bottom 4 and mix
+      const b0 = batches[groupStart];
+      const mid = Math.floor(b0.length / 2);
+      const A = b0.slice(0, mid);
+      const B = b0.slice(mid);
+      pairBatches(A, B);
+      groupStart += 1;
     }
-
-    const team: QuadsPlayerRow[] = [];
-
-    // Take girls first
-    for (let i = 0; i < needF && females.length; i++) {
-      team.push(females.shift()!);
-      remainingF--;
-    }
-
-    // Then guys
-    for (let i = 0; i < needM && males.length; i++) {
-      team.push(males.shift()!);
-      remainingM--;
-    }
-
-    // If still short, top-up from whatever is left
-    while (team.length < 4 && (males.length || females.length)) {
-      if (females.length && remainingF > teamsLeft - 1) {
-        team.push(females.shift()!);
-        remainingF--;
-      } else if (males.length) {
-        team.push(males.shift()!);
-        remainingM--;
-      } else if (females.length) {
-        team.push(females.shift()!);
-        remainingF--;
-      } else {
-        break;
-      }
-    }
-
-    teamsPlayers.push(team);
   }
 
-  // Now convert to Team[] and seed by combined W, then PD
+  // Now convert the QuadsPlayerRow[][] into Team[]
   const scored = teamsPlayers.map((members, idx) => {
     const W = members.reduce((s, p) => s + (p.W || 0), 0);
     const PD = members.reduce((s, p) => s + (p.PD || 0), 0);
@@ -982,6 +1007,7 @@ function buildQuadsPlayoffTeams(players: QuadsPlayerRow[]): Team[] {
     };
   });
 
+  // Seed teams by combined W then PD
   scored.sort(
     (a, b) =>
       b.W - a.W ||
@@ -996,6 +1022,7 @@ function buildQuadsPlayoffTeams(players: QuadsPlayerRow[]): Team[] {
 
   return scored.map((s) => s.team);
 }
+
 
 /* ========================= Bracket core ========================= */
 
@@ -2211,36 +2238,40 @@ function QuadsPlayoffBuilder({
 
   type Mode = 'COMBINED' | 'SPLIT';
   const [mode, setMode] = useState<Mode>('COMBINED');
-  const [totalPlayers, setTotalPlayers] = useState<number>(16); // combined mode
-  const [perGender, setPerGender] = useState<number>(4);        // split mode
+
+  // COMBINED: total players from the combined leaderboard
+  const [totalPlayers, setTotalPlayers] = useState<number>(16);
+
+  // SPLIT: top K guys + top K girls
+  const [perGender, setPerGender] = useState<number>(4);
+
+  // Randomize within each batch of 8 before forming teams
   const [seedRandom, setSeedRandom] = useState<boolean>(true);
 
   const onBuild = () => {
     let pool: QuadsPlayerRow[] = [];
 
     if (mode === 'COMBINED') {
-      const n = clampN(totalPlayers, 4);
+      const n = clampN(totalPlayers, 8);
       const limited = Math.min(n, allRows.length);
       pool = allRows.slice(0, limited);
     } else {
-      const k = clampN(perGender, 1);
+      const k = clampN(perGender, 4);
       const guysSel = guysRows.slice(0, k).map((r) => ({ ...r, gender: 'M' as const }));
       const girlsSel = girlsRows.slice(0, k).map((r) => ({ ...r, gender: 'F' as const }));
       pool = [...guysSel, ...girlsSel];
     }
 
-    if (pool.length < 4) {
-      alert('Not enough players to build a quads bracket.');
+    if (pool.length < 8) {
+      alert('Not enough players to build a quads playoff bracket. You need at least 8.');
       return;
     }
 
-    if (seedRandom) {
-      pool = shuffle(pool);
-    }
+    // Build teams using batch-of-8 logic (top 8 with 3rd, 2nd with 4th, etc.)
+    const teams = buildQuadsPlayoffTeams(pool, seedRandom);
+    if (!teams.length) return; // helper already alerted if configuration is invalid
 
-    const teams = buildQuadsPlayoffTeams(pool);
-    if (!teams.length) return; // error already alerted inside helper
-
+    // One big quads bracket in UPPER division
     const bracket = buildBracket('UPPER', teams, 0);
     setBrackets(() => bracket);
   };
@@ -2251,8 +2282,9 @@ function QuadsPlayoffBuilder({
         Playoff Builder (Quads)
       </h2>
       <p className="text-[11px] text-slate-500 mb-3">
-        Uses quads pool-play W/L/PD to seed teams. Team seeding is based on the
-        combined record (wins, then point differential) of all four players.
+        Uses quads pool-play W/L/PD to seed one big bracket. Teams are formed from ranking batches of 8
+        (top 8 with 3rd batch of 8, 2nd batch with 4th batch of 8, and so on) so that each team has a mix
+        of higher and lower ranked players.
       </p>
 
       <div className="grid md:grid-cols-2 gap-4 text-[12px]">
@@ -2269,12 +2301,12 @@ function QuadsPlayoffBuilder({
                 Combined leaderboard – top{' '}
                 <input
                   type="number"
-                  min={4}
-                  step={4}
+                  min={8}
+                  step={8}
                   className="w-16 border rounded px-1 py-0.5 mx-1"
                   value={totalPlayers}
                   onChange={(e) =>
-                    setTotalPlayers(clampN(+e.target.value || 4, 4))
+                    setTotalPlayers(clampN(+e.target.value || 8, 8))
                   }
                 />
                 players (any gender)
@@ -2290,11 +2322,12 @@ function QuadsPlayoffBuilder({
                 Top{' '}
                 <input
                   type="number"
-                  min={1}
+                  min={4}
+                  step={4}
                   className="w-12 border rounded px-1 py-0.5 mx-1"
                   value={perGender}
                   onChange={(e) =>
-                    setPerGender(clampN(+e.target.value || 1, 1))
+                    setPerGender(clampN(+e.target.value || 4, 4))
                   }
                 />{' '}
                 guys + top {perGender} girls
@@ -2308,7 +2341,7 @@ function QuadsPlayoffBuilder({
               checked={seedRandom}
               onChange={(e) => setSeedRandom(e.target.checked)}
             />
-            Randomize within the selected pool before forming teams
+            Randomize within each batch of 8 before forming teams
           </label>
         </div>
 
@@ -2326,8 +2359,8 @@ function QuadsPlayoffBuilder({
             </div>
           </div>
           <p className="mt-2">
-            Tip: choose a total number of players that&apos;s a multiple of 4
-            (e.g., 16, 20, 24, 28, 32) so playoffs are all quads with no triples.
+            Tip: choose a total number of playoff players that&apos;s a <strong>multiple of 8</strong>{' '}
+            (8, 16, 24, 32, ...) so the batches-of-8 pairing (1st+3rd, 2nd+4th, etc.) works cleanly.
           </p>
         </div>
       </div>
@@ -2341,13 +2374,13 @@ function QuadsPlayoffBuilder({
         </button>
       </div>
       <p className="text-[11px] text-slate-500 mt-2">
-        Bracket uses your existing ESPN-style layout. Enter playoff scores
-        directly in the bracket grid. You can still decide in real life whether
-        early rounds are one set to 25 and semis/finals are match play (21/21/15).
+        Bracket uses the existing ESPN-style layout (1 big UPPER bracket). Enter playoff scores directly in the bracket
+        grid. You can still decide in real life whether early rounds are one set to 25 and semis/finals are match play.
       </p>
     </section>
   );
 }
+
 
 /* ========================= APP SHELL: Tabs + autosave ========================= */
 
