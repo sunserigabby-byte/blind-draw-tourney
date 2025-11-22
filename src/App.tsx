@@ -1601,7 +1601,7 @@ function QuadsRoundGenerator({
     }
   };
 
-  // ======= Gender composition helpers (NEW SMART LOGIC) =======
+  // ======= Gender composition helpers =======
 
   const chooseQuadComposition = (remainingM: number, remainingF: number, teamsLeft: number) => {
     const size = 4;
@@ -1609,39 +1609,25 @@ function QuadsRoundGenerator({
     // If we still have enough girls to give at least 1 girl
     // to every remaining team, then NEVER use a 0F team.
     if (remainingF >= teamsLeft) {
-      // Max girls we can use on THIS team while still leaving
-      // at least 1 girl for each of the other (teamsLeft - 1) teams.
       const maxFWeCanUse = Math.min(size, remainingF - (teamsLeft - 1));
-
-      // Prefer 2 girls if possible, otherwise 1,
-      // but never exceed the safe max.
       let targetF = 2;
       if (maxFWeCanUse < 2) targetF = Math.max(1, maxFWeCanUse);
-
       const needF = targetF;
       const needM = size - needF;
       return { needM, needF };
     }
 
-    // At this point, remainingF < teamsLeft:
-    // it's *impossible* to give every team a girl,
-    // so some teams will be all guys (or all girls) no matter what.
-    // We still try to keep mixes where we can.
+    // Not enough girls to keep every team mixed
 
-    // Ideal when we have enough of both: 2M2F
     if (remainingM >= 2 && remainingF >= 2) {
       return { needM: 2, needF: 2 };
     }
-
-    // If one gender is majority, lean 3+1
     if (remainingM > remainingF && remainingM >= 3 && remainingF >= 1) {
       return { needM: 3, needF: 1 };
     }
     if (remainingF > remainingM && remainingF >= 3 && remainingM >= 1) {
       return { needM: 1, needF: 3 };
     }
-
-    // If we're basically out of one gender, we have to go 4 of the other
     if (remainingF === 0 && remainingM >= 4) {
       return { needM: 4, needF: 0 };
     }
@@ -1649,11 +1635,9 @@ function QuadsRoundGenerator({
       return { needM: 0, needF: 4 };
     }
 
-    // Fallbacks
     if (remainingM >= 3 && remainingF >= 1) return { needM: 3, needF: 1 };
     if (remainingF >= 3 && remainingM >= 1) return { needM: 1, needF: 3 };
 
-    // Absolute last resort: just use what's available, majority first
     const useM = Math.min(size, remainingM);
     const useF = size - useM;
     return { needM: useM, needF: useF };
@@ -1662,30 +1646,20 @@ function QuadsRoundGenerator({
   const chooseTripleComposition = (remainingM: number, remainingF: number, teamsLeft: number) => {
     const size = 3;
 
-    // If we can still give ≥1 girl to every remaining team,
-    // don't make a 0F team yet.
     if (remainingF >= teamsLeft) {
       const maxFWeCanUse = Math.min(size, remainingF - (teamsLeft - 1));
-      // Prefer 2F if possible, else 1F, but stay within maxFWeCanUse
       let targetF = 2;
       if (maxFWeCanUse < 2) targetF = Math.max(1, maxFWeCanUse);
-
       const needF = targetF;
       const needM = size - needF;
       return { needM, needF };
     }
 
-    // Otherwise, we don't have enough girls to keep every team mixed.
-
-    // Best: 2+1 mix
     if (remainingM >= 2 && remainingF >= 1) return { needM: 2, needF: 1 };
     if (remainingF >= 2 && remainingM >= 1) return { needM: 1, needF: 2 };
-
-    // Then 3 of whichever is left
     if (remainingM >= 3) return { needM: 3, needF: 0 };
     if (remainingF >= 3) return { needM: 0, needF: 3 };
 
-    // Fallback
     const useM = Math.min(size, remainingM);
     const useF = size - useM;
     return { needM: useM, needF: useF };
@@ -1702,27 +1676,20 @@ function QuadsRoundGenerator({
 
     const totalPlayers = remainingM + remainingF;
 
-    // Decide how many quads vs triples so that everyone plays.
     let numQuads: number;
     let numTriples: number;
 
     if (totalPlayers < 3) {
-      // Not enough to form a match
       return [] as QuadsMatchRow[];
     }
 
     if (totalPlayers % 4 === 0) {
-      // Perfect quads
       numQuads = totalPlayers / 4;
       numTriples = 0;
     } else {
-      // General case: greedily make as many quads as we can,
-      // then cover leftovers with triples.
       numQuads = Math.floor(totalPlayers / 4);
       let leftover = totalPlayers - numQuads * 4;
 
-      // Try to adjust so leftover is 0 or multiple of 3 if possible
-      // (we don't want leftover 1 or 2)
       while (leftover === 1 || leftover === 2) {
         if (numQuads === 0) break;
         numQuads -= 1;
@@ -1742,7 +1709,6 @@ function QuadsRoundGenerator({
 
     let teamsLeftForGender = totalTeams;
 
-    // Helper to grab players while respecting partner history as much as possible
     const takePlayers = (
       needM: number,
       needF: number,
@@ -1765,7 +1731,7 @@ function QuadsRoundGenerator({
         remainingM--;
       }
 
-      // If we fell short due to running out of one gender, top up with whatever is left
+      // Top up with whatever is left if needed
       while (team.length < needM + needF) {
         if (guysArr.length) {
           team.push(guysArr.shift()!);
@@ -1781,13 +1747,11 @@ function QuadsRoundGenerator({
       return team;
     };
 
-    // Build all teams (quads then triples)
+    // Build quads
     for (let q = 0; q < numQuads; q++) {
       const { needM, needF } = chooseQuadComposition(remainingM, remainingF, teamsLeftForGender);
       const team = takePlayers(needM, needF, guysPool, girlsPool);
 
-      // If strict mode is on and teammates already together >=2 times,
-      // we don't have a trivial fix here, but we at least tried with counts.
       if (haventTeamedTooMuch(partnerMap, team, MAX_PARTNER_TIMES)) {
         bumpPartners(partnerMap, team);
       }
@@ -1796,6 +1760,7 @@ function QuadsRoundGenerator({
       teamsLeftForGender--;
     }
 
+    // Build triples
     for (let t = 0; t < numTriples; t++) {
       const { needM, needF } = chooseTripleComposition(remainingM, remainingF, teamsLeftForGender);
       const team = takePlayers(needM, needF, guysPool, girlsPool);
@@ -1808,8 +1773,9 @@ function QuadsRoundGenerator({
       teamsLeftForGender--;
     }
 
-    // Now pair teams into matches, avoiding repeat opponents when possible
-    const teamList = teams.slice();
+    // ===== PAIRING: shuffle teams before pairing (this is the key change) =====
+    const teamList = shuffle(teams);
+
     const made: QuadsMatchRow[] = [];
     let court = startCourt;
 
@@ -1906,7 +1872,8 @@ function QuadsRoundGenerator({
       <p className="text-[11px] text-slate-500 mt-2">
         Quads engine always uses all players. If total players is divisible by 4, it makes only quads. Otherwise it uses
         a mix of quads + triples. It prioritizes 2 guys/2 girls, then 3+1, and only makes all-one-gender teams when
-        mathematically necessary. Strict mode tries to avoid repeating partners and opponents more than a couple of times.
+        mathematically necessary. Strict mode limits repeat partners/opponents as much as possible, and teams are
+        shuffled before pairing so 3+1 and 2+2 teams can face each other freely.
       </p>
     </section>
   );
