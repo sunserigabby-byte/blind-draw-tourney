@@ -1,3 +1,5 @@
+'use client';
+
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 
 /**
@@ -31,7 +33,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
  *    - Auto winner tint by score
  * ✅ Quads Leaderboard:
  *    - All players ranked by W/L/PD (using quads matches)
- * ✅ Quads Playoffs & punishments: placeholder card (coming later)
+ * ✅ Quads Playoffs: builds quads-only bracket from pool standings
  */
 
 /* ========================= Types & helpers ========================= */
@@ -798,6 +800,205 @@ function computeStandings(matches:MatchRow[], guysText:string, girlsText:string)
   return { guysRows: sortRows(Array.from(g.values())), girlsRows: sortRows(Array.from(h.values())) };
 }
 
+/* ========================= QUADS: standings helpers ========================= */
+
+type QuadsPlayerRow = {
+  name: string;
+  gender: 'M' | 'F';
+  W: number;
+  L: number;
+  PD: number;
+};
+
+function computeQuadsStandingsFull(
+  matches: QuadsMatchRow[],
+  guysText: string,
+  girlsText: string
+) {
+  const guysList = Array.from(
+    new Set((guysText || '').split(/\r?\n/).map((s) => s.trim()).filter(Boolean))
+  );
+  const girlsList = Array.from(
+    new Set((girlsText || '').split(/\r?\n/).map((s) => s.trim()).filter(Boolean))
+  );
+
+  const guysSet = new Set(guysList.map(slug));
+  const girlsSet = new Set(girlsList.map(slug));
+
+  type Bucket = { name: string; W: number; L: number; PD: number };
+  const g = new Map<string, Bucket>();
+  const h = new Map<string, Bucket>();
+
+  const ensure = (map: Map<string, Bucket>, n: string) => {
+    if (!map.has(n)) map.set(n, { name: n, W: 0, L: 0, PD: 0 });
+    return map.get(n)!;
+  };
+
+  // Ensure everyone on the roster shows up
+  for (const n of guysList) ensure(g, n);
+  for (const n of girlsList) ensure(h, n);
+
+  // Tally from valid quads scores
+  for (const m of matches) {
+    const s = parseScore(m.scoreText);
+    if (!s) continue;
+    const [a, b] = s;
+    if (!isValidQuadsScore(a, b)) continue;
+    const diff = Math.abs(a - b);
+    const t1Won = a > b;
+
+    const t1 = m.t1;
+    const t2 = m.t2;
+
+    const apply = (name: string, won: boolean) => {
+      const isGuy = guysSet.has(slug(name));
+      const isGirl = girlsSet.has(slug(name));
+      const map = isGuy ? g : isGirl ? h : g;
+      const row = ensure(map, name);
+      if (won) {
+        row.W++;
+        row.PD += diff;
+      } else {
+        row.L++;
+        row.PD -= diff;
+      }
+    };
+
+    for (const p of t1) apply(p, t1Won);
+    for (const p of t2) apply(p, !t1Won);
+  }
+
+  const sortRows = (arr: Bucket[]) =>
+    arr.sort(
+      (x, y) =>
+        y.W - x.W ||
+        y.PD - x.PD ||
+        x.name.localeCompare(y.name)
+    );
+
+  const guysRows = sortRows(Array.from(g.values()));
+  const girlsRows = sortRows(Array.from(h.values()));
+
+  const allRows: QuadsPlayerRow[] = [
+    ...guysRows.map((r) => ({ ...r, gender: 'M' as const })),
+    ...girlsRows.map((r) => ({ ...r, gender: 'F' as const })),
+  ].sort(
+    (x, y) =>
+      y.W - x.W ||
+      y.PD - x.PD ||
+      x.name.localeCompare(y.name)
+  );
+
+  return { guysRows, girlsRows, allRows };
+}
+
+function buildQuadsPlayoffTeams(players: QuadsPlayerRow[]): Team[] {
+  if (players.length < 4) return [];
+
+  // For now: require total players divisible by 4 (pure quads, no triples in playoffs)
+  if (players.length % 4 !== 0) {
+    alert('Total selected playoff players must be divisible by 4 (all quads, no triples).');
+    return [];
+  }
+
+  let males = shuffle(players.filter((p) => p.gender === 'M'));
+  let females = shuffle(players.filter((p) => p.gender === 'F'));
+
+  let remainingM = males.length;
+  let remainingF = females.length;
+  const totalPlayers = remainingM + remainingF;
+  const numTeams = totalPlayers / 4;
+
+  const teamsPlayers: QuadsPlayerRow[][] = [];
+
+  for (let t = 0; t < numTeams; t++) {
+    const teamsLeft = numTeams - t;
+
+    // Try to give each team at least 1 girl when possible
+    let needF = 2;
+    if (remainingF < teamsLeft) {
+      // not enough girls to give 2 to every remaining team
+      needF = remainingF > 0 ? 1 : 0;
+    }
+    if (remainingF === 0) needF = 0;
+    if (remainingF >= 4 && remainingM === 0) needF = 4;
+
+    let needM = 4 - needF;
+
+    // Adjust if we don't have enough guys
+    if (remainingM < needM) {
+      needM = remainingM;
+      needF = 4 - needM;
+    }
+
+    const team: QuadsPlayerRow[] = [];
+
+    // Take girls first
+    for (let i = 0; i < needF && females.length; i++) {
+      team.push(females.shift()!);
+      remainingF--;
+    }
+
+    // Then guys
+    for (let i = 0; i < needM && males.length; i++) {
+      team.push(males.shift()!);
+      remainingM--;
+    }
+
+    // If still short, top-up from whatever is left
+    while (team.length < 4 && (males.length || females.length)) {
+      if (females.length && remainingF > teamsLeft - 1) {
+        team.push(females.shift()!);
+        remainingF--;
+      } else if (males.length) {
+        team.push(males.shift()!);
+        remainingM--;
+      } else if (females.length) {
+        team.push(females.shift()!);
+        remainingF--;
+      } else {
+        break;
+      }
+    }
+
+    teamsPlayers.push(team);
+  }
+
+  // Now convert to Team[] and seed by combined W, then PD
+  const scored = teamsPlayers.map((members, idx) => {
+    const W = members.reduce((s, p) => s + (p.W || 0), 0);
+    const PD = members.reduce((s, p) => s + (p.PD || 0), 0);
+    const name = members.map((m) => m.name).join(' / ');
+    return {
+      team: {
+        id: `Q-temp-${idx}`,
+        name,
+        members: members.map((m) => m.name),
+        seed: 0,
+        division: 'UPPER' as PlayDiv,
+      } as Team,
+      W,
+      PD,
+    };
+  });
+
+  scored.sort(
+    (a, b) =>
+      b.W - a.W ||
+      b.PD - a.PD ||
+      a.team.name.localeCompare(b.team.name)
+  );
+
+  scored.forEach((entry, i) => {
+    entry.team.seed = i + 1;
+    entry.team.id = `Q-${entry.team.seed}-${slug(entry.team.name)}`;
+  });
+
+  return scored.map((s) => s.team);
+}
+
+/* ========================= Bracket core ========================= */
+
 function nextPow2(n:number){ let p=1; while(p<n) p<<=1; return p; }
 
 function buildBracket(division:PlayDiv, teams:Team[], topSeedByeCount:number = 0): BracketMatch[] {
@@ -921,6 +1122,7 @@ function seedBadge(seed?:number){
 function BracketCard({m}:{m:BracketMatch}){
   const parsed = (()=>{
     if(!m.score) return null;
+    if (m.score === 'BYE') return null;
     const t = String(m.score).trim();
     const sep = t.includes('–') ? '–' : '-';
     const p=t.split(sep).map(s=>s.trim());
@@ -1036,7 +1238,7 @@ function BracketView({
       <h2 className="text-[20px] font-bold text-sky-900 mb-2 tracking-tight">Playoff Brackets</h2>
       <p className="text-[11px] text-slate-500 mb-4">
         ESPN-style seeding and BYEs. Quarterfinals → Semifinals → Final. Winners auto-advance. The{' '}
-        <strong>RR</strong> bracket combines UPPER+LOWER losers from R1/R2.
+        <strong>RR</strong> bracket can combine UPPER+LOWER losers from R1/R2 (doubles flow), or you can just use UPPER for quads.
       </p>
       {divisions.map(div=>{
         const cfg = buildVisualColumns(brackets, div);
@@ -1128,7 +1330,7 @@ function PlayoffBuilder({
         const girl = girlsShuffled[j - base];
         const name = `${guy?.name || '—'} & ${girl?.name || '—'}`;
         teams.push({
-          id:`${div}-tmp-${j+1}-{slug(name)}`,
+          id:`${div}-tmp-${j+1}-${slug(name)}`,
           name,
           members:[guy?.name||'', girl?.name||''],
           seed:j+1,
@@ -1775,7 +1977,7 @@ function QuadsRoundGenerator({
       teamsLeftForGender--;
     }
 
-    // ===== PAIRING: shuffle teams before pairing (this is the key change) =====
+    // ===== PAIRING: shuffle teams before pairing =====
     const teamList = shuffle(teams);
 
     const made: QuadsMatchRow[] = [];
@@ -1880,7 +2082,6 @@ function QuadsRoundGenerator({
     </section>
   );
 }
-
 
 /* ========================= QUADS: Leaderboard ========================= */
 
@@ -1990,6 +2191,164 @@ function QuadsLeaderboard({
   );
 }
 
+/* ========================= QUADS: Playoff Builder ========================= */
+
+function QuadsPlayoffBuilder({
+  matches,
+  guysText,
+  girlsText,
+  setBrackets,
+}: {
+  matches: QuadsMatchRow[];
+  guysText: string;
+  girlsText: string;
+  setBrackets: (f: (prev: BracketMatch[]) => BracketMatch[] | BracketMatch[]) => void;
+}) {
+  const { guysRows, girlsRows, allRows } = useMemo(
+    () => computeQuadsStandingsFull(matches, guysText, girlsText),
+    [matches, guysText, girlsText]
+  );
+
+  type Mode = 'COMBINED' | 'SPLIT';
+  const [mode, setMode] = useState<Mode>('COMBINED');
+  const [totalPlayers, setTotalPlayers] = useState<number>(16); // combined mode
+  const [perGender, setPerGender] = useState<number>(4);        // split mode
+  const [seedRandom, setSeedRandom] = useState<boolean>(true);
+
+  const onBuild = () => {
+    let pool: QuadsPlayerRow[] = [];
+
+    if (mode === 'COMBINED') {
+      const n = clampN(totalPlayers, 4);
+      const limited = Math.min(n, allRows.length);
+      pool = allRows.slice(0, limited);
+    } else {
+      const k = clampN(perGender, 1);
+      const guysSel = guysRows.slice(0, k).map((r) => ({ ...r, gender: 'M' as const }));
+      const girlsSel = girlsRows.slice(0, k).map((r) => ({ ...r, gender: 'F' as const }));
+      pool = [...guysSel, ...girlsSel];
+    }
+
+    if (pool.length < 4) {
+      alert('Not enough players to build a quads bracket.');
+      return;
+    }
+
+    if (seedRandom) {
+      pool = shuffle(pool);
+    }
+
+    const teams = buildQuadsPlayoffTeams(pool);
+    if (!teams.length) return; // error already alerted inside helper
+
+    const bracket = buildBracket('UPPER', teams, 0);
+    setBrackets(() => bracket);
+  };
+
+  return (
+    <section className="bg-white/95 backdrop-blur rounded-xl shadow ring-1 ring-slate-200 p-4">
+      <h2 className="text-[16px] font-semibold text-sky-800 mb-2">
+        Playoff Builder (Quads)
+      </h2>
+      <p className="text-[11px] text-slate-500 mb-3">
+        Uses quads pool-play W/L/PD to seed teams. Team seeding is based on the
+        combined record (wins, then point differential) of all four players.
+      </p>
+
+      <div className="grid md:grid-cols-2 gap-4 text-[12px]">
+        <div className="space-y-2">
+          <div className="flex flex-col gap-1">
+            <span className="font-medium text-slate-700">Selection mode</span>
+            <label className="flex items-center gap-2">
+              <input
+                type="radio"
+                checked={mode === 'COMBINED'}
+                onChange={() => setMode('COMBINED')}
+              />
+              <span>
+                Combined leaderboard – top{' '}
+                <input
+                  type="number"
+                  min={4}
+                  step={4}
+                  className="w-16 border rounded px-1 py-0.5 mx-1"
+                  value={totalPlayers}
+                  onChange={(e) =>
+                    setTotalPlayers(clampN(+e.target.value || 4, 4))
+                  }
+                />
+                players (any gender)
+              </span>
+            </label>
+            <label className="flex items-center gap-2">
+              <input
+                type="radio"
+                checked={mode === 'SPLIT'}
+                onChange={() => setMode('SPLIT')}
+              />
+              <span>
+                Top{' '}
+                <input
+                  type="number"
+                  min={1}
+                  className="w-12 border rounded px-1 py-0.5 mx-1"
+                  value={perGender}
+                  onChange={(e) =>
+                    setPerGender(clampN(+e.target.value || 1, 1))
+                  }
+                />{' '}
+                guys + top {perGender} girls
+              </span>
+            </label>
+          </div>
+
+          <label className="flex items-center gap-2">
+            <input
+              type="checkbox"
+              checked={seedRandom}
+              onChange={(e) => setSeedRandom(e.target.checked)}
+            />
+            Randomize within the selected pool before forming teams
+          </label>
+        </div>
+
+        <div className="space-y-1 text-[11px] text-slate-600">
+          <div>
+            <span className="font-semibold">Quads standings snapshot:</span>
+            <div className="mt-1">
+              Guys on board: <span className="font-medium">{guysRows.length}</span>
+            </div>
+            <div>
+              Girls on board: <span className="font-medium">{girlsRows.length}</span>
+            </div>
+            <div>
+              Combined players: <span className="font-medium">{allRows.length}</span>
+            </div>
+          </div>
+          <p className="mt-2">
+            Tip: choose a total number of players that&apos;s a multiple of 4
+            (e.g., 16, 20, 24, 28, 32) so playoffs are all quads with no triples.
+          </p>
+        </div>
+      </div>
+
+      <div className="mt-3 flex items-center gap-2">
+        <button
+          className="px-3 py-1.5 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 shadow-sm text-[13px]"
+          onClick={onBuild}
+        >
+          Build Quads Playoff Bracket
+        </button>
+      </div>
+      <p className="text-[11px] text-slate-500 mt-2">
+        Bracket uses your existing ESPN-style layout. Enter playoff scores
+        directly in the bracket grid. You can still decide in real life whether
+        early rounds are one set to 25 and semis/finals are match play (21/21/15).
+      </p>
+    </section>
+  );
+}
+
 /* ========================= APP SHELL: Tabs + autosave ========================= */
 
 type TabKey = 'DOUBLES' | 'QUADS';
@@ -2007,7 +2366,7 @@ export default function BlindDrawTourneyApp(){
   const [qGuysText, setQGuysText] = useState<string>("");
   const [qGirlsText, setQGirlsText] = useState<string>("");
   const [qMatches, setQMatches] = useState<QuadsMatchRow[]>([]);
-  const [qBrackets, setQBrackets] = useState<BracketMatch[]>([]); // reserved for future quads playoffs
+  const [qBrackets, setQBrackets] = useState<BracketMatch[]>([]);
 
   // Autosave – support old structure (doubles only) + new quads fields
   useEffect(()=>{
@@ -2169,26 +2528,26 @@ export default function BlindDrawTourneyApp(){
               </div>
             </section>
 
-            {/* Quads playoffs placeholder for now */}
-            <section className="bg-white/95 backdrop-blur rounded-xl shadow ring-1 ring-slate-200 p-4">
-              <h2 className="text-[16px] font-semibold text-sky-800 mb-1">Playoffs & Punishments (Quads)</h2>
-              <p className="text-[12px] text-slate-600 mb-1">
-                Coming next: single-elim quads brackets, loser punishment randomizer, and manual drag-and-drop team
-                builder based on quads standings.
-              </p>
-              <p className="text-[11px] text-slate-500">
-                For now, you can still use the quads leaderboard to seed teams manually.
-              </p>
-            </section>
+            {/* Quads playoffs */}
+            <QuadsPlayoffBuilder
+              matches={qMatches}
+              guysText={qGuysText}
+              girlsText={qGirlsText}
+              setBrackets={setQBrackets}
+            />
+            <BracketView brackets={qBrackets} setBrackets={setQBrackets} />
           </>
         )}
 
-        {/* Data & backup */}
+        {/* Data & backup – applies to both tabs */}
         <section className="bg-white/80 rounded-lg p-3 text-[11px] text-slate-600">
           <div className="flex items-center gap-2 flex-wrap">
             <button
               className="px-2 py-1 border rounded text-[11px]"
-              onClick={()=>{ localStorage.removeItem('sunnysports.autosave'); location.reload(); }}
+              onClick={()=>{
+                localStorage.removeItem('sunnysports.autosave');
+                location.reload();
+              }}
             >
               Reset App (clear autosave)
             </button>
@@ -2199,3 +2558,4 @@ export default function BlindDrawTourneyApp(){
     </main>
   );
 }
+
