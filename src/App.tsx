@@ -1719,7 +1719,7 @@ function QuadsRoundGenerator({
     [girlsText]
   );
 
-  // ======= History maps for partners & opponents (with counts) =======
+  // ======= History maps (partner & opponent counts) =======
 
   type CountMap = Map<string, Map<string, number>>;
 
@@ -1769,31 +1769,14 @@ function QuadsRoundGenerator({
     return mp;
   };
 
-  const haventTeamedTooMuch = (mp: CountMap, team: string[], maxTimes: number) => {
-    if (!strict) return true;
-    for (let i = 0; i < team.length; i++) {
-      for (let j = i + 1; j < team.length; j++) {
-        const A = slug(team[i]);
-        const B = slug(team[j]);
-        const row = mp.get(A);
-        const count = row?.get(B) || 0;
-        if (count >= maxTimes) return false;
-      }
+  const cloneCountMap = (src: CountMap): CountMap => {
+    const out: CountMap = new Map();
+    for (const [k, row] of src) {
+      const newRow = new Map<string, number>();
+      for (const [kk, v] of row) newRow.set(kk, v);
+      out.set(k, newRow);
     }
-    return true;
-  };
-
-  const haventOpposedTooMuch = (mp: CountMap, teamA: string[], teamB: string[], maxTimes: number) => {
-    if (!strict) return true;
-    for (const a of teamA) {
-      const row = mp.get(slug(a));
-      if (!row) continue;
-      for (const b of teamB) {
-        const count = row.get(slug(b)) || 0;
-        if (count >= maxTimes) return false;
-      }
-    }
-    return true;
+    return out;
   };
 
   const bumpPartners = (mp: CountMap, team: string[]) => {
@@ -1831,6 +1814,371 @@ function QuadsRoundGenerator({
       }
     }
   };
+
+  // ======= Gender composition helpers =======
+
+  const chooseQuadComposition = (remainingM: number, remainingF: number, teamsLeft: number) => {
+    const size = 4;
+
+    // Prefer at least 1 girl per team when possible
+    if (remainingF >= teamsLeft) {
+      const maxFWeCanUse = Math.min(size, remainingF - (teamsLeft - 1));
+      let targetF = 2;
+      if (maxFWeCanUse < 2) targetF = Math.max(1, maxFWeCanUse);
+      const needF = targetF;
+      const needM = size - needF;
+      return { needM, needF };
+    }
+
+    if (remainingM >= 2 && remainingF >= 2) {
+      return { needM: 2, needF: 2 };
+    }
+    if (remainingM > remainingF && remainingM >= 3 && remainingF >= 1) {
+      return { needM: 3, needF: 1 };
+    }
+    if (remainingF > remainingM && remainingF >= 3 && remainingM >= 1) {
+      return { needM: 1, needF: 3 };
+    }
+    if (remainingF === 0 && remainingM >= 4) {
+      return { needM: 4, needF: 0 };
+    }
+    if (remainingM === 0 && remainingF >= 4) {
+      return { needM: 0, needF: 4 };
+    }
+
+    if (remainingM >= 3 && remainingF >= 1) return { needM: 3, needF: 1 };
+    if (remainingF >= 3 && remainingM >= 1) return { needM: 1, needF: 3 };
+
+    const useM = Math.min(size, remainingM);
+    const useF = size - useM;
+    return { needM: useM, needF: useF };
+  };
+
+  const chooseTripleComposition = (remainingM: number, remainingF: number, teamsLeft: number) => {
+    const size = 3;
+
+    if (remainingF >= teamsLeft) {
+      const maxFWeCanUse = Math.min(size, remainingF - (teamsLeft - 1));
+      let targetF = 2;
+      if (maxFWeCanUse < 2) targetF = Math.max(1, maxFWeCanUse);
+      const needF = targetF;
+      const needM = size - needF;
+      return { needM, needF };
+    }
+
+    if (remainingM >= 2 && remainingF >= 1) return { needM: 2, needF: 1 };
+    if (remainingF >= 2 && remainingM >= 1) return { needM: 1, needF: 2 };
+    if (remainingM >= 3) return { needM: 3, needF: 0 };
+    if (remainingF >= 3) return { needM: 0, needF: 3 };
+
+    const useM = Math.min(size, remainingM);
+    const useF = size - useM;
+    return { needM: useM, needF: useF };
+  };
+
+  const takePlayers = (
+    needM: number,
+    needF: number,
+    guysArr: string[],
+    girlsArr: string[],
+    remainingMRef: { v: number },
+    remainingFRef: { v: number }
+  ): string[] => {
+    const team: string[] = [];
+
+    // Take girls first
+    for (let i = 0; i < needF; i++) {
+      if (!girlsArr.length) break;
+      team.push(girlsArr.shift()!);
+      remainingFRef.v--;
+    }
+
+    // Then guys
+    for (let i = 0; i < needM; i++) {
+      if (!guysArr.length) break;
+      team.push(guysArr.shift()!);
+      remainingMRef.v--;
+    }
+
+    // Top up with whatever is left if still short
+    while (team.length < needM + needF && (guysArr.length || girlsArr.length)) {
+      if (guysArr.length) {
+        team.push(guysArr.shift()!);
+        remainingMRef.v--;
+      } else if (girlsArr.length) {
+        team.push(girlsArr.shift()!);
+        remainingFRef.v--;
+      } else {
+        break;
+      }
+    }
+
+    return team;
+  };
+
+  // ======= Scoring helper: how many partner/opponent violations would this round add? =======
+
+  function scoreRound(
+    historyPartner: CountMap,
+    historyOpp: CountMap,
+    newMatches: QuadsMatchRow[],
+    maxPartner: number,
+    maxOpp: number
+  ) {
+    const partnerMap = cloneCountMap(historyPartner);
+    const oppMap = cloneCountMap(historyOpp);
+    let partnerViolations = 0;
+    let opponentViolations = 0;
+
+    for (const m of newMatches) {
+      const teams = [m.t1, m.t2];
+
+      // partners
+      for (const team of teams) {
+        for (let i = 0; i < team.length; i++) {
+          for (let j = i + 1; j < team.length; j++) {
+            const A = slug(team[i]);
+            const B = slug(team[j]);
+            const rowA = partnerMap.get(A);
+            const prev = rowA?.get(B) || 0;
+            if (prev >= maxPartner) partnerViolations++;
+          }
+        }
+        bumpPartners(partnerMap, team);
+      }
+
+      // opponents
+      const t1 = m.t1;
+      const t2 = m.t2;
+      for (const a of t1) {
+        const A = slug(a);
+        const rowA = oppMap.get(A);
+        for (const b of t2) {
+          const B = slug(b);
+          const prev = rowA?.get(B) || 0;
+          if (prev >= maxOpp) opponentViolations++;
+        }
+      }
+      bumpOpponents(oppMap, t1, t2);
+    }
+
+    // Heavier weight on partner repeats (people really notice same teammates)
+    const totalScore = partnerViolations * 100 + opponentViolations;
+    return { partnerViolations, opponentViolations, totalScore };
+  }
+
+  // ======= Build a single round, with multi-attempt search in strict mode =======
+
+  function buildRound(roundIdx: number, history: QuadsMatchRow[]) {
+    const totalPlayers = guys.length + girls.length;
+    if (totalPlayers < 3) return [] as QuadsMatchRow[];
+
+    // How many quads/triples do we want?
+    let numQuads: number;
+    let numTriples: number;
+
+    if (totalPlayers % 4 === 0) {
+      numQuads = totalPlayers / 4;
+      numTriples = 0;
+    } else {
+      numQuads = Math.floor(totalPlayers / 4);
+      let leftover = totalPlayers - numQuads * 4;
+
+      // Avoid 1 or 2 stranded players by converting a quad to triple(s)
+      while (leftover === 1 || leftover === 2) {
+        if (numQuads === 0) break;
+        numQuads -= 1;
+        leftover = totalPlayers - numQuads * 4;
+      }
+
+      numTriples = leftover > 0 ? leftover / 3 : 0;
+    }
+
+    const totalTeams = numQuads + numTriples;
+    if (totalTeams < 2) return [] as QuadsMatchRow[];
+
+    const historyPartner = buildPartnerMap(history);
+    const historyOpp = buildOpponentMap(history);
+
+    // Strict thresholds
+    const MAX_PARTNER_TIMES = strict ? 1 : Number.POSITIVE_INFINITY; // teammate max (strict = 1)
+    const MAX_OPP_TIMES = strict ? 2 : Number.POSITIVE_INFINITY;     // opponent max (strict = 2)
+
+    const ATTEMPTS = strict ? 24 : 1;
+    let best: { matches: QuadsMatchRow[]; score: number } | null = null;
+
+    for (let attempt = 0; attempt < ATTEMPTS; attempt++) {
+      // Fresh pools each attempt
+      const guysPool = shuffle(guys);
+      const girlsPool = shuffle(girls);
+
+      let gPool = guysPool.slice();
+      let fPool = girlsPool.slice();
+      const remainingMRef = { v: gPool.length };
+      const remainingFRef = { v: fPool.length };
+
+      const teams: { members: string[]; isTriple: boolean }[] = [];
+      let teamsLeftForGender = totalTeams;
+
+      // Build quads
+      for (let q = 0; q < numQuads; q++) {
+        const { needM, needF } = chooseQuadComposition(
+          remainingMRef.v,
+          remainingFRef.v,
+          teamsLeftForGender
+        );
+        const team = takePlayers(needM, needF, gPool, fPool, remainingMRef, remainingFRef);
+        teams.push({ members: team, isTriple: false });
+        teamsLeftForGender--;
+      }
+
+      // Build triples
+      for (let t = 0; t < numTriples; t++) {
+        const { needM, needF } = chooseTripleComposition(
+          remainingMRef.v,
+          remainingFRef.v,
+          teamsLeftForGender
+        );
+        const team = takePlayers(needM, needF, gPool, fPool, remainingMRef, remainingFRef);
+        teams.push({ members: team, isTriple: true });
+        teamsLeftForGender--;
+      }
+
+      // If we somehow didn't form enough teams, skip this attempt
+      if (teams.length < 2) continue;
+
+      // Pair teams into matches; prefer opponents with fewer prior meetings
+      const localOpp = cloneCountMap(historyOpp);
+      const teamList = shuffle(teams);
+      const attemptMatches: QuadsMatchRow[] = [];
+      let court = startCourt;
+
+      while (teamList.length >= 2) {
+        const a = teamList.shift()!;
+
+        let bestIdx = 0;
+        let bestOppScore = Number.POSITIVE_INFINITY;
+
+        for (let i = 0; i < teamList.length; i++) {
+          const b = teamList[i];
+          let violationCount = 0;
+
+          for (const pa of a.members) {
+            const row = localOpp.get(slug(pa));
+            for (const pb of b.members) {
+              const prev = row?.get(slug(pb)) || 0;
+              if (prev >= MAX_OPP_TIMES) violationCount++;
+            }
+          }
+
+          if (violationCount < bestOppScore) {
+            bestOppScore = violationCount;
+            bestIdx = i;
+            if (violationCount === 0) break; // perfect opponent found
+          }
+        }
+
+        const b = teamList.splice(bestIdx, 1)[0];
+        bumpOpponents(localOpp, a.members, b.members);
+
+        attemptMatches.push({
+          id: `${roundIdx}-${court}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+          round: roundIdx,
+          court: court++,
+          t1: a.members,
+          t2: b.members,
+          isTriple1: a.isTriple,
+          isTriple2: b.isTriple,
+          scoreText: "",
+        });
+      }
+
+      // Score this attempt for partner/opponent repeats
+      const { totalScore } = scoreRound(
+        historyPartner,
+        historyOpp,
+        attemptMatches,
+        MAX_PARTNER_TIMES,
+        MAX_OPP_TIMES
+      );
+
+      if (!best || totalScore < best.score) {
+        best = { matches: attemptMatches, score: totalScore };
+        // If we found an attempt with zero repeats, we can stop early
+        if (totalScore === 0 && strict) break;
+      }
+    }
+
+    return best ? best.matches : ([] as QuadsMatchRow[]);
+  }
+
+  function onGenerate() {
+    const n = clampN(roundsToGen, 1);
+    const out: QuadsMatchRow[] = [];
+    let history = matches.slice();
+    const currentMax = history.reduce((mx, m) => Math.max(mx, m.round), 0) || 0;
+
+    for (let i = 1; i <= n; i++) {
+      const roundIdx = currentMax + i;
+      const one = buildRound(roundIdx, history);
+      out.push(...one);
+      history = history.concat(one);
+    }
+
+    setMatches((prev) => (Array.isArray(prev) ? prev : []).concat(out));
+  }
+
+  return (
+    <section className="bg-white/90 backdrop-blur rounded-xl shadow ring-1 ring-slate-200 p-4">
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <h3 className="text-[16px] font-semibold text-sky-800">Round Generator (Quads)</h3>
+        <div className="flex items-center gap-3 text-[12px] flex-wrap">
+          <label className="flex items-center gap-1">
+            <input
+              type="checkbox"
+              checked={strict}
+              onChange={(e) => setStrict(e.target.checked)}
+            />
+            Strict: limit repeat partners/opponents
+          </label>
+          <label className="flex items-center gap-1">
+            Rounds
+            <input
+              type="number"
+              min={1}
+              value={roundsToGen}
+              onChange={(e) => setRoundsToGen(clampN(+e.target.value || 1, 1))}
+              className="w-16 border rounded px-2 py-1"
+            />
+          </label>
+          <label className="flex items-center gap-1">
+            Start court
+            <input
+              type="number"
+              min={1}
+              value={startCourt}
+              onChange={(e) => setStartCourt(clampN(+e.target.value || 1, 1))}
+              className="w-16 border rounded px-2 py-1"
+            />
+          </label>
+          <button
+            className="px-3 py-1.5 rounded-lg bg-blue-600 text-white hover:bg-blue-700 shadow-sm active:scale-[.99]"
+            onClick={onGenerate}
+          >
+            Generate
+          </button>
+        </div>
+      </div>
+      <p className="text-[11px] text-slate-500 mt-2">
+        Quads engine always uses all players. If total players is divisible by 4, it makes only quads; otherwise, it uses
+        a mix of quads + triples. In <strong>strict</strong> mode it runs multiple builds and picks the one with the
+        fewest repeat partners and opponents (trying to avoid someone teaming with the same person more than once and
+        playing the same opponents more than twice across rounds).
+      </p>
+    </section>
+  );
+}
+
 
   // ======= Gender composition helpers =======
 
