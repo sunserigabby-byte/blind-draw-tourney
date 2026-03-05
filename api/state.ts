@@ -42,3 +42,55 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(500).json({ error: "Server error" });
   }
 }
+import { Redis } from "@upstash/redis";
+
+export const config = {
+  runtime: "nodejs",
+};
+
+const redisReadOnly = Redis.fromEnv(); // will use KV_REST_API_URL + KV_REST_API_TOKEN by default if present
+
+function json(res: any, status: number, body: any) {
+  res.statusCode = status;
+  res.setHeader("Content-Type", "application/json");
+  res.end(JSON.stringify(body));
+}
+
+export default async function handler(req: any, res: any) {
+  try {
+    const key = "blind-draw:state";
+
+    if (req.method === "GET") {
+      // Public read
+      const data = await redisReadOnly.get(key);
+      return json(res, 200, { ok: true, data: data ?? null });
+    }
+
+    if (req.method === "POST") {
+      // Admin write
+      const adminKey = process.env.ADMIN_KEY;
+      const sent = req.headers["x-admin-key"];
+
+      if (!adminKey || sent !== adminKey) {
+        return json(res, 401, { ok: false, error: "Unauthorized" });
+      }
+
+      const chunks: Buffer[] = [];
+      await new Promise<void>((resolve) => {
+        req.on("data", (c: Buffer) => chunks.push(c));
+        req.on("end", () => resolve());
+      });
+
+      const raw = Buffer.concat(chunks).toString("utf8");
+      const parsed = raw ? JSON.parse(raw) : null;
+
+      await redisReadOnly.set(key, parsed);
+      return json(res, 200, { ok: true });
+    }
+
+    res.setHeader("Allow", "GET, POST");
+    return json(res, 405, { ok: false, error: "Method not allowed" });
+  } catch (e: any) {
+    return json(res, 500, { ok: false, error: e?.message ?? "Server error" });
+  }
+}
