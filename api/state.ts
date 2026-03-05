@@ -1,25 +1,41 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { Redis } from "@upstash/redis";
 
-export const config = {
-  runtime: "nodejs",
-};
-
-const redis = Redis.fromEnv(); 
-// Uses KV_REST_API_URL + KV_REST_API_TOKEN automatically (Vercel + Upstash integration)
+export const config = { runtime: "nodejs" };
 
 const KEY = "blind-draw:state";
 
+function getRedis() {
+  // Support BOTH env styles:
+  const url =
+    process.env.UPSTASH_REDIS_REST_URL ||
+    process.env.KV_REST_API_URL ||
+    "";
+
+  const token =
+    process.env.UPSTASH_REDIS_REST_TOKEN ||
+    process.env.KV_REST_API_TOKEN ||
+    "";
+
+  if (!url || !token) {
+    throw new Error(
+      "Missing Redis env vars. Set UPSTASH_REDIS_REST_URL + UPSTASH_REDIS_REST_TOKEN (or KV_REST_API_URL + KV_REST_API_TOKEN)."
+    );
+  }
+
+  return new Redis({ url, token });
+}
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
-    // CORS (optional but helpful if you ever hit it from other origins)
+    // CORS
     res.setHeader("Access-Control-Allow-Origin", "*");
     res.setHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
     res.setHeader("Access-Control-Allow-Headers", "Content-Type,x-admin-key");
 
-    if (req.method === "OPTIONS") {
-      return res.status(204).end();
-    }
+    if (req.method === "OPTIONS") return res.status(204).end();
+
+    const redis = getRedis();
 
     if (req.method === "GET") {
       const data = await redis.get(KEY);
