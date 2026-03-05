@@ -134,7 +134,36 @@ function isValidQuadsScore(a: number, b: number) {
   const max = Math.max(a, b);
   return max >= 21 && max <= 25 && diff >= 2;
 }
+type PersistedState = {
+  guysText: string;
+  girlsText: string;
+  matches: MatchRow[];
+  brackets: BracketMatch[];
+  qGuysText: string;
+  qGirlsText: string;
+  qMatches: QuadsMatchRow[];
+  qBrackets: BracketMatch[];
+  activeTab: "DOUBLES" | "QUADS";
+};
 
+async function apiGetState(): Promise<PersistedState | null> {
+  const res = await fetch("/api/state", { cache: "no-store" });
+  if (!res.ok) throw new Error(`GET /api/state failed (${res.status})`);
+  const json = await res.json();
+  return json?.data ?? null;
+}
+
+async function apiSaveState(state: PersistedState, adminKey: string): Promise<void> {
+  const res = await fetch("/api/state", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-admin-key": adminKey,
+    },
+    body: JSON.stringify(state),
+  });
+  if (!res.ok) throw new Error(`POST /api/state failed (${res.status})`);
+}
 /* ========================= Sunny Logo ========================= */
 
 function SunnyLogo(){
@@ -175,7 +204,40 @@ function SunnyLogo(){
     </div>
   );
 }
+<section className="bg-white/90 rounded-lg p-3 text-[12px] text-slate-700 flex items-center justify-between gap-3 flex-wrap">
+  <div className="flex items-center gap-2">
+    <span className={`inline-block w-2.5 h-2.5 rounded-full ${isAdmin ? "bg-emerald-500" : "bg-slate-400"}`} />
+    <span className="font-semibold">{isAdmin ? "Admin Mode (editing enabled)" : "Viewer Mode (read-only)"}</span>
+    {loadingRemote && <span className="text-slate-500">Loading shared data…</span>}
+    {!!remoteError && <span className="text-red-600">{remoteError}</span>}
+  </div>
 
+  <div className="flex items-center gap-2">
+    {!isAdmin ? (
+      <button
+        className="px-3 py-1.5 rounded bg-sky-700 text-white hover:bg-sky-800"
+        onClick={() => {
+          const k = prompt("Enter Admin Key to enable editing:");
+          if (!k) return;
+          sessionStorage.setItem("ADMIN_KEY", k);
+          setAdminKey(k);
+        }}
+      >
+        Unlock Editing
+      </button>
+    ) : (
+      <button
+        className="px-3 py-1.5 rounded border"
+        onClick={() => {
+          sessionStorage.removeItem("ADMIN_KEY");
+          setAdminKey("");
+        }}
+      >
+        Lock (Viewer Mode)
+      </button>
+    )}
+  </div>
+</section>
 /* ========================= LinedTextarea (shared) ========================= */
 
 function LinedTextarea({
@@ -2945,7 +3007,14 @@ type TabKey = 'DOUBLES' | 'QUADS';
 
 export default function BlindDrawTourneyApp(){
   const [activeTab, setActiveTab] = useState<TabKey>('DOUBLES');
+const [adminKey, setAdminKey] = useState<string>(() => sessionStorage.getItem("ADMIN_KEY") || "");
+const isAdmin = !!adminKey;
 
+const [loadingRemote, setLoadingRemote] = useState(true);
+const [remoteError, setRemoteError] = useState<string>("");
+
+const saveTimer = useRef<number | null>(null);
+  
   // Doubles state
   const [dGuysText, setDGuysText] = useState<string>("");
   const [dGirlsText, setDGirlsText] = useState<string>("");
@@ -2979,6 +3048,17 @@ export default function BlindDrawTourneyApp(){
   },[]);
 
   useEffect(()=>{
+    const snapshotState = (): PersistedState => ({
+  guysText: dGuysText,
+  girlsText: dGirlsText,
+  matches: dMatches,
+  brackets: dBrackets,
+  qGuysText,
+  qGirlsText,
+  qMatches,
+  qBrackets,
+  activeTab,
+});
     const snapshot = JSON.stringify({
       guysText: dGuysText,
       girlsText: dGirlsText,
@@ -2990,9 +3070,67 @@ export default function BlindDrawTourneyApp(){
       qBrackets,
       activeTab,
     });
-    localStorage.setItem('sunnysports.autosave', snapshot);
-  },[dGuysText, dGirlsText, dMatches, dBrackets, qGuysText, qGirlsText, qMatches, qBrackets, activeTab]);
+    useEffect(() => {
+  (async () => {
+    try {
+      const remote = await apiGetState();
+      if (remote) {
+        setDGuysText(remote.guysText || "");
+        setDGirlsText(remote.girlsText || "");
+        setDMatches(Array.isArray(remote.matches) ? remote.matches : []);
+        setDBrackets(Array.isArray(remote.brackets) ? remote.brackets : []);
+        setQGuysText(remote.qGuysText || "");
+        setQGirlsText(remote.qGirlsText || "");
+        setQMatches(Array.isArray(remote.qMatches) ? remote.qMatches : []);
+        setQBrackets(Array.isArray(remote.qBrackets) ? remote.qBrackets : []);
+        if (remote.activeTab === "DOUBLES" || remote.activeTab === "QUADS") setActiveTab(remote.activeTab);
+        setRemoteError("");
+        setLoadingRemote(false);
+        return;
+      }
+useEffect(() => {
+  const snap = snapshotState();
+  localStorage.setItem("sunnysports.autosave", JSON.stringify(snap));
 
+  if (!isAdmin) return;
+
+  if (saveTimer.current) window.clearTimeout(saveTimer.current);
+  saveTimer.current = window.setTimeout(async () => {
+    try {
+      await apiSaveState(snap, adminKey);
+      setRemoteError("");
+    } catch (e: any) {
+      setRemoteError(e?.message || "Failed to save shared data");
+    }
+  }, 600);
+}, [
+  dGuysText, dGirlsText, dMatches, dBrackets,
+  qGuysText, qGirlsText, qMatches, qBrackets,
+  activeTab, isAdmin, adminKey
+]);
+      // fallback to local
+      const raw = localStorage.getItem("sunnysports.autosave");
+      if (raw) {
+        const data = JSON.parse(raw);
+        if (typeof data.guysText === "string") setDGuysText(data.guysText);
+        if (typeof data.girlsText === "string") setDGirlsText(data.girlsText);
+        if (Array.isArray(data.matches)) setDMatches(data.matches);
+        if (Array.isArray(data.brackets)) setDBrackets(data.brackets);
+        if (typeof data.qGuysText === "string") setQGuysText(data.qGuysText);
+        if (typeof data.qGirlsText === "string") setQGirlsText(data.qGirlsText);
+        if (Array.isArray(data.qMatches)) setQMatches(data.qMatches);
+        if (Array.isArray(data.qBrackets)) setQBrackets(data.qBrackets);
+        if (data.activeTab === "DOUBLES" || data.activeTab === "QUADS") setActiveTab(data.activeTab);
+      }
+
+      setLoadingRemote(false);
+    } catch (e: any) {
+      setRemoteError(e?.message || "Failed to load shared data");
+      setLoadingRemote(false);
+    }
+  })();
+}, []);
+    
   return (
     <main className="min-h-screen bg-gradient-to-b from-sky-800 via-sky-700 to-sky-500 text-slate-800 antialiased">
       <header className="sticky top-0 z-10 bg-sky-900/90 backdrop-blur border-b border-sky-700 shadow-sm">
