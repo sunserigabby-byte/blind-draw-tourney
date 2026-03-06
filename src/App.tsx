@@ -384,6 +384,32 @@ export default function BlindDrawTourneyApp() {
     return () => { if (saveTimer.current) window.clearTimeout(saveTimer.current); };
   }, [snapshotState, isAdmin, adminKey]);
 
+    useEffect(() => {
+  const interval = setInterval(async () => {
+    try {
+      const remote = await apiGetState();
+      if (!remote) return;
+
+      setDGuysText(remote.guysText || "");
+      setDGirlsText(remote.girlsText || "");
+      setDMatches(Array.isArray(remote.matches) ? remote.matches : []);
+      setDBrackets(Array.isArray(remote.brackets) ? remote.brackets : []);
+
+      setQGuysText(remote.qGuysText || "");
+      setQGirlsText(remote.qGirlsText || "");
+      setQMatches(Array.isArray(remote.qMatches) ? remote.qMatches : []);
+      setQBrackets(Array.isArray(remote.qBrackets) ? remote.qBrackets : []);
+
+      if (remote.activeTab === "DOUBLES" || remote.activeTab === "QUADS") {
+        setActiveTab(remote.activeTab);
+      }
+
+    } catch {}
+  }, 5000);
+
+  return () => clearInterval(interval);
+}, []);
+    
   const AdminBanner = () => (
     <section className="bg-white/90 rounded-lg p-3 text-[12px] text-slate-700 flex items-center justify-between gap-3 flex-wrap">
       <div className="flex items-center gap-2">
