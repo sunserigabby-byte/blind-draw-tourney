@@ -1982,8 +1982,8 @@ export default function BlindDrawTourneyApp() {
               <section className="bg-white/95 backdrop-blur rounded-xl shadow ring-1 ring-slate-200 p-4">
                 <h2 className="text-[16px] font-semibold text-sky-800 mb-2">Players (Doubles)</h2>
                 <div className="grid md:grid-cols-2 gap-4">
-                  <LineNumberTextarea id="guys" label="Guys" value={guysText} onChange={(e)=>setGuysText(e.target.value)} />
-                  <LineNumberTextarea id="girls" label="Girls" value={girlsText} onChange={(e)=>setGirlsText(e.target.value)} />
+                  <LinedTextarea id="guys" label="Guys" value={guysText} onChange={(e)=>setGuysText(e.target.value)} />
+                  <LinedTextarea id="girls" label="Girls" value={girlsText} onChange={(e)=>setGirlsText(e.target.value)} />
                 </div>
               </section>
 
@@ -2002,8 +2002,8 @@ export default function BlindDrawTourneyApp() {
                 <h2 className="text-[16px] font-semibold text-sky-800 mb-2">Players (Quads)</h2>
                 <p className="text-[11px] text-slate-500 mb-2">These rosters are separate from Doubles.</p>
                 <div className="grid md:grid-cols-2 gap-4">
-                  <LineNumberTextarea id="q-guys" label="Guys (Quads)" value={qGuysText} onChange={(e)=>setQGuysText(e.target.value)} />
-                  <LineNumberTextarea id="q-girls" label="Girls (Quads)" value={qGirlsText} onChange={(e)=>setQGirlsText(e.target.value)} />
+                  <LinedTextarea id="q-guys" label="Guys (Quads)" value={qGuysText} onChange={(e)=>setQGuysText(e.target.value)} />
+                  <LinedTextarea id="q-girls" label="Girls (Quads)" value={qGirlsText} onChange={(e)=>setQGirlsText(e.target.value)} />
                 </div>
               </section>
 
