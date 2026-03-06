@@ -334,7 +334,7 @@ function MatchesView({
   const doDelete = (round:number) => { setMatches(prev=> prev.filter(m=> m.round !== round)); setConfirmR(null); };
 
   return (
-    <section className="bg-white backdrop-blur rounded-2xl shadow-lg ring-1 ring-sky-200 p-6 border border-sky-100">
+    <section className="mt-6 bg-white backdrop-blur rounded-2xl shadow-lg ring-1 ring-sky-200 p-6 border border-sky-100">
       <h2 className="text-[20px] font-bold text-sky-800 mb-2 tracking-tight">Matches & Results (Doubles)</h2>
       <div className="w-24 h-1 bg-sky-500 mx-auto rounded-full mb-4" />
 
@@ -629,7 +629,7 @@ function RoundGenerator({
   }
 
   return (
-    <section className="bg-white/90 backdrop-blur rounded-xl shadow ring-1 ring-slate-200 p-4">
+    <section className="mt-6 bg-white/90 backdrop-blur rounded-xl shadow ring-1 ring-slate-200 p-4">
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <h3 className="text-[16px] font-semibold text-sky-800">Round Generator (Doubles)</h3>
         <div className="flex items-center gap-3 text-[12px] flex-wrap">
@@ -751,7 +751,7 @@ function Leaderboard({
   }, [matches, guysList, girlsList, guysSet, girlsSet]);
 
   const Table = ({title, rows}:{title:string; rows:Bucket[]})=> (
-    <section className="bg-white/95 backdrop-blur rounded-xl shadow ring-1 ring-slate-200 p-4">
+    <section className="mt-6 bg-white/95 backdrop-blur rounded-xl shadow ring-1 ring-slate-200 p-4">
       <h3 className="text-[15px] font-semibold text-sky-800 mb-2">{title}</h3>
       <div className="overflow-x-auto">
         <table className="min-w-full text-[13px]">
@@ -1062,7 +1062,7 @@ function BracketView({
   });
 
   return (
-    <section className="bg-white/95 backdrop-blur rounded-2xl shadow-lg ring-1 ring-sky-200 p-6">
+    <section className="mt-6 bg-white/95 backdrop-blur rounded-2xl shadow-lg ring-1 ring-sky-200 p-6">
       <h2 className="text-[20px] font-bold text-sky-900 mb-2 tracking-tight">Playoff Brackets</h2>
       <p className="text-[11px] text-slate-500 mb-4">
         ESPN-style seeding and BYEs. Quarterfinals → Semifinals → Final. Winners auto-advance. The{' '}
@@ -1259,7 +1259,7 @@ function PlayoffBuilder({
   }
 
   return (
-    <section className="bg-white/95 backdrop-blur rounded-xl shadow ring-1 ring-slate-200 p-4">
+    <section className="mt-6 bg-white/95 backdrop-blur rounded-xl shadow ring-1 ring-slate-200 p-4">
       <h3 className="text-[16px] font-semibold text-sky-800 mb-2">Playoff Setup (Doubles)</h3>
       <div className="grid md:grid-cols-2 gap-3 text-[12px]">
         <div className="space-y-2">
@@ -1364,7 +1364,7 @@ function QuadsMatchesView({
   const doDelete = (round:number) => { setMatches(prev=> prev.filter(m=> m.round !== round)); setConfirmR(null); };
 
   return (
-    <section className="bg-white backdrop-blur rounded-2xl shadow-lg ring-1 ring-sky-200 p-6 border border-sky-100">
+    <section className="mt-6 bg-white backdrop-blur rounded-2xl shadow-lg ring-1 ring-sky-200 p-6 border border-sky-100">
       <h2 className="text-[20px] font-bold text-sky-800 mb-2 tracking-tight">Matches & Results (Quads)</h2>
       <div className="w-24 h-1 bg-sky-500 mx-auto rounded-full mb-4" />
 
@@ -1641,7 +1641,7 @@ function QuadsRoundGenerator({
   }
 
   return (
-    <section className="bg-white/90 backdrop-blur rounded-xl shadow ring-1 ring-slate-200 p-4">
+    <section className="mt-6 bg-white/90 backdrop-blur rounded-xl shadow ring-1 ring-slate-200 p-4">
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <h3 className="text-[16px] font-semibold text-sky-800">Round Generator (Quads)</h3>
         <div className="flex items-center gap-3 text-[12px] flex-wrap">
@@ -1754,7 +1754,7 @@ function QuadsLeaderboard({
   }, [matches, guysList, girlsList, guysSet, girlsSet]);
 
   const Table = ({title, rows}:{title:string; rows:Bucket[]})=> (
-    <section className="bg-white/95 backdrop-blur rounded-xl shadow ring-1 ring-slate-200 p-4">
+    <section className="mt-6 bg-white/95 backdrop-blur rounded-xl shadow ring-1 ring-slate-200 p-4">
       <h3 className="text-[15px] font-semibold text-sky-800 mb-2">{title}</h3>
       <div className="overflow-x-auto">
         <table className="min-w-full text-[13px]">
@@ -1910,7 +1910,7 @@ export default function BlindDrawTourneyApp() {
   }, [snapshotState, isAdmin, adminKey]);
 
   const AdminBanner = () => (
-    <section className="bg-white/90 rounded-lg p-3 text-[12px] text-slate-700 flex items-center justify-between gap-3 flex-wrap">
+    <section className="mt-6 bg-white/90 rounded-lg p-3 text-[12px] text-slate-700 flex items-center justify-between gap-3 flex-wrap">
       <div className="flex items-center gap-2">
         <span className={`inline-block w-2.5 h-2.5 rounded-full ${isAdmin ? "bg-emerald-500" : "bg-slate-400"}`} />
         <span className="font-semibold">{isAdmin ? "Admin Mode (editing enabled)" : "Viewer Mode (read-only)"}</span>
@@ -1979,7 +1979,7 @@ export default function BlindDrawTourneyApp() {
             <Leaderboard matches={matches} guysText={guysText} girlsText={girlsText} />
 
             <fieldset disabled={!isAdmin} className={!isAdmin ? "opacity-95" : ""}>
-              <section className="bg-white/95 backdrop-blur rounded-xl shadow ring-1 ring-slate-200 p-4">
+              <section className="mt-6 bg-white/95 backdrop-blur rounded-xl shadow ring-1 ring-slate-200 p-4">
                 <h2 className="text-[16px] font-semibold text-sky-800 mb-2">Players (Doubles)</h2>
                 <div className="grid md:grid-cols-2 gap-4">
                   <LinedTextarea id="guys" label="Guys" value={guysText} onChange={(e)=>setGuysText(e.target.value)} />
@@ -1998,7 +1998,7 @@ export default function BlindDrawTourneyApp() {
             <QuadsLeaderboard matches={qMatches} guysText={qGuysText} girlsText={qGirlsText} />
 
             <fieldset disabled={!isAdmin} className={!isAdmin ? "opacity-95" : ""}>
-              <section className="bg-white/95 backdrop-blur rounded-xl shadow ring-1 ring-slate-200 p-4">
+              <section className="mt-6 bg-white/95 backdrop-blur rounded-xl shadow ring-1 ring-slate-200 p-4">
                 <h2 className="text-[16px] font-semibold text-sky-800 mb-2">Players (Quads)</h2>
                 <p className="text-[11px] text-slate-500 mb-2">These rosters are separate from Doubles.</p>
                 <div className="grid md:grid-cols-2 gap-4">
