@@ -1947,7 +1947,7 @@ export default function BlindDrawTourneyApp() {
   );
 
   return (
-    <main className="min-h-screen bg-gradient-to-b from-sky-800 via-sky-700 to-sky-500 text-slate-800 antialiased">
+    <main className="min-h-screen bg-slate-100 text-slate-800 antialiased">
       <header className="sticky top-0 z-10 bg-sky-900/90 backdrop-blur border-b border-sky-700 shadow-sm">
         <div className="max-w-6xl mx-auto px-4 py-3 flex flex-col md:flex-row md:items-center md:justify-between gap-2">
           <div className="flex items-center justify-between gap-3"><SunnyLogo /></div>
