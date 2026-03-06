@@ -136,14 +136,23 @@ function isValidQuadsScore(a: number, b: number) {
 /* ========================= Shared persistence API ========================= */
 
 type PersistedState = {
-  guysText: string;
-  girlsText: string;
-  matches: MatchRow[];
-  brackets: BracketMatch[];
+  dUpperGuysText: string;
+  dUpperGirlsText: string;
+  dUpperMatches: MatchRow[];
+  dUpperBrackets: BracketMatch[];
+
+  dLowerGuysText: string;
+  dLowerGirlsText: string;
+  dLowerMatches: MatchRow[];
+  dLowerBrackets: BracketMatch[];
+
+  doublesDivisionTab: "UPPER" | "LOWER";
+
   qGuysText: string;
   qGirlsText: string;
   qMatches: QuadsMatchRow[];
   qBrackets: BracketMatch[];
+
   activeTab: "DOUBLES" | "QUADS";
 };
 
@@ -1251,6 +1260,7 @@ function BracketView({
 }
 
 function PlayoffBuilder({
+  // doubles playoff
   matches,
   guysText,
   girlsText,
@@ -1547,6 +1557,371 @@ function PlayoffBuilder({
       <p className="text-[11px] text-slate-500 mt-2">
         Upper/Lower teams are formed by pairing top halves of Guys/Girls and seeding by combined W then PD.
         This version safely handles uneven roster sizes by only building as many teams as both sides allow.
+      </p>
+    </section>
+  );
+}
+
+    function QuadsPlayoffBuilder({
+  matches,
+  guysText,
+  girlsText,
+  setBrackets,
+}: {
+  matches: QuadsMatchRow[];
+  guysText: string;
+  girlsText: string;
+  setBrackets: (f: (prev: BracketMatch[]) => BracketMatch[] | BracketMatch[]) => void;
+}) {
+  const { guysRows, girlsRows, allRows } = useMemo(
+    () => computeQuadsStandingsFull(matches, guysText, girlsText),
+    [matches, guysText, girlsText]
+  );
+
+  type Mode = "COMBINED" | "SPLIT";
+  const [mode, setMode] = useState<Mode>("COMBINED");
+  const [totalPlayers, setTotalPlayers] = useState<number>(16);
+  const [perGender, setPerGender] = useState<number>(4);
+  const [seedRandom, setSeedRandom] = useState<boolean>(true);
+
+  const [selectedPool, setSelectedPool] = useState<QuadsPlayerRow[]>([]);
+  const [editTeams, setEditTeams] = useState<{ id: string; members: string[] }[]>([]);
+
+  const buildPool = (): QuadsPlayerRow[] => {
+    if (mode === "COMBINED") {
+      const n = clampN(totalPlayers, 4);
+      const limited = Math.min(n, allRows.length);
+      return allRows.slice(0, limited);
+    } else {
+      const k = clampN(perGender, 1);
+      const guysSel = guysRows.slice(0, k).map((r) => ({ ...r, gender: "M" as const }));
+      const girlsSel = girlsRows.slice(0, k).map((r) => ({ ...r, gender: "F" as const }));
+      return [...guysSel, ...girlsSel];
+    }
+  };
+
+  const onGenerateTeams = () => {
+    let pool = buildPool();
+
+    if (pool.length < 8) {
+      alert("You need at least 8 players to build quads playoff teams.");
+      return;
+    }
+
+    // Quads playoff team builder works cleanly in groups of 8 players.
+    const usableCount = pool.length - (pool.length % 8);
+    if (usableCount < 8) {
+      alert("Please choose a player count that gives you at least 8 usable players.");
+      return;
+    }
+
+    if (usableCount !== pool.length) {
+      pool = pool.slice(0, usableCount);
+    }
+
+    const teams = buildQuadsPlayoffTeams(pool, seedRandom);
+    if (!teams.length) return;
+
+    const editable = teams.map((t) => ({
+      id: t.id,
+      members: [...t.members, "", "", "", ""].slice(0, 4),
+    }));
+
+    setSelectedPool(pool);
+    setEditTeams(editable);
+  };
+
+  const onBuildBracketFromTeams = () => {
+    if (!editTeams.length) {
+      alert("Generate teams first, then adjust them, then build the bracket.");
+      return;
+    }
+
+    const incomplete = editTeams.some(
+      (t) => t.members.filter((m) => m && m.trim()).length !== 4
+    );
+    if (incomplete) {
+      alert("Every team must have exactly 4 players before building the bracket.");
+      return;
+    }
+
+    const allChosen = editTeams.flatMap((t) => t.members.map((m) => m.trim()).filter(Boolean));
+    const dupNames = Array.from(
+      new Set(allChosen.filter((name, idx) => allChosen.indexOf(name) !== idx))
+    );
+
+    if (dupNames.length > 0) {
+      alert(`These players appear more than once: ${dupNames.join(", ")}`);
+      return;
+    }
+
+    const allowedNames = new Set(selectedPool.map((p) => p.name));
+    const invalidNames = allChosen.filter((n) => !allowedNames.has(n));
+    if (invalidNames.length > 0) {
+      alert(`These names are not in the selected playoff pool: ${invalidNames.join(", ")}`);
+      return;
+    }
+
+    const statMap = new Map<string, { W: number; PD: number }>();
+    guysRows.forEach((r) => statMap.set(r.name, { W: r.W, PD: r.PD }));
+    girlsRows.forEach((r) => statMap.set(r.name, { W: r.W, PD: r.PD }));
+
+    const scored = editTeams.map((t, idx) => {
+      const members = t.members.map((m) => m.trim()).filter(Boolean);
+      const W = members.reduce((s, n) => s + (statMap.get(n)?.W ?? 0), 0);
+      const PD = members.reduce((s, n) => s + (statMap.get(n)?.PD ?? 0), 0);
+      const name = members.join(" / ") || `Team ${idx + 1}`;
+
+      return {
+        team: {
+          id: `Q-temp-${idx}`,
+          name,
+          members,
+          seed: 0,
+          division: "UPPER" as PlayDiv,
+        } as Team,
+        W,
+        PD,
+      };
+    });
+
+    scored.sort(
+      (a, b) =>
+        b.W - a.W ||
+        b.PD - a.PD ||
+        a.team.name.localeCompare(b.team.name)
+    );
+
+    scored.forEach((entry, i) => {
+      entry.team.seed = i + 1;
+      entry.team.id = `Q-${entry.team.seed}-${slug(entry.team.name)}`;
+    });
+
+    const finalTeams = scored.map((s) => s.team);
+    const bracket = buildBracket("UPPER", finalTeams, 0);
+    setBrackets(() => bracket);
+  };
+
+  const clearTeams = () => {
+    setSelectedPool([]);
+    setEditTeams([]);
+  };
+
+  const handleMemberChange = (teamIdx: number, slotIdx: number, value: string) => {
+    setEditTeams((prev) =>
+      prev.map((t, i) =>
+        i === teamIdx
+          ? {
+              ...t,
+              members: t.members.map((m, j) => (j === slotIdx ? value : m)),
+            }
+          : t
+      )
+    );
+  };
+
+  const poolNames = selectedPool.map((p) => p.name);
+
+  const allChosenNames = editTeams.flatMap((t) => t.members.filter(Boolean));
+  const dupNames = Array.from(
+    new Set(
+      allChosenNames.filter((name, idx) => allChosenNames.indexOf(name) !== idx)
+    )
+  );
+
+  const projectedPool = buildPool();
+  const projectedUsablePlayers =
+    projectedPool.length >= 8 ? projectedPool.length - (projectedPool.length % 8) : 0;
+  const projectedTeams = projectedUsablePlayers / 4;
+
+  return (
+    <section className="bg-white/95 backdrop-blur rounded-xl shadow ring-1 ring-slate-200 p-4">
+      <h2 className="text-[16px] font-semibold text-sky-800 mb-2">
+        Playoff Builder (Quads)
+      </h2>
+
+      <p className="text-[11px] text-slate-500 mb-3">
+        Uses quads pool-play W/L/PD to seed teams. You can auto-build teams, edit them,
+        then create one main playoff bracket.
+      </p>
+
+      <div className="grid md:grid-cols-2 gap-4 text-[12px]">
+        <div className="space-y-2">
+          <div className="flex flex-col gap-1">
+            <span className="font-medium text-slate-700">Selection mode</span>
+
+            <label className="flex items-center gap-2">
+              <input
+                type="radio"
+                checked={mode === "COMBINED"}
+                onChange={() => setMode("COMBINED")}
+              />
+              <span>
+                Combined leaderboard – top{" "}
+                <input
+                  type="number"
+                  min={8}
+                  step={4}
+                  className="w-16 border rounded px-1 py-0.5 mx-1"
+                  value={totalPlayers}
+                  onChange={(e) => setTotalPlayers(clampN(+e.target.value || 8, 8))}
+                />
+                players
+              </span>
+            </label>
+
+            <label className="flex items-center gap-2">
+              <input
+                type="radio"
+                checked={mode === "SPLIT"}
+                onChange={() => setMode("SPLIT")}
+              />
+              <span>
+                Top{" "}
+                <input
+                  type="number"
+                  min={1}
+                  className="w-12 border rounded px-1 py-0.5 mx-1"
+                  value={perGender}
+                  onChange={(e) => setPerGender(clampN(+e.target.value || 1, 1))}
+                />{" "}
+                guys + top {perGender} girls
+              </span>
+            </label>
+          </div>
+
+          <label className="flex items-center gap-2">
+            <input
+              type="checkbox"
+              checked={seedRandom}
+              onChange={(e) => setSeedRandom(e.target.checked)}
+            />
+            Randomize within the selected pool before forming teams
+          </label>
+
+          <div className="flex items-center gap-2 mt-2 flex-wrap">
+            <button
+              className="px-3 py-1.5 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 shadow-sm text-[13px]"
+              onClick={onGenerateTeams}
+            >
+              Generate Teams for Editing
+            </button>
+
+            {editTeams.length > 0 && (
+              <button
+                className="px-2 py-1 rounded border text-[11px]"
+                onClick={clearTeams}
+              >
+                Clear Teams
+              </button>
+            )}
+          </div>
+        </div>
+
+        <div className="space-y-2 text-[11px]">
+          <div className="rounded-lg border border-sky-200 bg-sky-50 px-3 py-2">
+            <div className="font-semibold text-sky-800">Projected Pool</div>
+            <div className="mt-1 text-slate-700">
+              {projectedUsablePlayers} usable players → {projectedTeams} quads teams
+            </div>
+            <div className="text-slate-500">
+              Quads auto-builder uses groups of 8 players cleanly.
+            </div>
+          </div>
+
+          <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+            <div className="font-semibold text-slate-800">Standings Snapshot</div>
+            <div className="mt-1 text-slate-700">Guys: {guysRows.length}</div>
+            <div className="text-slate-700">Girls: {girlsRows.length}</div>
+            <div className="text-slate-700">Combined: {allRows.length}</div>
+          </div>
+        </div>
+      </div>
+
+      {selectedPool.length > 0 && (
+        <div className="mt-4 border-t pt-3 text-[11px] text-slate-600">
+          <div className="font-semibold mb-1">
+            Selected playoff players ({selectedPool.length})
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {selectedPool.map((p) => (
+              <span
+                key={p.name}
+                className="px-2 py-0.5 rounded-full bg-slate-100 text-slate-800 border border-slate-200"
+              >
+                {p.name}{" "}
+                <span className="text-[10px] text-slate-500">
+                  ({p.gender} · {p.W}-{p.L} · PD {p.PD})
+                </span>
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {editTeams.length > 0 && (
+        <div className="mt-4 border-t pt-3">
+          <div className="flex items-center justify-between gap-2 mb-2 flex-wrap">
+            <div className="text-[12px] font-semibold text-slate-700">
+              Edit quads teams before building the bracket
+            </div>
+
+            <button
+              className="px-3 py-1.5 rounded-lg bg-sky-600 text-white hover:bg-sky-700 shadow-sm text-[12px]"
+              onClick={onBuildBracketFromTeams}
+            >
+              Build Bracket from Teams
+            </button>
+          </div>
+
+          {dupNames.length > 0 && (
+            <div className="mb-2 text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1">
+              Warning: duplicate players across teams:{" "}
+              <span className="font-medium">{dupNames.join(", ")}</span>
+            </div>
+          )}
+
+          <div className="grid md:grid-cols-2 gap-3 text-[12px]">
+            {editTeams.map((team, tIdx) => (
+              <div
+                key={team.id || tIdx}
+                className="border rounded-lg p-2 bg-slate-50/60"
+              >
+                <div className="font-semibold text-slate-700 mb-1">
+                  Team {tIdx + 1}
+                </div>
+
+                <div className="grid grid-cols-2 gap-2">
+                  {team.members.map((member, mIdx) => (
+                    <div key={mIdx} className="flex flex-col gap-1">
+                      <span className="text-[10px] text-slate-500">
+                        Player {mIdx + 1}
+                      </span>
+                      <select
+                        className="border rounded px-1 py-1 text-[12px] bg-white"
+                        value={member}
+                        onChange={(e) =>
+                          handleMemberChange(tIdx, mIdx, e.target.value)
+                        }
+                      >
+                        <option value="">— choose —</option>
+                        {poolNames.map((name) => (
+                          <option key={name} value={name}>
+                            {name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <p className="text-[11px] text-slate-500 mt-3">
+        This safely builds quads playoff teams without touching doubles logic.
       </p>
     </section>
   );
@@ -2417,10 +2792,17 @@ function QuadsLeaderboard({
   );
 }
 
+      <QuadsPlayoffBuilder
+  matches={qMatches}
+  guysText={qGuysText}
+  girlsText={qGirlsText}
+  setBrackets={setQBrackets}
+/>
+      
 /* ========================= APP SHELL: Tabs + autosave ========================= */
 
 type TabKey = 'DOUBLES' | 'QUADS';
-
+type DoublesDivisionTab = "UPPER" | "LOWER";
 
 export default function BlindDrawTourneyApp() {
   const [activeTab, setActiveTab] = useState<"DOUBLES" | "QUADS">("DOUBLES");
@@ -2448,20 +2830,43 @@ export default function BlindDrawTourneyApp() {
   const [qBrackets, setQBrackets] = useState<BracketMatch[]>([]);
 
   const snapshotState = useMemo(
-    () =>
-      ({
-        guysText,
-        girlsText,
-        matches,
-        brackets,
-        qGuysText,
-        qGirlsText,
-        qMatches,
-        qBrackets,
-        activeTab,
-      } satisfies PersistedState),
-    [guysText, girlsText, matches, brackets, qGuysText, qGirlsText, qMatches, qBrackets, activeTab]
-  );
+  () =>
+    ({
+      dUpperGuysText,
+      dUpperGirlsText,
+      dUpperMatches,
+      dUpperBrackets,
+
+      dLowerGuysText,
+      dLowerGirlsText,
+      dLowerMatches,
+      dLowerBrackets,
+
+      doublesDivisionTab,
+
+      qGuysText,
+      qGirlsText,
+      qMatches,
+      qBrackets,
+      activeTab,
+    } satisfies PersistedState),
+  [
+    dUpperGuysText,
+    dUpperGirlsText,
+    dUpperMatches,
+    dUpperBrackets,
+    dLowerGuysText,
+    dLowerGirlsText,
+    dLowerMatches,
+    dLowerBrackets,
+    doublesDivisionTab,
+    qGuysText,
+    qGirlsText,
+    qMatches,
+    qBrackets,
+    activeTab,
+  ]
+);
 
   // Load: remote -> local fallback
   useEffect(() => {
@@ -2469,38 +2874,36 @@ export default function BlindDrawTourneyApp() {
       try {
         const remote = await apiGetState();
         if (remote) {
-          setGuysText(remote.guysText || "");
-          setGirlsText(remote.girlsText || "");
-          setMatches(Array.isArray(remote.matches) ? remote.matches : []);
-          setBrackets(Array.isArray(remote.brackets) ? remote.brackets : []);
+          setDUpperGuysText(remote.dUpperGuysText || "");
+setDUpperGirlsText(remote.dUpperGirlsText || "");
+setDUpperMatches(Array.isArray(remote.dUpperMatches) ? remote.dUpperMatches : []);
+setDUpperBrackets(Array.isArray(remote.dUpperBrackets) ? remote.dUpperBrackets : []);
 
-          setQGuysText(remote.qGuysText || "");
-          setQGirlsText(remote.qGirlsText || "");
-          setQMatches(Array.isArray(remote.qMatches) ? remote.qMatches : []);
-          setQBrackets(Array.isArray(remote.qBrackets) ? remote.qBrackets : []);
+setDLowerGuysText(remote.dLowerGuysText || "");
+setDLowerGirlsText(remote.dLowerGirlsText || "");
+setDLowerMatches(Array.isArray(remote.dLowerMatches) ? remote.dLowerMatches : []);
+setDLowerBrackets(Array.isArray(remote.dLowerBrackets) ? remote.dLowerBrackets : []);
 
-          if (remote.activeTab === "DOUBLES" || remote.activeTab === "QUADS") setActiveTab(remote.activeTab);
-
-          setRemoteError("");
-          setLoadingRemote(false);
-          return;
-        }
+if (remote.doublesDivisionTab === "UPPER" || remote.doublesDivisionTab === "LOWER") {
+  setDoublesDivisionTab(remote.doublesDivisionTab);
+}
 
         const raw = localStorage.getItem("sunnysports.autosave");
         if (raw) {
           const data = JSON.parse(raw);
-          if (typeof data.guysText === "string") setGuysText(data.guysText);
-          if (typeof data.girlsText === "string") setGirlsText(data.girlsText);
-          if (Array.isArray(data.matches)) setMatches(data.matches);
-          if (Array.isArray(data.brackets)) setBrackets(data.brackets);
+if (typeof data.dUpperGuysText === "string") setDUpperGuysText(data.dUpperGuysText);
+if (typeof data.dUpperGirlsText === "string") setDUpperGirlsText(data.dUpperGirlsText);
+if (Array.isArray(data.dUpperMatches)) setDUpperMatches(data.dUpperMatches);
+if (Array.isArray(data.dUpperBrackets)) setDUpperBrackets(data.dUpperBrackets);
 
-          if (typeof data.qGuysText === "string") setQGuysText(data.qGuysText);
-          if (typeof data.qGirlsText === "string") setQGirlsText(data.qGirlsText);
-          if (Array.isArray(data.qMatches)) setQMatches(data.qMatches);
-          if (Array.isArray(data.qBrackets)) setQBrackets(data.qBrackets);
+if (typeof data.dLowerGuysText === "string") setDLowerGuysText(data.dLowerGuysText);
+if (typeof data.dLowerGirlsText === "string") setDLowerGirlsText(data.dLowerGirlsText);
+if (Array.isArray(data.dLowerMatches)) setDLowerMatches(data.dLowerMatches);
+if (Array.isArray(data.dLowerBrackets)) setDLowerBrackets(data.dLowerBrackets);
 
-          if (data.activeTab === "DOUBLES" || data.activeTab === "QUADS") setActiveTab(data.activeTab);
-        }
+if (data.doublesDivisionTab === "UPPER" || data.doublesDivisionTab === "LOWER") {
+  setDoublesDivisionTab(data.doublesDivisionTab);
+}
 
         setLoadingRemote(false);
       } catch (e: any) {
