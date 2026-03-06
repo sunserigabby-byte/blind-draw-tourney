@@ -1636,178 +1636,578 @@ function QuadsRoundGenerator({
   girlsText,
   matches,
   setMatches,
-}:{
-  guysText:string;
-  girlsText:string;
-  matches:QuadsMatchRow[];
-  setMatches:(f:(prev:QuadsMatchRow[])=>QuadsMatchRow[]|QuadsMatchRow[])=>void;
-}){
+}: {
+  guysText: string;
+  girlsText: string;
+  matches: QuadsMatchRow[];
+  setMatches: (f: (prev: QuadsMatchRow[]) => QuadsMatchRow[] | QuadsMatchRow[]) => void;
+}) {
   const [strict, setStrict] = useState(true);
   const [roundsToGen, setRoundsToGen] = useState(1);
   const [startCourt, setStartCourt] = useState(1);
+  const [sitOuts, setSitOuts] = useState<string[]>([]);
 
-  const guys = useMemo(()=> uniq((guysText||'').split(/\r?\n/).map(s=>s.trim()).filter(Boolean)),[guysText]);
-  const girls= useMemo(()=> uniq((girlsText||'').split(/\r?\n/).map(s=>s.trim()).filter(Boolean)),[girlsText]);
+  const guys = useMemo(
+    () => uniq((guysText || "").split(/\r?\n/).map((s) => s.trim()).filter(Boolean)),
+    [guysText]
+  );
+  const girls = useMemo(
+    () => uniq((girlsText || "").split(/\r?\n/).map((s) => s.trim()).filter(Boolean)),
+    [girlsText]
+  );
 
-  // Opponent map: track which *individuals* have already opposed each other
-  const buildOpponentMap = (history:QuadsMatchRow[])=>{
-    const mp = new Map<string, Set<string>>();
-    for(const m of history){
-      const t1=m.t1, t2=m.t2;
-      for(const a of t1) for(const b of t2){
-        const A=slug(a),B=slug(b);
-        if(!mp.has(A)) mp.set(A,new Set());
-        mp.get(A)!.add(B);
+  type CountMap = Map<string, Map<string, number>>;
+
+  const buildPartnerMap = (history: QuadsMatchRow[]): CountMap => {
+    const mp: CountMap = new Map();
+
+    const addPair = (a: string, b: string) => {
+      const A = slug(a);
+      const B = slug(b);
+      if (!mp.has(A)) mp.set(A, new Map());
+      if (!mp.has(B)) mp.set(B, new Map());
+      const rowA = mp.get(A)!;
+      const rowB = mp.get(B)!;
+      rowA.set(B, (rowA.get(B) || 0) + 1);
+      rowB.set(A, (rowB.get(A) || 0) + 1);
+    };
+
+    for (const m of history) {
+      for (let i = 0; i < m.t1.length; i++) {
+        for (let j = i + 1; j < m.t1.length; j++) addPair(m.t1[i], m.t1[j]);
       }
-      for(const a of t2) for(const b of t1){
-        const A=slug(a),B=slug(b);
-        if(!mp.has(A)) mp.set(A,new Set());
-        mp.get(A)!.add(B);
+      for (let i = 0; i < m.t2.length; i++) {
+        for (let j = i + 1; j < m.t2.length; j++) addPair(m.t2[i], m.t2[j]);
       }
     }
+
     return mp;
   };
-  const haventOpposedTeam = (mp:Map<string,Set<string>>, teamA:string[], teamB:string[])=>{
-    if(!strict) return true;
-    for(const a of teamA){
-      const set = mp.get(slug(a));
-      if(!set) continue;
-      for(const b of teamB){
-        if(set.has(slug(b))) return false;
-      }
+
+  const buildOpponentMap = (history: QuadsMatchRow[]): CountMap => {
+    const mp: CountMap = new Map();
+
+    const addOpp = (a: string, b: string) => {
+      const A = slug(a);
+      const B = slug(b);
+      if (!mp.has(A)) mp.set(A, new Map());
+      const rowA = mp.get(A)!;
+      rowA.set(B, (rowA.get(B) || 0) + 1);
+    };
+
+    for (const m of history) {
+      for (const a of m.t1) for (const b of m.t2) addOpp(a, b);
+      for (const a of m.t2) for (const b of m.t1) addOpp(a, b);
     }
-    return true;
+
+    return mp;
   };
 
-  function buildRound(roundIdx:number, history:QuadsMatchRow[]){
-    const G = shuffle(guys);
-    const H = shuffle(girls);
+  const cloneCountMap = (src: CountMap): CountMap => {
+    const out: CountMap = new Map();
+    for (const [k, row] of src) {
+      const newRow = new Map<string, number>();
+      for (const [kk, v] of row) newRow.set(kk, v);
+      out.set(k, newRow);
+    }
+    return out;
+  };
 
-    const opponentMap = buildOpponentMap(history);
+  const bumpPartners = (mp: CountMap, team: string[]) => {
+    for (let i = 0; i < team.length; i++) {
+      for (let j = i + 1; j < team.length; j++) {
+        const A = slug(team[i]);
+        const B = slug(team[j]);
+        if (!mp.has(A)) mp.set(A, new Map());
+        if (!mp.has(B)) mp.set(B, new Map());
+        const rowA = mp.get(A)!;
+        const rowB = mp.get(B)!;
+        rowA.set(B, (rowA.get(B) || 0) + 1);
+        rowB.set(A, (rowB.get(A) || 0) + 1);
+      }
+    }
+  };
 
-    const totalPlayers = G.length + H.length;
-    const maxQuadsByCounts = Math.min(Math.floor(G.length/2), Math.floor(H.length/2));
-
-    // choose #quads so leftover players form at most 2 triples (0,3,6 leftover)
-    let quadsToMake = maxQuadsByCounts;
-    for(let q=maxQuadsByCounts;q>=0;q--){
-      const leftover = totalPlayers - 4*q;
-      if(leftover===0 || leftover===3 || leftover===6){
-        quadsToMake = q;
-        break;
+  const bumpOpponents = (mp: CountMap, teamA: string[], teamB: string[]) => {
+    for (const a of teamA) {
+      const A = slug(a);
+      if (!mp.has(A)) mp.set(A, new Map());
+      const rowA = mp.get(A)!;
+      for (const b of teamB) {
+        const B = slug(b);
+        rowA.set(B, (rowA.get(B) || 0) + 1);
       }
     }
 
-    const teams: { members:string[]; isTriple:boolean }[] = [];
-    let gIdx=0, hIdx=0;
+    for (const b of teamB) {
+      const B = slug(b);
+      if (!mp.has(B)) mp.set(B, new Map());
+      const rowB = mp.get(B)!;
+      for (const a of teamA) {
+        const A = slug(a);
+        rowB.set(A, (rowB.get(A) || 0) + 1);
+      }
+    }
+  };
 
-    // Build full quads: 2 guys + 2 girls when possible
-    for(let i=0;i<quadsToMake;i++){
-      const tGuys = G.slice(gIdx,gIdx+2);
-      const tGirls= H.slice(hIdx,hIdx+2);
-      gIdx+=2; hIdx+=2;
-      teams.push({ members:[...tGuys,...tGirls], isTriple:false });
+  const partnerViolationsForTeam = (
+    team: string[],
+    partnerMap: CountMap,
+    maxPartnerTimes: number
+  ) => {
+    let violations = 0;
+    for (let i = 0; i < team.length; i++) {
+      for (let j = i + 1; j < team.length; j++) {
+        const A = slug(team[i]);
+        const B = slug(team[j]);
+        const prev = partnerMap.get(A)?.get(B) || 0;
+        if (prev >= maxPartnerTimes) violations++;
+      }
+    }
+    return violations;
+  };
+
+  const opponentViolationsBetweenTeams = (
+    teamA: string[],
+    teamB: string[],
+    oppMap: CountMap,
+    maxOppTimes: number
+  ) => {
+    let violations = 0;
+    for (const a of teamA) {
+      const row = oppMap.get(slug(a));
+      for (const b of teamB) {
+        const prev = row?.get(slug(b)) || 0;
+        if (prev >= maxOppTimes) violations++;
+      }
+    }
+    return violations;
+  };
+
+  const takeBestTeam = (
+    candidates: string[][],
+    partnerMap: CountMap,
+    maxPartnerTimes: number
+  ) => {
+    if (!candidates.length) return null;
+
+    let best = candidates[0];
+    let bestScore = Number.POSITIVE_INFINITY;
+
+    for (const team of candidates) {
+      const score = partnerViolationsForTeam(team, partnerMap, maxPartnerTimes);
+      if (score < bestScore) {
+        best = team;
+        bestScore = score;
+        if (score === 0) break;
+      }
     }
 
-    // Leftovers → triples (3 or 6 players → 1 or 2 triples)
-    const leftovers = [...G.slice(gIdx), ...H.slice(hIdx)];
-    for(let i=0;i+2<leftovers.length;i+=3){
-      const t = leftovers.slice(i,i+3);
-      teams.push({ members:t, isTriple:true });
-    }
+    return best;
+  };
 
-    // Pair teams into matches, 2 teams per court, try to avoid repeat opponents
-    const teamList = teams.slice();
-    const made: QuadsMatchRow[] = [];
-    let court = startCourt;
+  const generateTeamCandidates = (
+    guysPool: string[],
+    girlsPool: string[],
+    size: number
+  ): string[][] => {
+    const candidates: string[][] = [];
 
-    while(teamList.length>=2){
-      const a = teamList.shift()!;
-      let idx=0, found=false;
-      for(let i=0;i<teamList.length;i++){
-        const b = teamList[i];
-        if(haventOpposedTeam(opponentMap,a.members,b.members)){
-          idx=i; found=true; break;
+    if (size === 4) {
+      // Prefer 2G/2M first
+      if (guysPool.length >= 2 && girlsPool.length >= 2) {
+        for (let gi1 = 0; gi1 < guysPool.length; gi1++) {
+          for (let gi2 = gi1 + 1; gi2 < guysPool.length; gi2++) {
+            for (let fi1 = 0; fi1 < girlsPool.length; fi1++) {
+              for (let fi2 = fi1 + 1; fi2 < girlsPool.length; fi2++) {
+                candidates.push([
+                  guysPool[gi1],
+                  guysPool[gi2],
+                  girlsPool[fi1],
+                  girlsPool[fi2],
+                ]);
+                if (candidates.length >= 40) return candidates;
+              }
+            }
+          }
         }
       }
-      const b = teamList.splice(found?idx:0,1)[0];
 
-      // update opponent map
-      for(const A of a.members){
-        const SA=slug(A);
-        const set = opponentMap.get(SA) || new Set<string>();
-        for(const B of b.members) set.add(slug(B));
-        opponentMap.set(SA,set);
-      }
-      for(const A of b.members){
-        const SA=slug(A);
-        const set = opponentMap.get(SA) || new Set<string>();
-        for(const B of a.members) set.add(slug(B));
-        opponentMap.set(SA,set);
+      // Then 3+1 combos
+      if (guysPool.length >= 3 && girlsPool.length >= 1) {
+        for (let gi1 = 0; gi1 < guysPool.length; gi1++) {
+          for (let gi2 = gi1 + 1; gi2 < guysPool.length; gi2++) {
+            for (let gi3 = gi2 + 1; gi3 < guysPool.length; gi3++) {
+              for (let fi = 0; fi < girlsPool.length; fi++) {
+                candidates.push([
+                  guysPool[gi1],
+                  guysPool[gi2],
+                  guysPool[gi3],
+                  girlsPool[fi],
+                ]);
+                if (candidates.length >= 40) return candidates;
+              }
+            }
+          }
+        }
       }
 
-      made.push({
-        id: `${roundIdx}-${court}-${Date.now()}-${Math.random().toString(36).slice(2,7)}`,
-        round: roundIdx,
-        court: court++,
-        t1: a.members,
-        t2: b.members,
-        isTriple1: a.isTriple,
-        isTriple2: b.isTriple,
-        scoreText: '',
-      });
+      if (girlsPool.length >= 3 && guysPool.length >= 1) {
+        for (let fi1 = 0; fi1 < girlsPool.length; fi1++) {
+          for (let fi2 = fi1 + 1; fi2 < girlsPool.length; fi2++) {
+            for (let fi3 = fi2 + 1; fi3 < girlsPool.length; fi3++) {
+              for (let gi = 0; gi < guysPool.length; gi++) {
+                candidates.push([
+                  girlsPool[fi1],
+                  girlsPool[fi2],
+                  girlsPool[fi3],
+                  guysPool[gi],
+                ]);
+                if (candidates.length >= 40) return candidates;
+              }
+            }
+          }
+        }
+      }
+
+      // Finally allow 4 same-gender only if mathematically necessary
+      if (guysPool.length >= 4) {
+        for (let i = 0; i < guysPool.length; i++) {
+          for (let j = i + 1; j < guysPool.length; j++) {
+            for (let k = j + 1; k < guysPool.length; k++) {
+              for (let l = k + 1; l < guysPool.length; l++) {
+                candidates.push([guysPool[i], guysPool[j], guysPool[k], guysPool[l]]);
+                if (candidates.length >= 40) return candidates;
+              }
+            }
+          }
+        }
+      }
+
+      if (girlsPool.length >= 4) {
+        for (let i = 0; i < girlsPool.length; i++) {
+          for (let j = i + 1; j < girlsPool.length; j++) {
+            for (let k = j + 1; k < girlsPool.length; k++) {
+              for (let l = k + 1; l < girlsPool.length; l++) {
+                candidates.push([girlsPool[i], girlsPool[j], girlsPool[k], girlsPool[l]]);
+                if (candidates.length >= 40) return candidates;
+              }
+            }
+          }
+        }
+      }
     }
 
-    return made;
+    if (size === 3) {
+      // Prefer at least 1 girl
+      if (guysPool.length >= 2 && girlsPool.length >= 1) {
+        for (let gi1 = 0; gi1 < guysPool.length; gi1++) {
+          for (let gi2 = gi1 + 1; gi2 < guysPool.length; gi2++) {
+            for (let fi = 0; fi < girlsPool.length; fi++) {
+              candidates.push([guysPool[gi1], guysPool[gi2], girlsPool[fi]]);
+              if (candidates.length >= 40) return candidates;
+            }
+          }
+        }
+      }
+
+      if (girlsPool.length >= 2 && guysPool.length >= 1) {
+        for (let fi1 = 0; fi1 < girlsPool.length; fi1++) {
+          for (let fi2 = fi1 + 1; fi2 < girlsPool.length; fi2++) {
+            for (let gi = 0; gi < guysPool.length; gi++) {
+              candidates.push([girlsPool[fi1], girlsPool[fi2], guysPool[gi]]);
+              if (candidates.length >= 40) return candidates;
+            }
+          }
+        }
+      }
+
+      // Only if needed
+      if (guysPool.length >= 3) {
+        for (let i = 0; i < guysPool.length; i++) {
+          for (let j = i + 1; j < guysPool.length; j++) {
+            for (let k = j + 1; k < guysPool.length; k++) {
+              candidates.push([guysPool[i], guysPool[j], guysPool[k]]);
+              if (candidates.length >= 40) return candidates;
+            }
+          }
+        }
+      }
+
+      if (girlsPool.length >= 3) {
+        for (let i = 0; i < girlsPool.length; i++) {
+          for (let j = i + 1; j < girlsPool.length; j++) {
+            for (let k = j + 1; k < girlsPool.length; k++) {
+              candidates.push([girlsPool[i], girlsPool[j], girlsPool[k]]);
+              if (candidates.length >= 40) return candidates;
+            }
+          }
+        }
+      }
+    }
+
+    return candidates;
+  };
+
+  const removePlayersFromPools = (
+    team: string[],
+    guysPool: string[],
+    girlsPool: string[]
+  ) => {
+    const nextGuys = guysPool.slice();
+    const nextGirls = girlsPool.slice();
+
+    for (const player of team) {
+      const gi = nextGuys.findIndex((x) => x === player);
+      if (gi !== -1) {
+        nextGuys.splice(gi, 1);
+        continue;
+      }
+      const fi = nextGirls.findIndex((x) => x === player);
+      if (fi !== -1) {
+        nextGirls.splice(fi, 1);
+      }
+    }
+
+    return { nextGuys, nextGirls };
+  };
+
+  const scoreRound = (
+    historyPartner: CountMap,
+    historyOpp: CountMap,
+    newMatches: QuadsMatchRow[],
+    maxPartner: number,
+    maxOpp: number
+  ) => {
+    const partnerMap = cloneCountMap(historyPartner);
+    const oppMap = cloneCountMap(historyOpp);
+
+    let partnerViolations = 0;
+    let opponentViolations = 0;
+
+    for (const m of newMatches) {
+      for (const team of [m.t1, m.t2]) {
+        partnerViolations += partnerViolationsForTeam(team, partnerMap, maxPartner);
+        bumpPartners(partnerMap, team);
+      }
+
+      opponentViolations += opponentViolationsBetweenTeams(m.t1, m.t2, oppMap, maxOpp);
+      bumpOpponents(oppMap, m.t1, m.t2);
+    }
+
+    return {
+      partnerViolations,
+      opponentViolations,
+      totalScore: partnerViolations * 100 + opponentViolations,
+    };
+  };
+
+  function buildRound(roundIdx: number, history: QuadsMatchRow[]) {
+    const totalPlayers = guys.length + girls.length;
+    if (totalPlayers < 3) return { matches: [] as QuadsMatchRow[], sitOutNames: [] as string[] };
+
+    const historyPartner = buildPartnerMap(history);
+    const historyOpp = buildOpponentMap(history);
+
+    const MAX_PARTNER_TIMES = strict ? 1 : Number.POSITIVE_INFINITY;
+    const MAX_OPP_TIMES = strict ? 2 : Number.POSITIVE_INFINITY;
+    const ATTEMPTS = strict ? 28 : 1;
+
+    let best:
+      | {
+          matches: QuadsMatchRow[];
+          sitOutNames: string[];
+          score: number;
+        }
+      | null = null;
+
+    for (let attempt = 0; attempt < ATTEMPTS; attempt++) {
+      let guysPool = shuffle(guys);
+      let girlsPool = shuffle(girls);
+
+      const teams: { members: string[]; isTriple: boolean }[] = [];
+      const sitOutNames: string[] = [];
+      const localPartner = cloneCountMap(historyPartner);
+
+      const totalCount = guysPool.length + girlsPool.length;
+
+      let numQuads = 0;
+      let numTriples = 0;
+
+      if (totalCount % 4 === 0) {
+        numQuads = totalCount / 4;
+      } else {
+        numQuads = Math.floor(totalCount / 4);
+        let leftover = totalCount - numQuads * 4;
+        while ((leftover === 1 || leftover === 2) && numQuads > 0) {
+          numQuads -= 1;
+          leftover = totalCount - numQuads * 4;
+        }
+        numTriples = leftover > 0 ? leftover / 3 : 0;
+      }
+
+      // Build quads first
+      for (let i = 0; i < numQuads; i++) {
+        const candidates = generateTeamCandidates(guysPool, girlsPool, 4);
+        const team = takeBestTeam(candidates, localPartner, MAX_PARTNER_TIMES);
+        if (!team) break;
+
+        teams.push({ members: team, isTriple: false });
+        bumpPartners(localPartner, team);
+
+        const removed = removePlayersFromPools(team, guysPool, girlsPool);
+        guysPool = removed.nextGuys;
+        girlsPool = removed.nextGirls;
+      }
+
+      // Then triples
+      for (let i = 0; i < numTriples; i++) {
+        const candidates = generateTeamCandidates(guysPool, girlsPool, 3);
+        const team = takeBestTeam(candidates, localPartner, MAX_PARTNER_TIMES);
+        if (!team) break;
+
+        teams.push({ members: team, isTriple: true });
+        bumpPartners(localPartner, team);
+
+        const removed = removePlayersFromPools(team, guysPool, girlsPool);
+        guysPool = removed.nextGuys;
+        girlsPool = removed.nextGirls;
+      }
+
+      // Any leftovers become sit-outs
+      sitOutNames.push(...guysPool);
+      sitOutNames.push(...girlsPool);
+
+      // Pair teams into matches
+      const localOpp = cloneCountMap(historyOpp);
+      const waiting = shuffle(teams);
+      const attemptMatches: QuadsMatchRow[] = [];
+      let court = startCourt;
+
+      while (waiting.length >= 2) {
+        const a = waiting.shift()!;
+
+        let bestIdx = 0;
+        let bestOppScore = Number.POSITIVE_INFINITY;
+
+        for (let i = 0; i < waiting.length; i++) {
+          const b = waiting[i];
+          const score = opponentViolationsBetweenTeams(
+            a.members,
+            b.members,
+            localOpp,
+            MAX_OPP_TIMES
+          );
+
+          if (score < bestOppScore) {
+            bestOppScore = score;
+            bestIdx = i;
+            if (score === 0) break;
+          }
+        }
+
+        const b = waiting.splice(bestIdx, 1)[0];
+        bumpOpponents(localOpp, a.members, b.members);
+
+        attemptMatches.push({
+          id: `${roundIdx}-${court}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+          round: roundIdx,
+          court: court++,
+          t1: a.members,
+          t2: b.members,
+          isTriple1: a.isTriple,
+          isTriple2: b.isTriple,
+          scoreText: "",
+        });
+      }
+
+      // If odd number of teams, leftover whole team sits
+      if (waiting.length === 1) {
+        sitOutNames.push(...waiting[0].members);
+      }
+
+      const scored = scoreRound(
+        historyPartner,
+        historyOpp,
+        attemptMatches,
+        MAX_PARTNER_TIMES,
+        MAX_OPP_TIMES
+      );
+
+      const totalScore = scored.totalScore + sitOutNames.length * 3;
+
+      if (!best || totalScore < best.score) {
+        best = {
+          matches: attemptMatches,
+          sitOutNames,
+          score: totalScore,
+        };
+        if (strict && totalScore === 0) break;
+      }
+    }
+
+    return best
+      ? { matches: best.matches, sitOutNames: best.sitOutNames }
+      : { matches: [] as QuadsMatchRow[], sitOutNames: [] as string[] };
   }
 
-  function onGenerate(){
+  function onGenerate() {
     const n = clampN(roundsToGen, 1);
     const out: QuadsMatchRow[] = [];
+    const allSitOuts: string[] = [];
+
     let history = matches.slice();
-    const currentMax = history.reduce((mx,m)=> Math.max(mx,m.round),0) || 0;
-    for(let i=1;i<=n;i++){
+    const currentMax = history.reduce((mx, m) => Math.max(mx, m.round), 0) || 0;
+
+    for (let i = 1; i <= n; i++) {
       const roundIdx = currentMax + i;
-      const one = buildRound(roundIdx, history);
-      out.push(...one);
-      history = history.concat(one);
+      const result = buildRound(roundIdx, history);
+      out.push(...result.matches);
+      allSitOuts.push(...result.sitOutNames.map((name) => `Round ${roundIdx}: ${name}`));
+      history = history.concat(result.matches);
     }
-    setMatches(prev=> (Array.isArray(prev)? prev:[]).concat(out));
+
+    setMatches((prev) => (Array.isArray(prev) ? prev : []).concat(out));
+    setSitOuts(allSitOuts);
   }
 
   return (
-    <section className="mt-6 bg-white/90 backdrop-blur rounded-xl shadow ring-1 ring-slate-200 p-4">
+    <section className="bg-white/90 backdrop-blur rounded-xl shadow ring-1 ring-slate-200 p-4">
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <h3 className="text-[16px] font-semibold text-sky-800">Round Generator (Quads)</h3>
+
         <div className="flex items-center gap-3 text-[12px] flex-wrap">
           <label className="flex items-center gap-1">
             <input
               type="checkbox"
               checked={strict}
-              onChange={(e)=>setStrict(e.target.checked)}
+              onChange={(e) => setStrict(e.target.checked)}
             />
-            Strict no-repeat (opponents)
+            Strict: limit repeat partners/opponents
           </label>
+
           <label className="flex items-center gap-1">
             Rounds
             <input
               type="number"
               min={1}
               value={roundsToGen}
-              onChange={(e)=>setRoundsToGen(clampN(+e.target.value||1,1))}
+              onChange={(e) => setRoundsToGen(clampN(+e.target.value || 1, 1))}
               className="w-16 border rounded px-2 py-1"
             />
           </label>
+
           <label className="flex items-center gap-1">
             Start court
             <input
               type="number"
               min={1}
               value={startCourt}
-              onChange={(e)=>setStartCourt(clampN(+e.target.value||1,1))}
+              onChange={(e) => setStartCourt(clampN(+e.target.value || 1, 1))}
               className="w-16 border rounded px-2 py-1"
             />
           </label>
+
           <button
             className="px-3 py-1.5 rounded-lg bg-blue-600 text-white hover:bg-blue-700 shadow-sm active:scale-[.99]"
             onClick={onGenerate}
@@ -1816,10 +2216,24 @@ function QuadsRoundGenerator({
           </button>
         </div>
       </div>
+
       <p className="text-[11px] text-slate-500 mt-2">
-        Quads engine prioritizes 2 guys + 2 girls per team. Leftover players form up to two Triples teams. Strict mode
-        avoids repeat opponents as much as possible.
+        Quads prefers 2 guys + 2 girls first, then 3+1, and only makes same-gender teams when necessary.
+        If some players or one extra team cannot be placed, they are listed below as sit-outs.
       </p>
+
+      {sitOuts.length > 0 && (
+        <div className="mt-3 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2">
+          <div className="text-[12px] font-semibold text-amber-800 mb-1">
+            Sit-outs / Unpaired players
+          </div>
+          <ul className="text-[12px] text-amber-900 space-y-1">
+            {sitOuts.map((name, idx) => (
+              <li key={`${name}-${idx}`}>• {name}</li>
+            ))}
+          </ul>
+        </div>
+      )}
     </section>
   );
 }
