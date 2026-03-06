@@ -1265,19 +1265,18 @@ function PlayoffBuilder({
     ()=> computeStandings(matches, guysText, girlsText),
     [matches, guysText, girlsText],
   );
+
   const [upperK, setUpperK] = useState<number>(Math.ceil(Math.max(1, guysRows.length)/2));
   const [seedRandom, setSeedRandom] = useState<boolean>(true);
-  const [groupSize, setGroupSize] = useState<number>(4); // randomized pairing window size
-  const [byeUpper, setByeUpper] = useState<number>(0); // top-seed BYEs for UPPER
-  const [byeLower, setByeLower] = useState<number>(0); // top-seed BYEs for LOWER
-  const [rrRandomize, setRrRandomize] = useState<boolean>(false); // randomize partners in combined RR
+  const [groupSize, setGroupSize] = useState<number>(4);
+  const [byeUpper, setByeUpper] = useState<number>(0);
+  const [byeLower, setByeLower] = useState<number>(0);
+  const [rrRandomize, setRrRandomize] = useState<boolean>(false);
 
-  // Build teams from buckets, then seed by COMBINED pool results (W first) then combined PD
   function build(div:PlayDiv, guySlice:{start:number,end:number}, girlSlice:{start:number,end:number}){
-    const g = guysRows.slice(guySlice.start, guySlice.end); // sorted by guys W/PD already
+    const g = guysRows.slice(guySlice.start, guySlice.end);
     const h = girlsRows.slice(girlSlice.start, girlSlice.end);
 
-    // Helper: quick lookup of stats by name
     const gStats = new Map(guysRows.map(r=>[r.name, r] as const));
     const hStats = new Map(girlsRows.map(r=>[r.name, r] as const));
 
@@ -1288,12 +1287,14 @@ function PlayoffBuilder({
       const end = Math.min(base + Math.max(2, groupSize), K);
       const girlsWindow = h.slice(base, end);
       const girlsShuffled = seedRandom ? shuffle(girlsWindow) : girlsWindow;
+
       for(let j = base; j < end; j++){
         const guy = g[j];
         const girl = girlsShuffled[j - base];
         const name = `${guy?.name || '—'} & ${girl?.name || '—'}`;
+
         teams.push({
-          id:`${div}-tmp-${j+1}-{slug(name)}`,
+          id:`${div}-tmp-${j+1}-${slug(name)}`,
           name,
           members:[guy?.name||'', girl?.name||''],
           seed:j+1,
@@ -1302,17 +1303,18 @@ function PlayoffBuilder({
       }
     }
 
-    // Rank by combined record (W first) then combined PD
     const score = (t:Team)=>{
       const stats = t.members.map(n => gStats.get(n) || hStats.get(n) || {W:0,L:0,PD:0});
       const W = stats.reduce((s,v)=> s+(v.W||0), 0);
-      const PD= stats.reduce((s,v)=> s+(v.PD||0),0);
+      const PD= stats.reduce((s,v)=> s+(v.PD||0), 0);
       return { W, PD };
     };
+
     teams.sort((A,B)=>{
       const sA = score(A), sB = score(B);
       return (sB.W - sA.W) || (sB.PD - sA.PD) || A.name.localeCompare(B.name);
     });
+
     teams.forEach((t,i)=>{
       t.seed = i+1;
       t.id = `${div}-${t.seed}-${slug(t.name)}`;
@@ -1322,10 +1324,30 @@ function PlayoffBuilder({
   }
 
   function onBuild(){
-    const upperTeams = build('UPPER', {start:0,end:upperK}, {start:0,end:upperK});
-    const lowerTeams = build('LOWER', {start:upperK,end:guysRows.length}, {start:upperK,end:girlsRows.length});
+    const safeUpperK = Math.max(
+      1,
+      Math.min(
+        upperK,
+        guysRows.length,
+        girlsRows.length
+      )
+    );
+
+    const upperTeams = build(
+      'UPPER',
+      {start:0,end:safeUpperK},
+      {start:0,end:safeUpperK}
+    );
+
+    const lowerTeams = build(
+      'LOWER',
+      {start:safeUpperK,end:guysRows.length},
+      {start:safeUpperK,end:girlsRows.length}
+    );
+
     const upperMain = buildBracket('UPPER', upperTeams, byeUpper);
     const lowerMain = buildBracket('LOWER', lowerTeams, byeLower);
+
     setBrackets(() => ([...upperMain, ...lowerMain]));
   }
 
@@ -1334,20 +1356,25 @@ function PlayoffBuilder({
       const main = prev.filter(b => b.division==='UPPER' || b.division==='LOWER');
       const rrPruned = prev.filter(b => b.division!=='RR');
 
-      // Collect losers from Round 1 & 2 of UPPER+LOWER **with entered scores**
       const losers: Team[] = [];
 
       const decided = main.filter(
-        m=> (m.round===1 || m.round===2) &&
-            m.team1 && m.team2 &&
-            typeof m.score==='string' && m.score.trim(),
+        m =>
+          (m.round===1 || m.round===2) &&
+          m.team1 &&
+          m.team2 &&
+          typeof m.score === 'string' &&
+          m.score.trim()
       );
+
       for (const m of decided) {
         const parsed = parseScore(m.score);
         if(!parsed) continue;
+
         const [a,b] = parsed;
         const winner = a>b ? m.team1 : m.team2;
         const loser  = a>b ? m.team2 : m.team1;
+
         if(loser){
           losers.push({
             id:`RR-carry-${losers.length+1}`,
@@ -1357,7 +1384,7 @@ function PlayoffBuilder({
             division:'RR',
           });
         }
-        // also auto-advance winner to next if wiring exists (safety)
+
         if(winner && m.nextId && m.nextSide){
           const parent = main.find(x=>x.id===m.nextId);
           if(parent){
@@ -1367,14 +1394,18 @@ function PlayoffBuilder({
         }
       }
 
-      // Optional: re-randomize RR partners
       let rrTeams: Team[] = [];
+
       if(rrRandomize){
         const pool = losers.flatMap(t=> t.members);
         const names = uniq(pool).filter(Boolean);
         const shuffled = shuffle(names);
+
         for(let i=0;i<shuffled.length;i+=2){
-          const a = shuffled[i], b = shuffled[i+1]; if(!a || !b) break;
+          const a = shuffled[i];
+          const b = shuffled[i+1];
+          if(!a || !b) break;
+
           const name = `${a} & ${b}`;
           rrTeams.push({
             id:`RR-${i/2+1}-${slug(name)}`,
@@ -1384,8 +1415,12 @@ function PlayoffBuilder({
             division:'RR',
           });
         }
-      }else{
-        rrTeams = losers;
+      } else {
+        rrTeams = losers.map((t, i) => ({
+          ...t,
+          seed: i + 1,
+          id: `RR-${i+1}-${slug(t.name)}`,
+        }));
       }
 
       const rrBracket = buildBracket('RR', rrTeams, 0);
@@ -1393,9 +1428,16 @@ function PlayoffBuilder({
     });
   }
 
+  const actualUpperTeams = Math.min(upperK, guysRows.length, girlsRows.length);
+  const actualLowerTeams = Math.min(
+    Math.max(0, guysRows.length - actualUpperTeams),
+    Math.max(0, girlsRows.length - actualUpperTeams)
+  );
+
   return (
-    <section className="mt-6 bg-white/95 backdrop-blur rounded-xl shadow ring-1 ring-slate-200 p-4">
+    <section className="bg-white/95 backdrop-blur rounded-xl shadow ring-1 ring-slate-200 p-4">
       <h3 className="text-[16px] font-semibold text-sky-800 mb-2">Playoff Setup (Doubles)</h3>
+
       <div className="grid md:grid-cols-2 gap-3 text-[12px]">
         <div className="space-y-2">
           <label className="flex items-center gap-2">
@@ -1408,6 +1450,7 @@ function PlayoffBuilder({
               onChange={(e)=>setUpperK(clampN(+e.target.value||1,1))}
             />
           </label>
+
           <label className="flex items-center gap-2">
             Pairing window (group shuffle)
             <input
@@ -1418,6 +1461,7 @@ function PlayoffBuilder({
               onChange={(e)=>setGroupSize(clampN(+e.target.value||2,2))}
             />
           </label>
+
           <label className="flex items-center gap-2">
             <input
               type="checkbox"
@@ -1427,6 +1471,7 @@ function PlayoffBuilder({
             Randomize within window
           </label>
         </div>
+
         <div className="space-y-2">
           <label className="flex items-center gap-2">
             Top BYEs (Upper)
@@ -1438,6 +1483,7 @@ function PlayoffBuilder({
               onChange={(e)=>setByeUpper(clampN(+e.target.value||0,0))}
             />
           </label>
+
           <label className="flex items-center gap-2">
             Top BYEs (Lower)
             <input
@@ -1448,6 +1494,7 @@ function PlayoffBuilder({
               onChange={(e)=>setByeLower(clampN(+e.target.value||0,0))}
             />
           </label>
+
           <label className="flex items-center gap-2">
             <input
               type="checkbox"
@@ -1458,13 +1505,37 @@ function PlayoffBuilder({
           </label>
         </div>
       </div>
-      <div className="mt-3 flex items-center gap-2">
+
+      <div className="mt-3 grid md:grid-cols-2 gap-3 text-[12px]">
+        <div className="rounded-lg border border-sky-200 bg-sky-50 px-3 py-2">
+          <div className="font-semibold text-sky-800">Projected Upper Division</div>
+          <div className="mt-1 text-slate-700">
+            {actualUpperTeams} teams
+          </div>
+          <div className="text-[11px] text-slate-500">
+            Built from top {actualUpperTeams} guys + top {actualUpperTeams} girls
+          </div>
+        </div>
+
+        <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+          <div className="font-semibold text-slate-800">Projected Lower Division</div>
+          <div className="mt-1 text-slate-700">
+            {actualLowerTeams} teams
+          </div>
+          <div className="text-[11px] text-slate-500">
+            Remaining players after Upper are used here
+          </div>
+        </div>
+      </div>
+
+      <div className="mt-3 flex items-center gap-2 flex-wrap">
         <button
           className="px-3 py-1.5 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 shadow-sm text-[13px]"
           onClick={onBuild}
         >
           Build Upper &amp; Lower
         </button>
+
         <button
           className="px-3 py-1.5 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 shadow-sm text-[13px]"
           onClick={buildCombinedRR}
@@ -1472,14 +1543,14 @@ function PlayoffBuilder({
           Build Redemption Rally
         </button>
       </div>
+
       <p className="text-[11px] text-slate-500 mt-2">
-        Upper/Lower teams are formed by pairing top halves of Guys/Girls and seeding by combined W then PD. BYEs are given
-        to top seeds if configured. RR combines first/second-round losers (optionally re-randomized).
+        Upper/Lower teams are formed by pairing top halves of Guys/Girls and seeding by combined W then PD.
+        This version safely handles uneven roster sizes by only building as many teams as both sides allow.
       </p>
     </section>
   );
 }
-
 /* ========================= QUADS: Matches View ========================= */
 
 function QuadsMatchesView({
