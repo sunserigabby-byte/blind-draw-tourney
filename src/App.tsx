@@ -1919,7 +1919,85 @@ function QuadsLeaderboard({
     </section>
   );
 }
+type QuadsPlayerRow = {
+  name: string;
+  gender: "M" | "F";
+  W: number;
+  L: number;
+  PD: number;
+};
 
+function computeQuadsStandingsFull(
+  matches: QuadsMatchRow[],
+  guysText: string,
+  girlsText: string
+) {
+  const guysList = Array.from(
+    new Set((guysText || "").split(/\r?\n/).map((s) => s.trim()).filter(Boolean))
+  );
+
+  const girlsList = Array.from(
+    new Set((girlsText || "").split(/\r?\n/).map((s) => s.trim()).filter(Boolean))
+  );
+
+  const guysSet = new Set(guysList.map(slug));
+  const girlsSet = new Set(girlsList.map(slug));
+
+  type Bucket = { name: string; W: number; L: number; PD: number };
+
+  const g = new Map<string, Bucket>();
+  const h = new Map<string, Bucket>();
+
+  const ensure = (map: Map<string, Bucket>, n: string) => {
+    if (!map.has(n)) map.set(n, { name: n, W: 0, L: 0, PD: 0 });
+    return map.get(n)!;
+  };
+
+  for (const n of guysList) ensure(g, n);
+  for (const n of girlsList) ensure(h, n);
+
+  for (const m of matches) {
+    const s = parseScore(m.scoreText);
+    if (!s) continue;
+
+    const [a, b] = s;
+    if (!isValidQuadsScore(a, b)) continue;
+
+    const diff = Math.abs(a - b);
+    const t1Won = a > b;
+
+    const apply = (name: string, won: boolean) => {
+      const isGuy = guysSet.has(slug(name));
+      const isGirl = girlsSet.has(slug(name));
+      const map = isGuy ? g : isGirl ? h : g;
+      const row = ensure(map, name);
+
+      if (won) {
+        row.W++;
+        row.PD += diff;
+      } else {
+        row.L++;
+        row.PD -= diff;
+      }
+    };
+
+    for (const p of m.t1) apply(p, t1Won);
+    for (const p of m.t2) apply(p, !t1Won);
+  }
+
+  const sortRows = (arr: Bucket[]) =>
+    arr.sort((x, y) => y.W - x.W || y.PD - x.PD || x.name.localeCompare(y.name));
+
+  const guysRows = sortRows(Array.from(g.values()));
+  const girlsRows = sortRows(Array.from(h.values()));
+
+  const allRows: QuadsPlayerRow[] = [
+    ...guysRows.map((r) => ({ ...r, gender: "M" as const })),
+    ...girlsRows.map((r) => ({ ...r, gender: "F" as const })),
+  ].sort((x, y) => y.W - x.W || y.PD - x.PD || x.name.localeCompare(y.name));
+
+  return { guysRows, girlsRows, allRows };
+}
 /* ========================= QUADS: Playoff Builder ========================= */
 
 function QuadsPlayoffBuilder({
