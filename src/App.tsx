@@ -197,7 +197,7 @@ function SunnyLogo(){
         <circle cx="32" cy="32" r="13.5" fill="none" stroke="#fde68a" strokeOpacity=".6" strokeWidth="1" />
       </svg>
       <div className="leading-tight">
-        <div className="font-extrabold tracking-tight text-sky-50 text-[16px]">Sunny Sports Performance</div>
+        <div className="font-extrabold tracking-tight text-sky-50 text-[16px]">Blueprint Athletics</div>
         <div className="text-[11px] text-sky-100/90">Blind Draw Tourney</div>
       </div>
     </div>
