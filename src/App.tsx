@@ -700,25 +700,45 @@ function RoundGenerator({
     return penalty;
   }
 
-  function scoreMatchup(
-    opponentMap: Map<string, Set<string>>,
-    teamA: [string, string],
-    teamB: [string, string]
-  ) {
-    const pairs: [string, string][] = [
-      [teamA[0], teamB[0]],
-      [teamA[0], teamB[1]],
-      [teamA[1], teamB[0]],
-      [teamA[1], teamB[1]],
-    ];
+ function scoreMatchup(
+  opponentMap: Map<string, Set<string>>,
+  teamA: [string, string],
+  teamB: [string, string],
+  tagA: MatchRow["tag"],
+  tagB: MatchRow["tag"]
+) {
+  const pairs: [string, string][] = [
+    [teamA[0], teamB[0]],
+    [teamA[0], teamB[1]],
+    [teamA[1], teamB[0]],
+    [teamA[1], teamB[1]],
+  ];
 
-    let penalty = 0;
-    for (const [a, b] of pairs) {
-      if (strict && hasOpposedBefore(opponentMap, a, b)) penalty += 100;
-    }
-    return penalty;
+  let penalty = 0;
+
+  const typeA = tagA ?? "REVCO";
+  const typeB = tagB ?? "REVCO";
+
+  // Best outcome: RevCo vs RevCo
+  if (typeA === "REVCO" && typeB === "REVCO") {
+    penalty += 0;
+  }
+  // Next-best: same-type non-RevCo
+  else if (typeA === typeB) {
+    penalty += 100;
+  }
+  // Allowed, but less preferred: mixed-type matchups
+  else {
+    penalty += 500;
   }
 
+  // Also minimize repeat opponents
+  for (const [a, b] of pairs) {
+    if (strict && hasOpposedBefore(opponentMap, a, b)) penalty += 100;
+  }
+
+  return penalty;
+}
   function scoreCourtForPlayers(
     courtMap: Map<string, Map<number, number>>,
     players: string[],
@@ -881,17 +901,17 @@ function RoundGenerator({
       const a = teamList.shift()!;
 
       let bestIdx = 0;
-      let bestScore = Number.POSITIVE_INFINITY;
+let bestScore = Number.POSITIVE_INFINITY;
 
-      for (let i = 0; i < teamList.length; i++) {
-        const b = teamList[i];
-        const score = scoreMatchup(opponentMap, a.team, b.team);
-        if (score < bestScore) {
-          bestScore = score;
-          bestIdx = i;
-          if (score === 0) break;
-        }
-      }
+for (let i = 0; i < teamList.length; i++) {
+  const b = teamList[i];
+  const score = scoreMatchup(opponentMap, a.team, b.team, a.tag, b.tag);
+  if (score < bestScore) {
+    bestScore = score;
+    bestIdx = i;
+    if (score === 0) break;
+  }
+}
 
       const b = teamList.splice(bestIdx, 1)[0];
 
