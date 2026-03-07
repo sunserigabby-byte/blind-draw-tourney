@@ -597,158 +597,385 @@ function RoundGenerator({
   girlsText,
   matches,
   setMatches,
-}:{
-  guysText:string;
-  girlsText:string;
-  matches:MatchRow[];
-  setMatches:(f:(prev:MatchRow[])=>MatchRow[]|MatchRow[])=>void;
-}){
+}: {
+  guysText: string;
+  girlsText: string;
+  matches: MatchRow[];
+  setMatches: (f: (prev: MatchRow[]) => MatchRow[] | MatchRow[]) => void;
+}) {
   const [strict, setStrict] = useState(true);
   const [roundsToGen, setRoundsToGen] = useState(1);
   const [startCourt, setStartCourt] = useState(1);
-  const [seedStr, setSeedStr] = useState('');
+  const [seedStr, setSeedStr] = useState("");
 
-  const guys = useMemo(()=> uniq((guysText||'').split(/\r?\n/).map(s=>s.trim()).filter(Boolean)),[guysText]);
-  const girls= useMemo(()=> uniq((girlsText||'').split(/\r?\n/).map(s=>s.trim()).filter(Boolean)),[girlsText]);
+  const guys = useMemo(
+    () => uniq((guysText || "").split(/\r?\n/).map(s => s.trim()).filter(Boolean)),
+    [guysText]
+  );
+  const girls = useMemo(
+    () => uniq((girlsText || "").split(/\r?\n/).map(s => s.trim()).filter(Boolean)),
+    [girlsText]
+  );
 
-  // Build maps from a given match history (so we can update within a multi-round generation batch)
-  const buildPartnerMap = (history:MatchRow[])=>{
-    const mp = new Map<string, Set<string>>();
-    for(const m of history){
-      const add=(a?:string,b?:string)=>{
-        if(!a||!b) return;
-        const A=slug(a),B=slug(b);
-        if(!mp.has(A)) mp.set(A,new Set());
-        if(!mp.has(B)) mp.set(B,new Set());
-        mp.get(A)!.add(B); mp.get(B)!.add(A);
-      };
-      add(m.t1p1,m.t1p2); add(m.t2p1,m.t2p2);
-    }
-    return mp;
+  type TeamBuild = {
+    team: [string, string];
+    tag: MatchRow["tag"];
   };
-  const buildOpponentMap = (history:MatchRow[])=>{
+
+  const addPairToMap = (mp: Map<string, Set<string>>, a?: string, b?: string) => {
+    if (!a || !b) return;
+    const A = slug(a);
+    const B = slug(b);
+    if (!mp.has(A)) mp.set(A, new Set());
+    if (!mp.has(B)) mp.set(B, new Set());
+    mp.get(A)!.add(B);
+    mp.get(B)!.add(A);
+  };
+
+  const buildPartnerMap = (history: MatchRow[]) => {
     const mp = new Map<string, Set<string>>();
-    for(const m of history){
-      const t1=[m.t1p1,m.t1p2], t2=[m.t2p1,m.t2p2];
-      for(const a of t1) for(const b of t2){
-        if(!a||!b) continue;
-        const A=slug(a),B=slug(b);
-        if(!mp.has(A)) mp.set(A,new Set());
-        mp.get(A)!.add(B);
-      }
-      for(const a of t2) for(const b of t1){
-        if(!a||!b) continue;
-        const A=slug(a),B=slug(b);
-        if(!mp.has(A)) mp.set(A,new Set());
-        mp.get(A)!.add(B);
-      }
+    for (const m of history) {
+      addPairToMap(mp, m.t1p1, m.t1p2);
+      addPairToMap(mp, m.t2p1, m.t2p2);
     }
     return mp;
   };
 
-  const canPair = (mp:Map<string,Set<string>>, a:string,b:string)=> !strict ? true : !(mp.get(slug(a))?.has(slug(b)));
-  const haventOpposed = (mp:Map<string,Set<string>>, a:string,b:string)=> !strict ? true : !(mp.get(slug(a))?.has(slug(b)));
+  const buildOpponentMap = (history: MatchRow[]) => {
+    const mp = new Map<string, Set<string>>();
 
-  function buildRound(roundIdx:number, history:MatchRow[]){
+    const addOpp = (a?: string, b?: string) => {
+      if (!a || !b) return;
+      const A = slug(a);
+      const B = slug(b);
+      if (!mp.has(A)) mp.set(A, new Set());
+      mp.get(A)!.add(B);
+    };
+
+    for (const m of history) {
+      const t1 = [m.t1p1, m.t1p2];
+      const t2 = [m.t2p1, m.t2p2];
+
+      for (const a of t1) for (const b of t2) addOpp(a, b);
+      for (const a of t2) for (const b of t1) addOpp(a, b);
+    }
+
+    return mp;
+  };
+
+  const buildCourtMap = (history: MatchRow[]) => {
+    const mp = new Map<string, Map<number, number>>();
+
+    const addCourt = (player?: string, court?: number) => {
+      if (!player || !court) return;
+      const key = slug(player);
+      if (!mp.has(key)) mp.set(key, new Map());
+      const inner = mp.get(key)!;
+      inner.set(court, (inner.get(court) || 0) + 1);
+    };
+
+    for (const m of history) {
+      addCourt(m.t1p1, m.court);
+      addCourt(m.t1p2, m.court);
+      addCourt(m.t2p1, m.court);
+      addCourt(m.t2p2, m.court);
+    }
+
+    return mp;
+  };
+
+  const hasPartneredBefore = (partnerMap: Map<string, Set<string>>, a: string, b: string) =>
+    !!partnerMap.get(slug(a))?.has(slug(b));
+
+  const hasOpposedBefore = (opponentMap: Map<string, Set<string>>, a: string, b: string) =>
+    !!opponentMap.get(slug(a))?.has(slug(b));
+
+  function scoreCandidateTeam(
+    partnerMap: Map<string, Set<string>>,
+    a: string,
+    b: string
+  ) {
+    let penalty = 0;
+    if (strict && hasPartneredBefore(partnerMap, a, b)) penalty += 1000;
+    return penalty;
+  }
+
+  function scoreMatchup(
+    opponentMap: Map<string, Set<string>>,
+    teamA: [string, string],
+    teamB: [string, string]
+  ) {
+    const pairs: [string, string][] = [
+      [teamA[0], teamB[0]],
+      [teamA[0], teamB[1]],
+      [teamA[1], teamB[0]],
+      [teamA[1], teamB[1]],
+    ];
+
+    let penalty = 0;
+    for (const [a, b] of pairs) {
+      if (strict && hasOpposedBefore(opponentMap, a, b)) penalty += 100;
+    }
+    return penalty;
+  }
+
+  function scoreCourtForPlayers(
+    courtMap: Map<string, Map<number, number>>,
+    players: string[],
+    court: number
+  ) {
+    let penalty = 0;
+    for (const p of players) {
+      const perCourt = courtMap.get(slug(p));
+      const count = perCourt?.get(court) || 0;
+      penalty += count * 25;
+    }
+    return penalty;
+  }
+
+  function noteCourtForPlayers(
+    courtMap: Map<string, Map<number, number>>,
+    players: string[],
+    court: number
+  ) {
+    for (const p of players) {
+      const key = slug(p);
+      if (!courtMap.has(key)) courtMap.set(key, new Map());
+      const inner = courtMap.get(key)!;
+      inner.set(court, (inner.get(court) || 0) + 1);
+    }
+  }
+
+  function makeMixedTeams(
+    guysPool: string[],
+    girlsPool: string[],
+    partnerMap: Map<string, Set<string>>
+  ) {
+    const mixed: TeamBuild[] = [];
+    const remainingGirls = [...girlsPool];
+
+    for (const guy of guysPool) {
+      if (!remainingGirls.length) break;
+
+      let bestIdx = -1;
+      let bestScore = Number.POSITIVE_INFINITY;
+
+      for (let i = 0; i < remainingGirls.length; i++) {
+        const girl = remainingGirls[i];
+        const score = scoreCandidateTeam(partnerMap, guy, girl);
+        if (score < bestScore) {
+          bestScore = score;
+          bestIdx = i;
+          if (score === 0) break;
+        }
+      }
+
+      if (bestIdx >= 0) {
+        const girl = remainingGirls.splice(bestIdx, 1)[0];
+        mixed.push({
+          team: [guy, girl],
+          tag: null,
+        });
+        addPairToMap(partnerMap, guy, girl);
+      }
+    }
+
+    return {
+      mixed,
+      leftoverGirls: remainingGirls,
+    };
+  }
+
+  function makeSameGenderTeams(
+    players: string[],
+    tag: MatchRow["tag"],
+    partnerMap: Map<string, Set<string>>
+  ) {
+    const out: TeamBuild[] = [];
+    const pool = [...players];
+
+    while (pool.length >= 2) {
+      let bestPair: [number, number] | null = null;
+      let bestScore = Number.POSITIVE_INFINITY;
+
+      for (let i = 0; i < pool.length; i++) {
+        for (let j = i + 1; j < pool.length; j++) {
+          const score = scoreCandidateTeam(partnerMap, pool[i], pool[j]);
+          if (score < bestScore) {
+            bestScore = score;
+            bestPair = [i, j];
+            if (score === 0) break;
+          }
+        }
+        if (bestScore === 0) break;
+      }
+
+      if (!bestPair) break;
+
+      const [i, j] = bestPair;
+      const a = pool[i];
+      const b = pool[j];
+
+      const nextPool = pool.filter((_, idx) => idx !== i && idx !== j);
+      pool.length = 0;
+      pool.push(...nextPool);
+
+      out.push({
+        team: [a, b],
+        tag,
+      });
+
+      addPairToMap(partnerMap, a, b);
+    }
+
+    return {
+      teams: out,
+      leftovers: pool,
+    };
+  }
+
+  function buildRound(roundIdx: number, history: MatchRow[]) {
     const seedNum = seedStr ? Number(seedStr) : undefined;
-    const G = shuffle(guys, seedNum);
-    const H = shuffle(girls, seedNum? seedNum+17 : undefined);
+
+    const shuffledGuys = shuffle(guys, seedNum);
+    const shuffledGirls = shuffle(girls, seedNum ? seedNum + 17 : undefined);
 
     const partnerMap = buildPartnerMap(history);
     const opponentMap = buildOpponentMap(history);
+    const courtMap = buildCourtMap(history);
 
-    const pairs: {team:[string,string], tag:MatchRow['tag']}[] = [];
-    const n = Math.min(G.length, H.length);
+    // Step 1: Make as many mixed teams as possible
+    const mixedCount = Math.min(shuffledGuys.length, shuffledGirls.length);
+    const guysForMixed = shuffledGuys.slice(0, mixedCount);
+    const girlsForMixed = shuffledGirls.slice(0, mixedCount);
 
-    for(let i=0;i<n;i++){
-      const g = G[i], h = H[i];
-      if(canPair(partnerMap,g,h)){
-        pairs.push({team:[g,h], tag:null});
-        const a=slug(g), b=slug(h);
-        partnerMap.get(a)?.add(b) || partnerMap.set(a,new Set([b]));
-        partnerMap.get(b)?.add(a) || partnerMap.set(b,new Set([a]));
-      }else{
-        let placed=false;
-        for(let j=i+1;j<n;j++){
-          if(canPair(partnerMap,g,H[j])){
-            const tmp=H[i]; H[i]=H[j]; H[j]=tmp;
-            pairs.push({team:[g,H[i]], tag:null});
-            placed=true;
-            const a=slug(g), b=slug(H[i]);
-            partnerMap.get(a)?.add(b) || partnerMap.set(a,new Set([b]));
-            partnerMap.get(b)?.add(a) || partnerMap.set(b,new Set([a]));
-            break;
-          }
-        }
-        if(!placed){
-          pairs.push({team:[g,h], tag:null});
-          const a=slug(g), b=slug(h);
-          partnerMap.get(a)?.add(b) || partnerMap.set(a,new Set([b]));
-          partnerMap.get(b)?.add(a) || partnerMap.set(b,new Set([a]));
-        }
-      }
-    }
+    const mixedBuilt = makeMixedTeams(guysForMixed, girlsForMixed, partnerMap);
 
-    const extraGuys = G.slice(n);
-    const extraGirls= H.slice(n);
-    if(extraGuys.length>=2) pairs.push({team:[extraGuys[0], extraGuys[1]], tag:'ULTIMATE_REVCO'});
-    if(extraGirls.length>=2) pairs.push({team:[extraGirls[0], extraGirls[1]], tag:'POWER_PUFF'});
+    // Step 2: Use ALL leftovers for same-gender teams
+    const leftoverGuys = shuffledGuys.slice(mixedCount);
+    const leftoverGirls = mixedBuilt.leftoverGirls.concat(shuffledGirls.slice(mixedCount));
 
-    // Pair teams onto courts (exactly two teams per court)
-    const teamList = pairs.slice();
+    const guyTeamsBuilt = makeSameGenderTeams(
+      leftoverGuys,
+      "ULTIMATE_REVCO",
+      partnerMap
+    );
+
+    const girlTeamsBuilt = makeSameGenderTeams(
+      leftoverGirls,
+      "POWER_PUFF",
+      partnerMap
+    );
+
+    const allTeams: TeamBuild[] = [
+      ...mixedBuilt.mixed,
+      ...guyTeamsBuilt.teams,
+      ...girlTeamsBuilt.teams,
+    ];
+
+    const teamList = shuffle(allTeams, seedNum ? seedNum + roundIdx * 101 : undefined);
     const made: MatchRow[] = [];
-    let court = startCourt;
-    while(teamList.length>=2){
+
+    // Step 3: Pair teams into matches, minimizing repeat opponents
+    while (teamList.length >= 2) {
       const a = teamList.shift()!;
-      let idx=0, found=false;
-      for(let i=0;i<teamList.length;i++){
+
+      let bestIdx = 0;
+      let bestScore = Number.POSITIVE_INFINITY;
+
+      for (let i = 0; i < teamList.length; i++) {
         const b = teamList[i];
-        const ok =
-          haventOpposed(opponentMap,a.team[0],b.team[0]) &&
-          haventOpposed(opponentMap,a.team[0],b.team[1]) &&
-          haventOpposed(opponentMap,a.team[1],b.team[0]) &&
-          haventOpposed(opponentMap,a.team[1],b.team[1]);
-        if(ok){ idx=i; found=true; break; }
+        const score = scoreMatchup(opponentMap, a.team, b.team);
+        if (score < bestScore) {
+          bestScore = score;
+          bestIdx = i;
+          if (score === 0) break;
+        }
       }
-      const b = teamList.splice(found?idx:0,1)[0];
-      // update opponent map so later pairings in this same round avoid repeats
-      [a.team[0],a.team[1]].forEach(A=>[b.team[0],b.team[1]].forEach(B=>{
-        const SA=slug(A), SB=slug(B);
-        opponentMap.get(SA)?.add(SB) || opponentMap.set(SA,new Set([SB]));
-      }));
-      [b.team[0],b.team[1]].forEach(A=>[a.team[0],a.team[1]].forEach(B=>{
-        const SA=slug(A), SB=slug(B);
-        opponentMap.get(SA)?.add(SB) || opponentMap.set(SA,new Set([SB]));
-      }));
+
+      const b = teamList.splice(bestIdx, 1)[0];
+
+      for (const A of a.team) {
+        for (const B of b.team) {
+          const SA = slug(A);
+          const SB = slug(B);
+
+          if (!opponentMap.has(SA)) opponentMap.set(SA, new Set());
+          if (!opponentMap.has(SB)) opponentMap.set(SB, new Set());
+
+          opponentMap.get(SA)!.add(SB);
+          opponentMap.get(SB)!.add(SA);
+        }
+      }
 
       made.push({
-        id: `${roundIdx}-${court}-${Date.now()}-${Math.random().toString(36).slice(2,7)}`,
+        id: `${roundIdx}-pending-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
         round: roundIdx,
-        court: court++,
+        court: 0,
         t1p1: a.team[0],
         t1p2: a.team[1],
         t2p1: b.team[0],
         t2p2: b.team[1],
         tag: a.tag || b.tag || null,
-        scoreText: '',
+        scoreText: "",
       });
     }
-    return made;
+
+    // Step 4: Assign courts to spread players around when possible
+    const courts = Array.from({ length: made.length }, (_, i) => startCourt + i);
+    const unassigned = [...made];
+    const assigned: MatchRow[] = [];
+
+    while (unassigned.length) {
+      let bestMatchIdx = 0;
+      let bestCourtIdx = 0;
+      let bestPenalty = Number.POSITIVE_INFINITY;
+
+      for (let mi = 0; mi < unassigned.length; mi++) {
+        const m = unassigned[mi];
+        const players = [m.t1p1, m.t1p2, m.t2p1, m.t2p2];
+        for (let ci = 0; ci < courts.length; ci++) {
+          const court = courts[ci];
+          const penalty = scoreCourtForPlayers(courtMap, players, court);
+          if (penalty < bestPenalty) {
+            bestPenalty = penalty;
+            bestMatchIdx = mi;
+            bestCourtIdx = ci;
+            if (penalty === 0) break;
+          }
+        }
+        if (bestPenalty === 0) break;
+      }
+
+      const match = unassigned.splice(bestMatchIdx, 1)[0];
+      const court = courts.splice(bestCourtIdx, 1)[0];
+
+      match.id = `${roundIdx}-${court}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+      match.court = court;
+
+      noteCourtForPlayers(courtMap, [match.t1p1, match.t1p2, match.t2p1, match.t2p2], court);
+      assigned.push(match);
+    }
+
+    assigned.sort((a, b) => a.court - b.court);
+    return assigned;
   }
 
-  function onGenerate(){
+  function onGenerate() {
     const n = clampN(roundsToGen, 1);
     const out: MatchRow[] = [];
-    // Use a moving history so new rounds in the same batch respect strict rules
+
     let history = matches.slice();
-    const currentMax = history.reduce((mx,m)=> Math.max(mx,m.round),0) || 0;
-    for(let i=1;i<=n;i++){
+    const currentMax = history.reduce((mx, m) => Math.max(mx, m.round), 0) || 0;
+
+    for (let i = 1; i <= n; i++) {
       const roundIdx = currentMax + i;
       const one = buildRound(roundIdx, history);
       out.push(...one);
       history = history.concat(one);
     }
-    setMatches(prev=> (Array.isArray(prev)? prev:[]).concat(out));
+
+    setMatches(prev => (Array.isArray(prev) ? prev : []).concat(out));
   }
 
   return (
@@ -760,40 +987,44 @@ function RoundGenerator({
             <input
               type="checkbox"
               checked={strict}
-              onChange={(e)=>setStrict(e.target.checked)}
+              onChange={(e) => setStrict(e.target.checked)}
             />
-            Strict no-repeat
+            Minimize repeats when possible
           </label>
+
           <label className="flex items-center gap-1">
             Rounds
             <input
               type="number"
               min={1}
               value={roundsToGen}
-              onChange={(e)=>setRoundsToGen(clampN(+e.target.value||1,1))}
+              onChange={(e) => setRoundsToGen(clampN(+e.target.value || 1, 1))}
               className="w-16 border rounded px-2 py-1"
             />
           </label>
+
           <label className="flex items-center gap-1">
             Start court
             <input
               type="number"
               min={1}
               value={startCourt}
-              onChange={(e)=>setStartCourt(clampN(+e.target.value||1,1))}
+              onChange={(e) => setStartCourt(clampN(+e.target.value || 1, 1))}
               className="w-16 border rounded px-2 py-1"
             />
           </label>
+
           <label className="flex items-center gap-1">
             Seed
             <input
               type="text"
               value={seedStr}
-              onChange={(e)=>setSeedStr(e.target.value)}
+              onChange={(e) => setSeedStr(e.target.value)}
               placeholder="optional"
               className="w-24 border rounded px-2 py-1"
             />
           </label>
+
           <button
             className="px-3 py-1.5 rounded-lg bg-blue-600 text-white hover:bg-blue-700 shadow-sm active:scale-[.99]"
             onClick={onGenerate}
@@ -802,9 +1033,11 @@ function RoundGenerator({
           </button>
         </div>
       </div>
+
       <p className="text-[11px] text-slate-500 mt-2">
-        Blue badge = Ultimate Revco (2 guys). Pink badge = Power Puff (2 girls). Strict mode avoids repeat partners &amp;
-        opponents. Courts are assigned to exactly two teams per match.
+        Mixed teams are built first, then all leftover same-gender players are used to form
+        Ultimate Revco or Power Puff teams. The generator minimizes repeat partners, repeat
+        opponents, and repeated court assignments when possible.
       </p>
     </section>
   );
