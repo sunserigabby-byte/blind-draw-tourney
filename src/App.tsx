@@ -1380,7 +1380,7 @@ function buildBracket(division:PlayDiv, teams:Team[], topSeedByeCount:number = 0
   }
 
   const gapByes = Math.max(0, size - N);
-  const wantByes = Math.min(Math.max(gapByes, Math.floor(topSeedByeCount)), 5, size);
+  const wantByes = Math.min(gapByes, Math.max(0, Math.floor(topSeedByeCount)));
   const byeSeeds = new Set<number>();
   for(let s=1;s<=wantByes;s++) byeSeeds.add(s);
 
@@ -1588,9 +1588,8 @@ function BracketView({
     <section className="bg-white/95 backdrop-blur rounded-2xl shadow-lg ring-1 ring-sky-200 p-6">
       <h2 className="text-[20px] font-bold text-sky-900 mb-2 tracking-tight">Playoff Brackets</h2>
       <p className="text-[11px] text-slate-500 mb-4">
-        ESPN-style seeding and BYEs. Quarterfinals → Semifinals → Final. Winners auto-advance. Redemption Rally is built from completed Round 1 / Round 2 losers in the current playoff mode. The{' '}
-        <strong>RR</strong> bracket combines UPPER+LOWER losers from R1/R2.
-      </p>
+  ESPN-style seeding and BYEs. Quarterfinals → Semifinals → Final. Winners auto-advance. Redemption Rally is built from completed Round 1 / Round 2 losers in the current playoff mode.
+</p>
       {divisions.map(div=>{
         const cfg = buildVisualColumns(brackets, div);
         const cols = cfg.cols;
