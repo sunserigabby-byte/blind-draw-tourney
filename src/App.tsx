@@ -41,10 +41,13 @@ type MatchRow = {
   id: string;
   round: number;
   court: number;
-  t1p1: string; t1p2: string;
-  t2p1: string; t2p2: string;
-  tag?: 'ULTIMATE_REVCO'|'POWER_PUFF'|null;
+  t1p1: string;
+  t1p2: string;
+  t2p1: string;
+  t2p2: string;
+  tag?: 'ULTIMATE_REVCO' | 'POWER_PUFF' | null;
   scoreText?: string;
+  sitOuts?: string[];
 };
 
 type PlayDiv = 'UPPER'|'LOWER'|'RR';
@@ -448,6 +451,7 @@ function MatchesView({
   setMatches:(f:(prev:MatchRow[])=>MatchRow[]|MatchRow[])=>void;
 }){
   const rounds = useMemo(()=> uniq(matches.map(m=>m.round)).sort((a,b)=>a-b), [matches]);
+  const roundSitOuts = matches.find((m) => m.round === r && (m.sitOuts?.length || 0) > 0)?.sitOuts || [];
   const [open, setOpen] = useState(()=> new Set<number>(rounds.length? [rounds[rounds.length-1]] : []));
   const [confirmR, setConfirmR] = useState<number|null>(null);
   useEffect(()=>{ if(rounds.length) setOpen(new Set([rounds[rounds.length-1]])); }, [matches.length]);
@@ -456,6 +460,12 @@ function MatchesView({
   const requestDelete = (round:number) => { setConfirmR(round); };
   const doDelete = (round:number) => { setMatches(prev=> prev.filter(m=> m.round !== round)); setConfirmR(null); };
 
+    {roundSitOuts.length > 0 && (
+  <div className="mb-2 text-[12px] text-amber-800 bg-amber-50 ring-1 ring-amber-200 rounded-lg px-3 py-2">
+    Sitting out this round: {roundSitOuts.join(", ")}
+  </div>
+)}
+    
   return (
     <section className="bg-white backdrop-blur rounded-2xl shadow-lg ring-1 ring-sky-200 p-6 border border-sky-100">
       <h2 className="text-[20px] font-bold text-sky-800 mb-2 tracking-tight">Matches & Results (Doubles)</h2>
@@ -853,133 +863,265 @@ function RoundGenerator({
       leftovers: pool,
     };
   }
+function buildPlayerUsageStats(history: MatchRow[]) {
+  const playCounts = new Map<string, number>();
+  const sitCounts = new Map<string, number>();
+  const lastSitRound = new Map<string, number>();
 
-  function buildRound(roundIdx: number, history: MatchRow[]) {
-    const seedNum = seedStr ? Number(seedStr) : undefined;
-
-    const shuffledGuys = shuffle(guys, seedNum);
-    const shuffledGirls = shuffle(girls, seedNum ? seedNum + 17 : undefined);
-
-    const partnerMap = buildPartnerMap(history);
-    const opponentMap = buildOpponentMap(history);
-    const courtMap = buildCourtMap(history);
-
-    // Step 1: Make as many mixed teams as possible
-    const mixedCount = Math.min(shuffledGuys.length, shuffledGirls.length);
-    const guysForMixed = shuffledGuys.slice(0, mixedCount);
-    const girlsForMixed = shuffledGirls.slice(0, mixedCount);
-
-    const mixedBuilt = makeMixedTeams(guysForMixed, girlsForMixed, partnerMap);
-
-    // Step 2: Use ALL leftovers for same-gender teams
-    const leftoverGuys = shuffledGuys.slice(mixedCount);
-    const leftoverGirls = mixedBuilt.leftoverGirls.concat(shuffledGirls.slice(mixedCount));
-
-    const guyTeamsBuilt = makeSameGenderTeams(
-      leftoverGuys,
-      "ULTIMATE_REVCO",
-      partnerMap
-    );
-
-    const girlTeamsBuilt = makeSameGenderTeams(
-      leftoverGirls,
-      "POWER_PUFF",
-      partnerMap
-    );
-
-    const allTeams: TeamBuild[] = [
-      ...mixedBuilt.mixed,
-      ...guyTeamsBuilt.teams,
-      ...girlTeamsBuilt.teams,
-    ];
-
-    const teamList = shuffle(allTeams, seedNum ? seedNum + roundIdx * 101 : undefined);
-    const made: MatchRow[] = [];
-
-    // Step 3: Pair teams into matches, minimizing repeat opponents
-    while (teamList.length >= 2) {
-      const a = teamList.shift()!;
-
-      let bestIdx = 0;
-let bestScore = Number.POSITIVE_INFINITY;
-
-for (let i = 0; i < teamList.length; i++) {
-  const b = teamList[i];
-  const score = scoreMatchup(opponentMap, a.team, b.team, a.tag, b.tag);
-  if (score < bestScore) {
-    bestScore = score;
-    bestIdx = i;
-    if (score === 0) break;
+  for (const m of history) {
+    [m.t1p1, m.t1p2, m.t2p1, m.t2p2].forEach((p) => {
+      if (!p) return;
+      const key = slug(p);
+      playCounts.set(key, (playCounts.get(key) || 0) + 1);
+    });
   }
+
+  const processedRounds = new Set<number>();
+  for (const m of history) {
+    if (processedRounds.has(m.round)) continue;
+    processedRounds.add(m.round);
+
+    for (const p of m.sitOuts || []) {
+      const key = slug(p);
+      sitCounts.set(key, (sitCounts.get(key) || 0) + 1);
+      lastSitRound.set(key, m.round);
+    }
+  }
+
+  return { playCounts, sitCounts, lastSitRound };
 }
 
-      const b = teamList.splice(bestIdx, 1)[0];
+function sitPriorityScore(
+  player: string,
+  stats: ReturnType<typeof buildPlayerUsageStats>,
+  roundIdx: number
+) {
+  const key = slug(player);
+  const plays = stats.playCounts.get(key) || 0;
+  const sits = stats.sitCounts.get(key) || 0;
+  const lastSit = stats.lastSitRound.get(key);
 
-      for (const A of a.team) {
-        for (const B of b.team) {
-          const SA = slug(A);
-          const SB = slug(B);
+  let score = plays * 100 - sits * 250;
 
-          if (!opponentMap.has(SA)) opponentMap.set(SA, new Set());
-          if (!opponentMap.has(SB)) opponentMap.set(SB, new Set());
+  // Strongly avoid making the same person sit back-to-back
+  if (lastSit === roundIdx - 1) score -= 100000;
+  else if (lastSit === roundIdx - 2) score -= 5000;
 
-          opponentMap.get(SA)!.add(SB);
-          opponentMap.get(SB)!.add(SA);
-        }
-      }
+  return score;
+}
 
-      made.push({
-        id: `${roundIdx}-pending-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-        round: roundIdx,
-        court: 0,
-        t1p1: a.team[0],
-        t1p2: a.team[1],
-        t2p1: b.team[0],
-        t2p2: b.team[1],
-        tag: a.tag || b.tag || null,
-        scoreText: "",
-      });
+function chooseSingleSitOut(
+  candidates: string[],
+  stats: ReturnType<typeof buildPlayerUsageStats>,
+  roundIdx: number
+) {
+  let best = candidates[0];
+  let bestScore = Number.NEGATIVE_INFINITY;
+
+  for (const p of candidates) {
+    const score = sitPriorityScore(p, stats, roundIdx);
+    if (score > bestScore) {
+      bestScore = score;
+      best = p;
     }
-
-    // Step 4: Assign courts to spread players around when possible
-    const courts = Array.from({ length: made.length }, (_, i) => startCourt + i);
-    const unassigned = [...made];
-    const assigned: MatchRow[] = [];
-
-    while (unassigned.length) {
-      let bestMatchIdx = 0;
-      let bestCourtIdx = 0;
-      let bestPenalty = Number.POSITIVE_INFINITY;
-
-      for (let mi = 0; mi < unassigned.length; mi++) {
-        const m = unassigned[mi];
-        const players = [m.t1p1, m.t1p2, m.t2p1, m.t2p2];
-        for (let ci = 0; ci < courts.length; ci++) {
-          const court = courts[ci];
-          const penalty = scoreCourtForPlayers(courtMap, players, court);
-          if (penalty < bestPenalty) {
-            bestPenalty = penalty;
-            bestMatchIdx = mi;
-            bestCourtIdx = ci;
-            if (penalty === 0) break;
-          }
-        }
-        if (bestPenalty === 0) break;
-      }
-
-      const match = unassigned.splice(bestMatchIdx, 1)[0];
-      const court = courts.splice(bestCourtIdx, 1)[0];
-
-      match.id = `${roundIdx}-${court}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-      match.court = court;
-
-      noteCourtForPlayers(courtMap, [match.t1p1, match.t1p2, match.t2p1, match.t2p2], court);
-      assigned.push(match);
-    }
-
-    assigned.sort((a, b) => a.court - b.court);
-    return assigned;
   }
+
+  return best;
+}
+
+function chooseByeTeamIndex(
+  teams: TeamBuild[],
+  stats: ReturnType<typeof buildPlayerUsageStats>,
+  roundIdx: number
+) {
+  let bestIdx = 0;
+  let bestScore = Number.NEGATIVE_INFINITY;
+
+  for (let i = 0; i < teams.length; i++) {
+    const [a, b] = teams[i].team;
+    const score =
+      sitPriorityScore(a, stats, roundIdx) +
+      sitPriorityScore(b, stats, roundIdx);
+
+    if (score > bestScore) {
+      bestScore = score;
+      bestIdx = i;
+    }
+  }
+
+  return bestIdx;
+}
+ function buildRound(roundIdx: number, history: MatchRow[]) {
+  const seedNum = seedStr ? Number(seedStr) : undefined;
+  const stats = buildPlayerUsageStats(history);
+  const sitOuts: string[] = [];
+
+  let availableGuys = [...guys];
+  let availableGirls = [...girls];
+
+  // If total players is odd, one individual must sit
+  if ((availableGuys.length + availableGirls.length) % 2 === 1) {
+    const singleSit = chooseSingleSitOut(
+      [...availableGuys, ...availableGirls],
+      stats,
+      roundIdx
+    );
+    sitOuts.push(singleSit);
+
+    if (availableGuys.includes(singleSit)) {
+      availableGuys = availableGuys.filter((p) => p !== singleSit);
+    } else {
+      availableGirls = availableGirls.filter((p) => p !== singleSit);
+    }
+  }
+
+  const shuffledGuys = shuffle(availableGuys, seedNum);
+  const shuffledGirls = shuffle(availableGirls, seedNum ? seedNum + 17 : undefined);
+
+  const partnerMap = buildPartnerMap(history);
+  const opponentMap = buildOpponentMap(history);
+  const courtMap = buildCourtMap(history);
+
+  // Step 1: Make as many mixed teams as possible
+  const mixedCount = Math.min(shuffledGuys.length, shuffledGirls.length);
+  const guysForMixed = shuffledGuys.slice(0, mixedCount);
+  const girlsForMixed = shuffledGirls.slice(0, mixedCount);
+
+  const mixedBuilt = makeMixedTeams(guysForMixed, girlsForMixed, partnerMap);
+
+  // Step 2: Use all leftovers for same-gender teams
+  const leftoverGuys = shuffledGuys.slice(mixedCount);
+  const leftoverGirls = mixedBuilt.leftoverGirls.concat(shuffledGirls.slice(mixedCount));
+
+  const guyTeamsBuilt = makeSameGenderTeams(
+    leftoverGuys,
+    "ULTIMATE_REVCO",
+    partnerMap
+  );
+
+  const girlTeamsBuilt = makeSameGenderTeams(
+    leftoverGirls,
+    "POWER_PUFF",
+    partnerMap
+  );
+
+  const allTeams: TeamBuild[] = [
+    ...mixedBuilt.mixed,
+    ...guyTeamsBuilt.teams,
+    ...girlTeamsBuilt.teams,
+  ];
+
+  // If team count is odd, one whole team must have a bye
+  if (allTeams.length % 2 === 1) {
+    const byeIdx = chooseByeTeamIndex(allTeams, stats, roundIdx);
+    const byeTeam = allTeams.splice(byeIdx, 1)[0];
+    sitOuts.push(...byeTeam.team);
+  }
+
+  const teamList = shuffle(allTeams, seedNum ? seedNum + roundIdx * 101 : undefined);
+  const made: MatchRow[] = [];
+
+  // Step 3: Pair teams into matches
+  while (teamList.length >= 2) {
+    const a = teamList.shift()!;
+
+    let bestIdx = 0;
+    let bestScore = Number.POSITIVE_INFINITY;
+
+    for (let i = 0; i < teamList.length; i++) {
+      const b = teamList[i];
+      const score = scoreMatchup(opponentMap, a.team, b.team, a.tag, b.tag);
+      if (score < bestScore) {
+        bestScore = score;
+        bestIdx = i;
+        if (score === 0) break;
+      }
+    }
+
+    const b = teamList.splice(bestIdx, 1)[0];
+
+    for (const A of a.team) {
+      for (const B of b.team) {
+        const SA = slug(A);
+        const SB = slug(B);
+
+        if (!opponentMap.has(SA)) opponentMap.set(SA, new Set());
+        if (!opponentMap.has(SB)) opponentMap.set(SB, new Set());
+
+        opponentMap.get(SA)!.add(SB);
+        opponentMap.get(SB)!.add(SA);
+      }
+    }
+
+    made.push({
+      id: `${roundIdx}-pending-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      round: roundIdx,
+      court: 0,
+      t1p1: a.team[0],
+      t1p2: a.team[1],
+      t2p1: b.team[0],
+      t2p2: b.team[1],
+      tag: a.tag || b.tag || null,
+      scoreText: "",
+    });
+  }
+
+  // Step 4: Assign courts to spread players around
+  const courts = Array.from({ length: made.length }, (_, i) => startCourt + i);
+  const unassigned = [...made];
+  const assigned: MatchRow[] = [];
+
+  while (unassigned.length) {
+    let bestMatchIdx = 0;
+    let bestCourtIdx = 0;
+    let bestPenalty = Number.POSITIVE_INFINITY;
+
+    for (let mi = 0; mi < unassigned.length; mi++) {
+      const m = unassigned[mi];
+      const players = [m.t1p1, m.t1p2, m.t2p1, m.t2p2];
+
+      for (let ci = 0; ci < courts.length; ci++) {
+        const court = courts[ci];
+        const penalty = scoreCourtForPlayers(courtMap, players, court);
+
+        if (penalty < bestPenalty) {
+          bestPenalty = penalty;
+          bestMatchIdx = mi;
+          bestCourtIdx = ci;
+          if (penalty === 0) break;
+        }
+      }
+      if (bestPenalty === 0) break;
+    }
+
+    const match = unassigned.splice(bestMatchIdx, 1)[0];
+    const court = courts.splice(bestCourtIdx, 1)[0];
+
+    match.id = `${roundIdx}-${court}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+    match.court = court;
+
+    noteCourtForPlayers(
+      courtMap,
+      [match.t1p1, match.t1p2, match.t2p1, match.t2p2],
+      court
+    );
+
+    assigned.push(match);
+  }
+
+  assigned.sort((a, b) => a.court - b.court);
+
+  // Store round sit-outs on the first match row of the round
+  if (assigned.length && sitOuts.length) {
+    assigned[0] = {
+      ...assigned[0],
+      sitOuts,
+    };
+  }
+
+  return assigned;
+}
+
 
   function onGenerate() {
     const n = clampN(roundsToGen, 1);
