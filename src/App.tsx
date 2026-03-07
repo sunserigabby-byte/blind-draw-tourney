@@ -1665,6 +1665,10 @@ function PlayoffBuilder({
   const [byeLower, setByeLower] = useState<number>(0);
   const [rrRandomize, setRrRandomize] = useState<boolean>(false);
 
+    useEffect(() => {
+  setUpperK(Math.ceil(Math.max(1, Math.min(guysRows.length, girlsRows.length)) / 2));
+}, [guysRows.length, girlsRows.length]);
+    
   function scoreTeam(
     members:string[],
     gStats: Map<string, any>,
@@ -1814,9 +1818,9 @@ function PlayoffBuilder({
     const gStats = new Map(guysRows.map(r => [r.name, r] as const));
     const hStats = new Map(girlsRows.map(r => [r.name, r] as const));
 
-    const allNames = losers.flatMap(t => t.members).filter(Boolean);
-    const allGuys = allNames.filter(n => gStats.has(n));
-    const allGirls = allNames.filter(n => hStats.has(n));
+    const allNames = uniq(losers.flatMap(t => t.members).filter(Boolean));
+const allGuys = allNames.filter(n => gStats.has(n));
+const allGirls = allNames.filter(n => hStats.has(n));
 
     const K = Math.min(allGuys.length, allGirls.length);
     const guysShuffled = shuffle(allGuys);
