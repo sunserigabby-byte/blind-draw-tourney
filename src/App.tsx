@@ -451,7 +451,7 @@ function MatchesView({
   matches:MatchRow[];
   setMatches:(f:(prev:MatchRow[])=>MatchRow[]|MatchRow[])=>void;
   isAdmin:boolean;
-})
+}){
   const rounds = useMemo(()=> uniq(matches.map(m=>m.round)).sort((a,b)=>a-b), [matches]);
   const [open, setOpen] = useState(()=> new Set<number>(rounds.length? [rounds[rounds.length-1]] : []));
   const [confirmR, setConfirmR] = useState<number|null>(null);
@@ -496,7 +496,7 @@ function MatchesView({
                 </button>
                 <button
                   className="text-[11px] px-2 py-1 rounded bg-red-600 text-white hover:bg-red-700"
-                  onClick={()=> isAdmin && requestDelete(r)}
+                  onClick={()=>requestDelete(r)}
 disabled={!isAdmin}
                   title="Delete this entire round"
                 >
