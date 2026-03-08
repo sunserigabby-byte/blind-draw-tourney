@@ -496,7 +496,7 @@ function MatchesView({
                 </button>
                 <button
                   className="text-[11px] px-2 py-1 rounded bg-red-600 text-white hover:bg-red-700"
-                  onClick={()=>requestDelete(r)}
+                  onClick={() =>requestDelete(r)}
 disabled={!isAdmin}
                   title="Delete this entire round"
                 >
@@ -2990,6 +2990,8 @@ export default function BlindDrawTourneyApp() {
         {activeTab === "DOUBLES" ? <>
       <Leaderboard matches={currentD.matches} guysText={currentD.guysText} girlsText={currentD.girlsText} />
 
+<Leaderboard matches={currentD.matches} guysText={currentD.guysText} girlsText={currentD.girlsText} />
+
 <fieldset disabled={!isAdmin} className={!isAdmin ? "opacity-95" : ""}>
   <section className="bg-white/95 backdrop-blur rounded-xl shadow ring-1 ring-slate-200 p-4">
     <h2 className="text-[16px] font-semibold text-sky-800 mb-2">
@@ -3030,6 +3032,7 @@ export default function BlindDrawTourneyApp() {
 <MatchesView
   matches={currentD.matches}
   setMatches={(v:any)=>setCurrentD(p=>({...p, matches: typeof v === 'function' ? v(p.matches) : v}))}
+  isAdmin={isAdmin}
 />
 
 <BracketView
