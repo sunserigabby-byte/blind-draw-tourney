@@ -2968,11 +2968,11 @@ export default function BlindDrawTourneyApp() {
   return (
    <main className="min-h-screen bg-gradient-to-b from-sky-100 via-sky-50 to-white text-slate-800 antialiased">
       <header className="sticky top-0 z-10 bg-sky-900/90 backdrop-blur border-b border-sky-700 shadow-sm">
-        <div className="max-w-6xl mx-auto px-4 py-3 flex flex-col md:flex-row md:items-center md:justify-between gap-2">
+        <div className="max-w-6xl mx-auto px-4 py-6 flex flex-col md:flex-row md:items-center md:justify-between gap-2">
           <div className="flex items-center justify-between gap-3"><SunnyLogo /></div>
           <div className="text-[11px] text-sky-100/80 md:text-right"><div className="font-medium">Tournament Control Panel</div><div>Live blind draw · pool play · playoffs · redemption rally</div></div>
         </div>
-        <div className="border-t border-sky-700 bg-sky-900/80"><div className="max-w-6xl mx-auto px-4 py-1.5 flex gap-2 text-[13px]">
+        <div className="border-t border-sky-700 bg-sky-900/80"><div className="max-w-6xl mx-auto px-4 py-6 flex gap-2 text-[13px]">
           <button className={"px-3 py-1 rounded-t-md border-b-2 "+(activeTab==="DOUBLES" ? "bg-white text-sky-900 border-sky-400" : "bg-transparent text-sky-100/80 border-transparent hover:bg-sky-800/60")} onClick={() => setActiveTab("DOUBLES")}>Revco Doubles</button>
           <button className={"px-3 py-1 rounded-t-md border-b-2 "+(activeTab==="QUADS" ? "bg-white text-sky-900 border-sky-400" : "bg-transparent text-sky-100/80 border-transparent hover:bg-sky-800/60")} onClick={() => setActiveTab("QUADS")}>Revco Quads</button>
           <button className={"px-3 py-1 rounded-t-md border-b-2 "+(activeTab==="TRIPLES" ? "bg-white text-sky-900 border-sky-400" : "bg-transparent text-sky-100/80 border-transparent hover:bg-sky-800/60")} onClick={() => setActiveTab("TRIPLES")}>Revco Triples</button>
