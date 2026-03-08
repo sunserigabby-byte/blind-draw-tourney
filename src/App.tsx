@@ -1382,9 +1382,9 @@ function buildBracket(division:PlayDiv, teams:Team[]): BracketMatch[] {
     if(i!==undefined) slots[i] = t;
   }
 
-  const gapByes = Math.max(0, size - N);
- for(let s=1; s<=gapByes; s++) byeSeeds.add(s);
-  const byeSeeds = new Set<number>();
+const gapByes = Math.max(0, size - N);
+const byeSeeds = new Set<number>();
+for (let s = 1; s <= gapByes; s++) byeSeeds.add(s);
   for(let s=1;s<=wantByes;s++) byeSeeds.add(s);
 
   const matches: BracketMatch[] = [];
@@ -3038,7 +3038,7 @@ export default function BlindDrawTourneyApp() {
   brackets={currentD.brackets}
   setBrackets={(v:any)=>setCurrentD(p=>({...p, brackets: typeof v === 'function' ? v(p.brackets) : v}))}
 />
-          </fieldset>
+        
         </> : activeTab === "QUADS" ? <>
           <QuadsLeaderboard matches={currentQ.matches} guysText={currentQ.guysText} girlsText={currentQ.girlsText} />
           <fieldset disabled={!isAdmin} className={!isAdmin ? "opacity-95" : ""}>
