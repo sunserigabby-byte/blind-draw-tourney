@@ -608,7 +608,6 @@ disabled={!isAdmin}
     </section>
   );
 }
-
 /* ========================= DOUBLES: Round Generator ========================= */
 
 function RoundGenerator({
