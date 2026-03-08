@@ -1353,7 +1353,7 @@ function computeStandings(matches:MatchRow[], guysText:string, girlsText:string)
 
 function nextPow2(n:number){ let p=1; while(p<n) p<<=1; return p; }
 
-function buildBracket(division:PlayDiv, teams:Team[], topSeedByeCount:number = 0): BracketMatch[] {
+function buildBracket(division:PlayDiv, teams:Team[]): BracketMatch[] {
   const N = teams.length; if (N === 0) return [];
   const size = nextPow2(N);
   function espnOrder(n:number): number[] {
@@ -1380,7 +1380,7 @@ function buildBracket(division:PlayDiv, teams:Team[], topSeedByeCount:number = 0
   }
 
   const gapByes = Math.max(0, size - N);
-  const wantByes = Math.min(gapByes, Math.max(0, Math.floor(topSeedByeCount)));
+ for(let s=1; s<=gapByes; s++) byeSeeds.add(s);
   const byeSeeds = new Set<number>();
   for(let s=1;s<=wantByes;s++) byeSeeds.add(s);
 
@@ -1435,28 +1435,23 @@ function buildBracket(division:PlayDiv, teams:Team[], topSeedByeCount:number = 0
   }
 
   for(const m of matches.filter(x=> x.round===1)){
-    const onlyOne = (!!m.team1 && !m.team2) || (!m.team1 && !!m.team2);
-    if(onlyOne){
-      m.score = 'BYE';
-      m.team1 = undefined;
-      m.team2 = undefined;
-    }
+  const onlyOne = (!!m.team1 && !m.team2) || (!m.team1 && !!m.team2);
+  if(onlyOne){
+    m.score = 'BYE';
   }
+}
 
   return matches;
 }
 
-// Build visual columns from matches; hide pure BYE leaves
+// Build visual columns from matches
 function buildVisualColumns(brackets:BracketMatch[], division:PlayDiv){
   const list = brackets.filter(b=>b.division===division);
   if(list.length===0) return { cols: [] as BracketMatch[][], rounds: 0, size: 0 };
   const maxRound = Math.max(1, ...list.map(b=> b.round));
   const cols: BracketMatch[][] = [];
   for(let r=1;r<=maxRound;r++){
-    let col = list.filter(b=> b.round===r).sort((a,b)=> a.slot-b.slot);
-    if(r===1){
-      col = col.filter(m=> !(m.team1===undefined && m.team2===undefined && (m.score||'').toUpperCase()==='BYE'));
-    }
+    const col = list.filter(b=> b.round===r).sort((a,b)=> a.slot-b.slot);
     cols.push(col);
   }
   return { cols, rounds:maxRound, size: (cols[0]?.length||1)*2 };
@@ -1529,11 +1524,17 @@ function BracketCard({m}:{m:BracketMatch}){
         <div className="h-px bg-slate-200" />
         <TeamLine t={m.team2} active={winnerSide==='team2'} label="B" />
       </div>
-      {m.score !== undefined && m.score !== 'BYE' && (
-        <div className="mt-1 text-xs text-slate-600">
-          <span className="text-slate-500">Score:</span> {m.score}
-        </div>
-      )}
+      {m.score === 'BYE' ? (
+  <div className="mt-1 text-xs">
+    <span className="inline-block px-2 py-1 rounded bg-amber-50 text-amber-700 ring-1 ring-amber-200">
+      BYE — auto-advanced
+    </span>
+  </div>
+) : m.score !== undefined ? (
+  <div className="mt-1 text-xs text-slate-600">
+    <span className="text-slate-500">Score:</span> {m.score}
+  </div>
+) : null}
       {/* connectors */}
       <div className="pointer-events-none absolute right-0 top-1/2 -translate-y-1/2 w-6 h-10">
         <div className="absolute right-0 top-0 bottom-0 w-px bg-slate-300" />
@@ -1659,9 +1660,6 @@ function PlayoffBuilder({
   const [upperK, setUpperK] = useState<number>(Math.ceil(Math.max(1, guysRows.length)/2));
   const [seedRandom, setSeedRandom] = useState<boolean>(true);
   const [groupSize, setGroupSize] = useState<number>(5);
-  const [byeMain, setByeMain] = useState<number>(0);
-  const [byeUpper, setByeUpper] = useState<number>(0);
-  const [byeLower, setByeLower] = useState<number>(0);
   const [rrRandomize, setRrRandomize] = useState<boolean>(false);
 
     useEffect(() => {
@@ -1739,7 +1737,7 @@ function PlayoffBuilder({
       { start: 0, end: girlsRows.length }
     );
 
-    const mainBracket = buildBracket(baseDivision, mainTeams, byeMain);
+    const mainBracket = buildBracket(baseDivision, mainTeams);
     setBrackets(() => mainBracket);
   }
 
@@ -1758,8 +1756,8 @@ function PlayoffBuilder({
       { start: cut, end: girlsRows.length }
     );
 
-    const upperMain = buildBracket('UPPER', upperTeams, byeUpper);
-    const lowerMain = buildBracket('LOWER', lowerTeams, byeLower);
+    const upperMain = buildBracket('UPPER', upperTeams);
+    const lowerMain = buildBracket('LOWER', lowerTeams);
 
     setBrackets(() => ([...upperMain, ...lowerMain]));
   }
@@ -1871,7 +1869,7 @@ const allGirls = allNames.filter(n => hStats.has(n));
         return prev;
       }
 
-      const rrBracket = buildBracket('RR', rrTeams, 0);
+      const rrBracket = buildBracket('RR', rrTeams);
       return [...nonRr, ...rrBracket];
     });
   }
@@ -1911,55 +1909,18 @@ const allGirls = allNames.filter(n => hStats.has(n));
             onChange={(e)=>setGroupSize(clampN(+e.target.value || 2, 2))}
           />
         </label>
-
-        {!splitBracket ? (
-          <label className="flex items-center gap-2">
-            Main bracket BYEs
-            <input
-              className="w-16 border rounded px-2 py-1"
-              type="number"
-              min={0}
-              value={byeMain}
-              onChange={(e)=>setByeMain(clampN(+e.target.value || 0, 0))}
-            />
-          </label>
-        ) : (
-          <>
-            <label className="flex items-center gap-2">
-              Upper cutoff
-              <input
-                className="w-16 border rounded px-2 py-1"
-                type="number"
-                min={1}
-                value={upperK}
-                onChange={(e)=>setUpperK(clampN(+e.target.value || 1, 1))}
-              />
-            </label>
-
-            <label className="flex items-center gap-2">
-              Upper BYEs
-              <input
-                className="w-16 border rounded px-2 py-1"
-                type="number"
-                min={0}
-                value={byeUpper}
-                onChange={(e)=>setByeUpper(clampN(+e.target.value || 0, 0))}
-              />
-            </label>
-
-            <label className="flex items-center gap-2">
-              Lower BYEs
-              <input
-                className="w-16 border rounded px-2 py-1"
-                type="number"
-                min={0}
-                value={byeLower}
-                onChange={(e)=>setByeLower(clampN(+e.target.value || 0, 0))}
-              />
-            </label>
-          </>
-        )}
-
+{splitBracket && (
+  <label className="flex items-center gap-2">
+    Upper cutoff
+    <input
+      className="w-16 border rounded px-2 py-1"
+      type="number"
+      min={1}
+      value={upperK}
+      onChange={(e)=>setUpperK(clampN(+e.target.value || 1, 1))}
+    />
+  </label>
+)}
         <label className="flex items-center gap-2">
           RR re-randomize partners
           <input
@@ -2872,6 +2833,67 @@ export default function BlindDrawTourneyApp() {
   const [tUpper, setTUpper] = useState<DivisionState<TriplesMatchRow>>(emptyDivisionState<TriplesMatchRow>());
   const [tLower, setTLower] = useState<DivisionState<TriplesMatchRow>>(emptyDivisionState<TriplesMatchRow>());
 
+    async function handleResetApp() {
+  const ok = window.confirm(
+    "Reset the whole app? This will clear all rosters, matches, brackets, and autosaved data."
+  );
+  if (!ok) return;
+
+  const emptyDUpper = emptyDivisionState<MatchRow>();
+  const emptyDLower = emptyDivisionState<MatchRow>();
+  const emptyQUpper = emptyDivisionState<QuadsMatchRow>();
+  const emptyQLower = emptyDivisionState<QuadsMatchRow>();
+  const emptyTUpper = emptyDivisionState<TriplesMatchRow>();
+  const emptyTLower = emptyDivisionState<TriplesMatchRow>();
+
+  // Clear in-memory state immediately
+  setDUpper(emptyDUpper);
+  setDLower(emptyDLower);
+  setQUpper(emptyQUpper);
+  setQLower(emptyQLower);
+  setTUpper(emptyTUpper);
+  setTLower(emptyTLower);
+  setActiveTab("DOUBLES");
+  setActiveDivision("UPPER");
+
+  // Clear local autosave
+  try {
+    localStorage.removeItem("sunnysports.autosave");
+  } catch {}
+
+  // If admin, also clear the shared remote state
+  if (isAdmin) {
+    const emptySnapshot = {
+      activeTab: "DOUBLES",
+      activeDivision: "UPPER",
+      doubles: { UPPER: emptyDUpper, LOWER: emptyDLower },
+      quads: { UPPER: emptyQUpper, LOWER: emptyQLower },
+      triples: { UPPER: emptyTUpper, LOWER: emptyTLower },
+
+      // legacy fallback fields
+      guysText: "",
+      girlsText: "",
+      matches: [],
+      brackets: [],
+      qGuysText: "",
+      qGirlsText: "",
+      qMatches: [],
+      qBrackets: [],
+      tGuysText: "",
+      tGirlsText: "",
+      tMatches: [],
+      tBrackets: [],
+    };
+
+    try {
+      await apiSaveState(emptySnapshot as any, adminKey);
+      setRemoteError("");
+    } catch (e: any) {
+      setRemoteError(e?.message || "Failed to reset shared data");
+    }
+  }
+}
+    
   const snapshotState = useMemo(() => ({
     activeTab,
     activeDivision,
@@ -2996,7 +3018,12 @@ export default function BlindDrawTourneyApp() {
           </fieldset>
         </>}
 
-        <section className="bg-white/80 rounded-lg p-3 text-[11px] text-slate-600"><div className="flex items-center gap-2 flex-wrap"><button className="px-2 py-1 border rounded text-[11px]" onClick={() => { localStorage.removeItem("sunnysports.autosave"); location.reload(); }}>Reset App (clear autosave)</button><span>Each format now has separate UPPER and LOWER division data.</span></div></section>
+        <section className="bg-white/80 rounded-lg p-3 text-[11px] text-slate-600"><div className="flex items-center gap-2 flex-wrap"><button
+  className="px-2 py-1 border rounded text-[11px]"
+  onClick={handleResetApp}
+>
+  {isAdmin ? "Reset App" : "Reset Local App"}
+</button><span>Each format now has separate UPPER and LOWER division data.</span></div></section>
       </div>
     </main>
   );
