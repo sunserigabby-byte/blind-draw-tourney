@@ -835,54 +835,132 @@ function RoundGenerator({
       leftoverGirls: remainingGirls,
     };
   }
+function buildRoleStats(history: MatchRow[]) {
+  const sameGenderCount = new Map<string, number>();
+  const lastSameGenderRound = new Map<string, number>();
+  const sameGenderStreak = new Map<string, number>();
 
-  function makeSameGenderTeams(
-    players: string[],
-    tag: MatchRow["tag"],
-    partnerMap: Map<string, Set<string>>
-  ) {
-    const out: TeamBuild[] = [];
-    const pool = [...players];
+  const rounds = uniq(history.map(m => m.round)).sort((a, b) => a - b);
 
-    while (pool.length >= 2) {
-      let bestPair: [number, number] | null = null;
-      let bestScore = Number.POSITIVE_INFINITY;
+  for (const round of rounds) {
+    const roundMatches = history.filter(m => m.round === round);
 
-      for (let i = 0; i < pool.length; i++) {
-        for (let j = i + 1; j < pool.length; j++) {
-          const score = scoreCandidateTeam(partnerMap, pool[i], pool[j]);
-          if (score < bestScore) {
-            bestScore = score;
-            bestPair = [i, j];
-            if (score === 0) break;
-          }
-        }
-        if (bestScore === 0) break;
-      }
+    const sameGenderPlayersThisRound = new Set<string>();
 
-      if (!bestPair) break;
+    for (const m of roundMatches) {
+      const isSameGenderTag =
+        m.tag === "ULTIMATE_REVCO" || m.tag === "POWER_PUFF";
 
-      const [i, j] = bestPair;
-      const a = pool[i];
-      const b = pool[j];
+      if (!isSameGenderTag) continue;
 
-      const nextPool = pool.filter((_, idx) => idx !== i && idx !== j);
-      pool.length = 0;
-      pool.push(...nextPool);
-
-      out.push({
-        team: [a, b],
-        tag,
+      [m.t1p1, m.t1p2, m.t2p1, m.t2p2].forEach((p) => {
+        if (!p) return;
+        sameGenderPlayersThisRound.add(slug(p));
       });
-
-      addPairToMap(partnerMap, a, b);
     }
 
-    return {
-      teams: out,
-      leftovers: pool,
-    };
+    for (const key of sameGenderPlayersThisRound) {
+      sameGenderCount.set(key, (sameGenderCount.get(key) || 0) + 1);
+
+      const prevRound = lastSameGenderRound.get(key);
+      if (prevRound === round - 1) {
+        sameGenderStreak.set(key, (sameGenderStreak.get(key) || 1) + 1);
+      } else {
+        sameGenderStreak.set(key, 1);
+      }
+
+      lastSameGenderRound.set(key, round);
+    }
   }
+
+  return {
+    sameGenderCount,
+    lastSameGenderRound,
+    sameGenderStreak,
+  };
+}
+
+function sameGenderPenalty(
+  player: string,
+  roleStats: ReturnType<typeof buildRoleStats>,
+  roundIdx: number
+) {
+  const key = slug(player);
+  const count = roleStats.sameGenderCount.get(key) || 0;
+  const lastRound = roleStats.lastSameGenderRound.get(key);
+  const streak = roleStats.sameGenderStreak.get(key) || 0;
+
+  let penalty = 0;
+
+  // Spread same-gender assignments across players
+  penalty += count * 300;
+
+  // Strongly avoid back-to-back same-gender assignments
+  if (lastRound === roundIdx - 1) penalty += 5000;
+
+  // Even more strongly avoid long streaks
+  penalty += streak * 1200;
+
+  return penalty;
+}
+    
+ function makeSameGenderTeams(
+  players: string[],
+  tag: MatchRow["tag"],
+  partnerMap: Map<string, Set<string>>,
+  roleStats: ReturnType<typeof buildRoleStats>,
+  roundIdx: number
+) {
+  const out: TeamBuild[] = [];
+  const pool = [...players];
+
+  while (pool.length >= 2) {
+    let bestPair: [number, number] | null = null;
+    let bestScore = Number.POSITIVE_INFINITY;
+
+    for (let i = 0; i < pool.length; i++) {
+      for (let j = i + 1; j < pool.length; j++) {
+        const a = pool[i];
+        const b = pool[j];
+
+        const partnerPenalty = scoreCandidateTeam(partnerMap, a, b);
+        const rolePenalty =
+          sameGenderPenalty(a, roleStats, roundIdx) +
+          sameGenderPenalty(b, roleStats, roundIdx);
+
+        const totalScore = partnerPenalty + rolePenalty;
+
+        if (totalScore < bestScore) {
+          bestScore = totalScore;
+          bestPair = [i, j];
+        }
+      }
+    }
+
+    if (!bestPair) break;
+
+    const [i, j] = bestPair;
+    const a = pool[i];
+    const b = pool[j];
+
+    const nextPool = pool.filter((_, idx) => idx !== i && idx !== j);
+    pool.length = 0;
+    pool.push(...nextPool);
+
+    out.push({
+      team: [a, b],
+      tag,
+    });
+
+    addPairToMap(partnerMap, a, b);
+  }
+
+  return {
+    teams: out,
+    leftovers: pool,
+  };
+}
+    
 function buildPlayerUsageStats(history: MatchRow[]) {
   const playCounts = new Map<string, number>();
   const sitCounts = new Map<string, number>();
@@ -1001,6 +1079,7 @@ function chooseByeTeamIndex(
   const partnerMap = buildPartnerMap(history);
   const opponentMap = buildOpponentMap(history);
   const courtMap = buildCourtMap(history);
+  const roleStats = buildRoleStats(history);
 
   // Step 1: Make as many mixed teams as possible
   const mixedCount = Math.min(shuffledGuys.length, shuffledGirls.length);
@@ -1014,16 +1093,20 @@ function chooseByeTeamIndex(
   const leftoverGirls = mixedBuilt.leftoverGirls.concat(shuffledGirls.slice(mixedCount));
 
   const guyTeamsBuilt = makeSameGenderTeams(
-    leftoverGuys,
-    "ULTIMATE_REVCO",
-    partnerMap
-  );
+  leftoverGuys,
+  "ULTIMATE_REVCO",
+  partnerMap,
+  roleStats,
+  roundIdx
+);
 
-  const girlTeamsBuilt = makeSameGenderTeams(
-    leftoverGirls,
-    "POWER_PUFF",
-    partnerMap
-  );
+const girlTeamsBuilt = makeSameGenderTeams(
+  leftoverGirls,
+  "POWER_PUFF",
+  partnerMap,
+  roleStats,
+  roundIdx
+);
 
   const allTeams: TeamBuild[] = [
     ...mixedBuilt.mixed,
