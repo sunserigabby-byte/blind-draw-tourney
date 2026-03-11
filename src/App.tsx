@@ -3161,7 +3161,7 @@ export default function BlindDrawTourneyApp() {
       setBrackets={(v:any)=>setCurrentD(p=>({...p, brackets: typeof v === 'function' ? v(p.brackets) : v}))}
     />
   </>
-) : ...}
+
         
         </> : activeTab === "QUADS" ? <>
           <QuadsLeaderboard matches={currentQ.matches} guysText={currentQ.guysText} girlsText={currentQ.girlsText} />
