@@ -903,6 +903,22 @@ function sameGenderPenalty(
 
   return penalty;
 }
+
+    function preferMixedAssignment(
+  players: string[],
+  roleStats: ReturnType<typeof buildRoleStats>,
+  roundIdx: number
+) {
+  return [...players].sort((a, b) => {
+    const penaltyA = sameGenderPenalty(a, roleStats, roundIdx);
+    const penaltyB = sameGenderPenalty(b, roleStats, roundIdx);
+
+    // Higher same-gender penalty = stronger need to get back into mixed
+    if (penaltyB !== penaltyA) return penaltyB - penaltyA;
+
+    return a.localeCompare(b);
+  });
+}
     
  function makeSameGenderTeams(
   players: string[],
@@ -1074,23 +1090,27 @@ function chooseByeTeamIndex(
   }
 
   const shuffledGuys = shuffle(availableGuys, seedNum);
-  const shuffledGirls = shuffle(availableGirls, seedNum ? seedNum + 17 : undefined);
+const shuffledGirls = shuffle(availableGirls, seedNum ? seedNum + 17 : undefined);
 
-  const partnerMap = buildPartnerMap(history);
-  const opponentMap = buildOpponentMap(history);
-  const courtMap = buildCourtMap(history);
-  const roleStats = buildRoleStats(history);
+const partnerMap = buildPartnerMap(history);
+const opponentMap = buildOpponentMap(history);
+const courtMap = buildCourtMap(history);
+const roleStats = buildRoleStats(history);
 
-  // Step 1: Make as many mixed teams as possible
-  const mixedCount = Math.min(shuffledGuys.length, shuffledGirls.length);
-  const guysForMixed = shuffledGuys.slice(0, mixedCount);
-  const girlsForMixed = shuffledGirls.slice(0, mixedCount);
+// Step 1: Prefer players with recent same-gender assignments for mixed opportunities
+const prioritizedGuys = preferMixedAssignment(shuffledGuys, roleStats, roundIdx);
+const prioritizedGirls = preferMixedAssignment(shuffledGirls, roleStats, roundIdx);
+
+// Make as many mixed teams as possible
+const mixedCount = Math.min(prioritizedGuys.length, prioritizedGirls.length);
+const guysForMixed = prioritizedGuys.slice(0, mixedCount);
+const girlsForMixed = prioritizedGirls.slice(0, mixedCount);
 
   const mixedBuilt = makeMixedTeams(guysForMixed, girlsForMixed, partnerMap);
 
   // Step 2: Use all leftovers for same-gender teams
-  const leftoverGuys = shuffledGuys.slice(mixedCount);
-  const leftoverGirls = mixedBuilt.leftoverGirls.concat(shuffledGirls.slice(mixedCount));
+  const leftoverGuys = prioritizedGuys.slice(mixedCount);
+const leftoverGirls = mixedBuilt.leftoverGirls.concat(prioritizedGirls.slice(mixedCount));
 
   const guyTeamsBuilt = makeSameGenderTeams(
   leftoverGuys,
