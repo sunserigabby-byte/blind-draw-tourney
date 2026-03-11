@@ -1597,103 +1597,111 @@ function BracketCard({
     const p=t.split(sep).map(s=>s.trim());
     if(p.length!==2) return null;
     const a=+p[0], b=+p[1];
-    return (isFinite(a)&&isFinite(b))? [a,b] as [number,number]: null;
+    return (isFinite(a)&&isFinite(b)) ? [a,b] as [number,number] : null;
   })();
+
   const winnerSide: 'team1'|'team2'|null =
-    parsed ? (parsed[0]>parsed[1] ? 'team1' : (parsed[0]<parsed[1] ? 'team2' : null)) : null;
+    parsed ? (parsed[0] > parsed[1] ? 'team1' : (parsed[0] < parsed[1] ? 'team2' : null)) : null;
 
   function winnerLabel(sourceId?: string) {
     if (!sourceId) return "Waiting on previous match";
     const src = byId.get(sourceId);
     if (!src) return "Waiting on previous match";
-    return `Winner of Game ${src.slot}`;
+    return `Winner of Round ${src.round}, Game ${src.slot}`;
   }
 
   const TeamLine = ({
-  t,
-  active,
-  label,
-  sourceId,
-}:{
-  t?:Team;
-  active?:boolean;
-  label:'A'|'B';
-  sourceId?: string;
-}) => t ? (
-  <div className={
-    "flex items-center justify-between gap-1 rounded px-1.5 py-1 " +
-    (active ? 'bg-emerald-50 ring-1 ring-emerald-200' : '')
-  }>
-    <div className="flex items-center gap-1 min-w-0">
-      <span className="inline-flex items-center justify-center w-4 h-4 text-[10px] rounded-full bg-slate-100 text-slate-600">
-        {label}
-      </span>
-      {seedBadge(t.seed)}
-      <span className="whitespace-normal break-words" title={t.name}>{t.name}</span>
+    t,
+    active,
+    label,
+    sourceId,
+  }:{
+    t?:Team;
+    active?:boolean;
+    label:'A'|'B';
+    sourceId?: string;
+  }) => (
+    <div
+      className={
+        "min-h-[34px] flex items-center gap-2 border-b border-slate-300 px-2 py-1 " +
+        (active ? "bg-emerald-50" : "bg-white")
+      }
+    >
+      <span className="text-[9px] text-slate-400 w-3 shrink-0">{label}</span>
+
+      {t ? (
+        <>
+          <span className="inline-flex items-center justify-center min-w-[22px] h-5 px-1 text-[9px] rounded-full bg-sky-100 text-sky-800 ring-1 ring-sky-200 shrink-0">
+            #{t.seed}
+          </span>
+          <span className="text-[12px] leading-tight whitespace-normal break-words" title={t.name}>
+            {t.name}
+          </span>
+        </>
+      ) : (
+        <span className="text-[11px] italic text-slate-400 leading-tight">
+          {winnerLabel(sourceId)}
+        </span>
+      )}
     </div>
-  </div>
-) : (
-  <div className="flex items-center gap-1 text-slate-400">
-    <span className="inline-flex items-center justify-center w-4 h-4 text-[10px] rounded-full bg-slate-100 text-slate-400">
-      {label}
-    </span>
-    <em className="text-[11px]">{winnerLabel(sourceId)}</em>
-  </div>
-);
+  );
+
   return (
-   <div className="relative min-w-[340px] rounded-xl border bg-white shadow-md p-3">
-      <div className="text-[11px] text-slate-500 mb-1 flex items-center justify-between">
+    <div className="relative min-w-[240px] bg-transparent">
+      <div className="text-[10px] text-slate-500 mb-1 flex items-center justify-between px-1">
         <span className="inline-flex items-center gap-1">
           <span className="font-medium text-slate-700">{m.division}</span>
-          <span>· R{m.round} · M{m.slot}</span>
+          <span>· R{m.round} · G{m.slot}</span>
           {m.redemption && (
-            <span className="ml-1 inline-block text-[10px] px-1 py-0.5 rounded bg-indigo-50 text-indigo-700 ring-1 ring-indigo-200">
+            <span className="ml-1 inline-block text-[9px] px-1 py-0.5 rounded bg-indigo-50 text-indigo-700 ring-1 ring-indigo-200">
               RR
             </span>
           )}
         </span>
+
         {m.court!==undefined && (
-          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-sky-50 text-sky-700 ring-1 ring-sky-200">
+          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-sky-50 text-sky-700 ring-1 ring-sky-200 text-[9px]">
             Court {m.court}
           </span>
         )}
       </div>
-    <div className="text-sm space-y-6">
-  <TeamLine
-    t={m.team1}
-    active={winnerSide==='team1'}
-    label="A"
-    sourceId={m.team1SourceId}
-  />
-  <div className="h-px bg-slate-200" />
-  <TeamLine
-    t={m.team2}
-    active={winnerSide==='team2'}
-    label="B"
-    sourceId={m.team2SourceId}
-  />
-</div>
 
-{m.score === 'BYE' ? (
-  <div className="mt-1 text-xs">
-    <span className="inline-block px-2 py-1 rounded bg-amber-50 text-amber-700 ring-1 ring-amber-200">
-      BYE — auto-advanced
-    </span>
-  </div>
-) : m.score !== undefined ? (
-  <div className="mt-1 text-xs text-slate-600">
-    <span className="text-slate-500">Score:</span> {m.score}
-  </div>
-) : null}
-      {/* connectors */}
-      <div className="pointer-events-none absolute right-0 top-1/2 -translate-y-1/2 w-6 h-10">
+      <div className="border border-slate-300 rounded-sm bg-white overflow-hidden">
+        <TeamLine
+          t={m.team1}
+          active={winnerSide === 'team1'}
+          label="A"
+          sourceId={m.team1SourceId}
+        />
+        <TeamLine
+          t={m.team2}
+          active={winnerSide === 'team2'}
+          label="B"
+          sourceId={m.team2SourceId}
+        />
+      </div>
+
+      {m.score === 'BYE' ? (
+        <div className="mt-1 px-1">
+          <span className="inline-block px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 ring-1 ring-amber-200 text-[10px]">
+            BYE — auto-advanced
+          </span>
+        </div>
+      ) : m.score !== undefined ? (
+        <div className="mt-1 px-1 text-[10px] text-slate-600">
+          <span className="text-slate-500">Score:</span> {m.score}
+        </div>
+      ) : null}
+
+      {/* right-side connector */}
+      <div className="pointer-events-none absolute right-0 top-1/2 -translate-y-1/2 w-5 h-8">
         <div className="absolute right-0 top-0 bottom-0 w-px bg-slate-300" />
-        <div className="absolute right-0 top-1/2 -translate-y-1/2 w-6 h-px bg-slate-300" />
+        <div className="absolute right-0 top-1/2 -translate-y-1/2 w-5 h-px bg-slate-300" />
       </div>
     </div>
   );
 }
-
+    
 function BracketView({
   brackets,
   setBrackets,
@@ -1755,11 +1763,11 @@ const byId = useMemo(
             <h3 className="font-semibold text-slate-700 mb-2 text-[14px]">{div}</h3>
             <div className="overflow-x-auto">
               <div
-                className="grid gap-6"
-                style={{ gridTemplateColumns: `repeat(${cols.length}, minmax(260px, 1fr))` }}
+                className="grid gap-2"
+                style={{ gridTemplateColumns: `repeat(${cols.length}, minmax(230px, 1fr))` }}
               >
                 {cols.map((col, colIdx)=>{
-                  const unit = 14;
+                  const unit = 8;
                   return (
                     <div key={colIdx} className="flex flex-col">
                       {col.map((m, i)=>{
