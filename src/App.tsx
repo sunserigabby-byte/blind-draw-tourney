@@ -3196,7 +3196,6 @@ export default function BlindDrawTourneyApp() {
     </fieldset>
   </>
 )}
-
 <section className="bg-white/80 rounded-lg p-3 text-[11px] text-slate-600">
   <div className="flex items-center gap-2 flex-wrap">
     <button
