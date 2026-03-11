@@ -3196,3 +3196,18 @@ export default function BlindDrawTourneyApp() {
     </fieldset>
   </>
 )}
+        <section className="bg-white/80 rounded-lg p-3 text-[11px] text-slate-600">
+          <div className="flex items-center gap-2 flex-wrap">
+            <button
+              className="px-2 py-1 border rounded text-[11px]"
+              onClick={handleResetApp}
+            >
+              {isAdmin ? "Reset App" : "Reset Local App"}
+            </button>
+            <span>Each format now has separate UPPER and LOWER division data.</span>
+          </div>
+        </section>
+      </div>
+    </main>
+  );
+}
