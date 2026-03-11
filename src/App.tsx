@@ -1563,15 +1563,28 @@ for (let s = 1; s <= gapByes; s++) byeSeeds.add(s);
 
 // Build visual columns from matches
 function buildVisualColumns(brackets:BracketMatch[], division:PlayDiv){
-  const list = brackets.filter(b=>b.division===division);
-  if(list.length===0) return { cols: [] as BracketMatch[][], rounds: 0, size: 0 };
-  const maxRound = Math.max(1, ...list.map(b=> b.round));
+  const list = brackets.filter(b => b.division === division);
+  if (list.length === 0) return { cols: [] as BracketMatch[][], rounds: 0, size: 0 };
+
+  const maxRound = Math.max(1, ...list.map(b => b.round));
   const cols: BracketMatch[][] = [];
-  for(let r=1;r<=maxRound;r++){
-    const col = list.filter(b=> b.round===r).sort((a,b)=> a.slot-b.slot);
+
+  for (let r = 1; r <= maxRound; r++) {
+    let col = list.filter(b => b.round === r).sort((a, b) => a.slot - b.slot);
+
+    // Hide first-round BYE placeholders (single team auto-advanced)
+    if (r === 1) {
+      col = col.filter(m => {
+        const onlyOneTeam = (!!m.team1 && !m.team2) || (!m.team1 && !!m.team2);
+        const isBye = m.score === 'BYE';
+        return !(onlyOneTeam && isBye);
+      });
+    }
+
     cols.push(col);
   }
-  return { cols, rounds:maxRound, size: (cols[0]?.length||1)*2 };
+
+  return { cols, rounds: maxRound, size: (cols[0]?.length || 1) * 2 };
 }
 
 function seedBadge(seed?:number){
@@ -1766,32 +1779,56 @@ const byId = useMemo(
                 className="grid gap-2"
                 style={{ gridTemplateColumns: `repeat(${cols.length}, minmax(230px, 1fr))` }}
               >
-                {cols.map((col, colIdx)=>{
-                  const unit = 8;
-                  return (
-                    <div key={colIdx} className="flex flex-col">
-                      {col.map((m, i)=>{
-                        const topGap = i===0 ? unit*(Math.pow(2,colIdx)-1) : unit*(Math.pow(2,colIdx+1)-1);
-                        const canScore = !!(m.team1 && m.team2);
-                        return (
-                          <div key={m.id} style={{ marginTop: topGap }}>
-                            <BracketCard m={m} byId={byId} />
-                            {canScore && (
-                              <div className="mt-1">
-                                <input
-                                  className="w-32 border rounded px-2 py-1 text-[12px]"
-                                  value={m.score||''}
-                                  onChange={(e)=>onScore(m.id, e.target.value)}
-                                  placeholder="e.g., 25-22"
-                                />
-                              </div>
-                            )}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  );
-                })}
+            {cols.map((col, colIdx) => {
+  const rowHeight = 72;
+
+  return (
+    <div key={colIdx} className="relative" style={{ minHeight: `${Math.max(cols[0]?.length || 1, 1) * rowHeight * 2}px` }}>
+      {col.map((m, i) => {
+        let top = i * rowHeight * 2;
+
+        if (colIdx > 0) {
+          const prevCol = cols[colIdx - 1] || [];
+
+          const srcIdxs = [
+            prevCol.findIndex(prev => prev.id === m.team1SourceId),
+            prevCol.findIndex(prev => prev.id === m.team2SourceId),
+          ].filter(idx => idx >= 0);
+
+          if (srcIdxs.length === 2) {
+            const minIdx = Math.min(srcIdxs[0], srcIdxs[1]);
+            const maxIdx = Math.max(srcIdxs[0], srcIdxs[1]);
+            top = ((minIdx + maxIdx) / 2) * rowHeight * 2;
+          } else if (srcIdxs.length === 1) {
+            top = srcIdxs[0] * rowHeight * 2;
+          }
+        }
+
+        const canScore = !!(m.team1 && m.team2);
+
+        return (
+          <div
+            key={m.id}
+            className="absolute left-0"
+            style={{ top }}
+          >
+            <BracketCard m={m} byId={byId} />
+            {canScore && (
+              <div className="mt-1">
+                <input
+                  className="w-32 border rounded px-2 py-1 text-[12px]"
+                  value={m.score || ''}
+                  onChange={(e)=>onScore(m.id, e.target.value)}
+                  placeholder="e.g., 25-22"
+                />
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+})}
               </div>
             </div>
           </div>
