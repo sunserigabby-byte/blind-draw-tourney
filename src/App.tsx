@@ -1583,7 +1583,13 @@ function seedBadge(seed?:number){
   );
 }
 
-function BracketCard({m}:{m:BracketMatch}){
+function BracketCard({
+  m,
+  byId,
+}:{
+  m:BracketMatch;
+  byId: Map<string, BracketMatch>;
+}){
   const parsed = (()=>{
     if(!m.score) return null;
     const t = String(m.score).trim();
@@ -1596,30 +1602,46 @@ function BracketCard({m}:{m:BracketMatch}){
   const winnerSide: 'team1'|'team2'|null =
     parsed ? (parsed[0]>parsed[1] ? 'team1' : (parsed[0]<parsed[1] ? 'team2' : null)) : null;
 
-  const TeamLine = ({t,active,label}:{t?:Team; active?:boolean; label:'A'|'B'})=> t ? (
-    <div className={
-      "flex items-center justify-between gap-1 rounded px-1.5 py-1 " +
-      (active? 'bg-emerald-50 ring-1 ring-emerald-200' : '')
-    }>
-      <div className="flex items-center gap-1 min-w-0">
-        <span className="inline-flex items-center justify-center w-4 h-4 text-[10px] rounded-full bg-slate-100 text-slate-600">
-          {label}
-        </span>
-        {seedBadge(t.seed)}
-        <span className="truncate" title={t.name}>{t.name}</span>
-      </div>
-    </div>
-  ) : (
-    <div className="flex items-center gap-1 text-slate-400">
-      <span className="inline-flex items-center justify-center w-4 h-4 text-[10px] rounded-full bg-slate-100 text-slate-400">
+  function winnerLabel(sourceId?: string) {
+    if (!sourceId) return "Waiting on previous match";
+    const src = byId.get(sourceId);
+    if (!src) return "Waiting on previous match";
+    return `Winner of Game ${src.slot}`;
+  }
+
+  const TeamLine = ({
+  t,
+  active,
+  label,
+  sourceId,
+}:{
+  t?:Team;
+  active?:boolean;
+  label:'A'|'B';
+  sourceId?: string;
+}) => t ? (
+  <div className={
+    "flex items-center justify-between gap-1 rounded px-1.5 py-1 " +
+    (active ? 'bg-emerald-50 ring-1 ring-emerald-200' : '')
+  }>
+    <div className="flex items-center gap-1 min-w-0">
+      <span className="inline-flex items-center justify-center w-4 h-4 text-[10px] rounded-full bg-slate-100 text-slate-600">
         {label}
       </span>
-      <em className="text-[11px]">Waiting on previous match</em>
+      {seedBadge(t.seed)}
+      <span className="whitespace-normal break-words" title={t.name}>{t.name}</span>
     </div>
-  );
-
+  </div>
+) : (
+  <div className="flex items-center gap-1 text-slate-400">
+    <span className="inline-flex items-center justify-center w-4 h-4 text-[10px] rounded-full bg-slate-100 text-slate-400">
+      {label}
+    </span>
+    <em className="text-[11px]">{winnerLabel(sourceId)}</em>
+  </div>
+);
   return (
-    <div className="relative min-w-[280px] rounded-xl border bg-white shadow-md p-3">
+   <div className="relative min-w-[340px] rounded-xl border bg-white shadow-md p-3">
       <div className="text-[11px] text-slate-500 mb-1 flex items-center justify-between">
         <span className="inline-flex items-center gap-1">
           <span className="font-medium text-slate-700">{m.division}</span>
@@ -1636,17 +1658,21 @@ function BracketCard({m}:{m:BracketMatch}){
           </span>
         )}
       </div>
-      <div className="text-sm space-y-6">
-        <TeamLine t={m.team1} active={winnerSide==='team1'} label="A" />
-        <div className="h-px bg-slate-200" />
-        <TeamLine t={m.team2} active={winnerSide==='team2'} label="B" />
-      </div>
-      {m.score === 'BYE' ? (
-  <div className="mt-1 text-xs">
-    <span className="inline-block px-2 py-1 rounded bg-amber-50 text-amber-700 ring-1 ring-amber-200">
-      BYE — auto-advanced
-    </span>
-  </div>
+     <div className="text-sm space-y-6">
+  <TeamLine
+    t={m.team1}
+    active={winnerSide==='team1'}
+    label="A"
+    sourceId={m.team1SourceId}
+  />
+  <div className="h-px bg-slate-200" />
+  <TeamLine
+    t={m.team2}
+    active={winnerSide==='team2'}
+    label="B"
+    sourceId={m.team2SourceId}
+  />
+</div>
 ) : m.score !== undefined ? (
   <div className="mt-1 text-xs text-slate-600">
     <span className="text-slate-500">Score:</span> {m.score}
@@ -1701,7 +1727,12 @@ function BracketView({
     }
     return copy;
   });
-
+    
+const byId = useMemo(
+  () => new Map(brackets.map(m => [m.id, m] as const)),
+  [brackets]
+);
+    
   return (
     <section className="bg-white/95 backdrop-blur rounded-2xl shadow-lg ring-1 ring-sky-200 p-6">
       <h2 className="text-[20px] font-bold text-sky-900 mb-2 tracking-tight">Playoff Brackets</h2>
@@ -1729,7 +1760,7 @@ function BracketView({
                         const canScore = !!(m.team1 && m.team2);
                         return (
                           <div key={m.id} style={{ marginTop: topGap }}>
-                            <BracketCard m={m} />
+                            <BracketCard m={m} byId={byId} />
                             {canScore && (
                               <div className="mt-1">
                                 <input
