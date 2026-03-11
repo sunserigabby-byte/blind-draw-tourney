@@ -3100,58 +3100,68 @@ export default function BlindDrawTourneyApp() {
         <AdminBanner />
         <DivisionTabs />
 
-        {activeTab === "DOUBLES" ? <>
+       {activeTab === "DOUBLES" ? (
+  <>
+    <fieldset disabled={!isAdmin} className={!isAdmin ? "opacity-95" : ""}>
+      <section className="bg-white/95 backdrop-blur rounded-xl shadow ring-1 ring-slate-200 p-4">
+        <h2 className="text-[16px] font-semibold text-sky-800 mb-2">
+          Players (Doubles – {activeDivision})
+        </h2>
+        <div className="grid md:grid-cols-2 gap-4">
+          <LineNumberTextarea
+            id={`d-guys-${activeDivision}`}
+            label="Guys"
+            value={currentD.guysText}
+            onChange={(e)=>setCurrentD(p=>({...p, guysText:e.target.value}))}
+          />
+          <LineNumberTextarea
+            id={`d-girls-${activeDivision}`}
+            label="Girls"
+            value={currentD.girlsText}
+            onChange={(e)=>setCurrentD(p=>({...p, girlsText:e.target.value}))}
+          />
+        </div>
+      </section>
 
-
-<Leaderboard matches={currentD.matches} guysText={currentD.guysText} girlsText={currentD.girlsText} />
-
-<fieldset disabled={!isAdmin} className={!isAdmin ? "opacity-95" : ""}>
-  <section className="bg-white/95 backdrop-blur rounded-xl shadow ring-1 ring-slate-200 p-4">
-    <h2 className="text-[16px] font-semibold text-sky-800 mb-2">
-      Players (Doubles – {activeDivision})
-    </h2>
-    <div className="grid md:grid-cols-2 gap-4">
-      <LineNumberTextarea
-        id={`d-guys-${activeDivision}`}
-        label="Guys"
-        value={currentD.guysText}
-        onChange={(e)=>setCurrentD(p=>({...p, guysText:e.target.value}))}
+      <RoundGenerator
+        guysText={currentD.guysText}
+        girlsText={currentD.girlsText}
+        matches={currentD.matches}
+        setMatches={(v:any)=>setCurrentD(p=>({...p, matches: typeof v === 'function' ? v(p.matches) : v}))}
       />
-      <LineNumberTextarea
-        id={`d-girls-${activeDivision}`}
-        label="Girls"
-        value={currentD.girlsText}
-        onChange={(e)=>setCurrentD(p=>({...p, girlsText:e.target.value}))}
+    </fieldset>
+
+    <MatchesView
+      matches={currentD.matches}
+      setMatches={(v:any)=>setCurrentD(p=>({...p, matches: typeof v === 'function' ? v(p.matches) : v}))}
+      isAdmin={isAdmin}
+    />
+
+    <Leaderboard
+      matches={currentD.matches}
+      guysText={currentD.guysText}
+      girlsText={currentD.girlsText}
+    />
+
+    <fieldset disabled={!isAdmin} className={!isAdmin ? "opacity-95" : ""}>
+      <PlayoffBuilder
+        matches={currentD.matches}
+        guysText={currentD.guysText}
+        girlsText={currentD.girlsText}
+        setBrackets={(f)=>setCurrentD(prev => ({
+          ...prev,
+          brackets: typeof f === "function" ? (f as any)(prev.brackets) : f
+        }))}
+        baseDivision={activeDivision}
       />
-    </div>
-  </section>
+    </fieldset>
 
-  <RoundGenerator
-    guysText={currentD.guysText}
-    girlsText={currentD.girlsText}
-    matches={currentD.matches}
-    setMatches={(v:any)=>setCurrentD(p=>({...p, matches: typeof v === 'function' ? v(p.matches) : v}))}
-  />
-
-  <PlayoffBuilder
-    matches={currentD.matches}
-    guysText={currentD.guysText}
-    girlsText={currentD.girlsText}
-    setBrackets={(f)=>setCurrentD(prev => ({ ...prev, brackets: typeof f === "function" ? (f as any)(prev.brackets) : f }))}
-    baseDivision={activeDivision}
-  />
-</fieldset>
-
-<MatchesView
-  matches={currentD.matches}
-  setMatches={(v:any)=>setCurrentD(p=>({...p, matches: typeof v === 'function' ? v(p.matches) : v}))}
-  isAdmin={isAdmin}
-/>
-
-<BracketView
-  brackets={currentD.brackets}
-  setBrackets={(v:any)=>setCurrentD(p=>({...p, brackets: typeof v === 'function' ? v(p.brackets) : v}))}
-/>
+    <BracketView
+      brackets={currentD.brackets}
+      setBrackets={(v:any)=>setCurrentD(p=>({...p, brackets: typeof v === 'function' ? v(p.brackets) : v}))}
+    />
+  </>
+) : ...}
         
         </> : activeTab === "QUADS" ? <>
           <QuadsLeaderboard matches={currentQ.matches} guysText={currentQ.guysText} girlsText={currentQ.girlsText} />
