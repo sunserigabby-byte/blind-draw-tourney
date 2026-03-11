@@ -3100,7 +3100,7 @@ export default function BlindDrawTourneyApp() {
         <AdminBanner />
         <DivisionTabs />
 
-       {activeTab === "DOUBLES" ? (
+{activeTab === "DOUBLES" ? (
   <>
     <fieldset disabled={!isAdmin} className={!isAdmin ? "opacity-95" : ""}>
       <section className="bg-white/95 backdrop-blur rounded-xl shadow ring-1 ring-slate-200 p-4">
@@ -3161,35 +3161,38 @@ export default function BlindDrawTourneyApp() {
       setBrackets={(v:any)=>setCurrentD(p=>({...p, brackets: typeof v === 'function' ? v(p.brackets) : v}))}
     />
   </>
-
-        
-        </> : activeTab === "QUADS" ? <>
-          <QuadsLeaderboard matches={currentQ.matches} guysText={currentQ.guysText} girlsText={currentQ.girlsText} />
-          <fieldset disabled={!isAdmin} className={!isAdmin ? "opacity-95" : ""}>
-            <section className="bg-white/95 backdrop-blur rounded-xl shadow ring-1 ring-slate-200 p-4"><h2 className="text-[16px] font-semibold text-sky-800 mb-2">Players (Quads – {activeDivision})</h2><div className="grid md:grid-cols-2 gap-4"><LineNumberTextarea id={`q-guys-${activeDivision}`} label="Guys (Quads)" value={currentQ.guysText} onChange={(e)=>setCurrentQ(p=>({...p, guysText:e.target.value}))} /><LineNumberTextarea id={`q-girls-${activeDivision}`} label="Girls (Quads)" value={currentQ.girlsText} onChange={(e)=>setCurrentQ(p=>({...p, girlsText:e.target.value}))} /></div></section>
-            <QuadsRoundGenerator guysText={currentQ.guysText} girlsText={currentQ.girlsText} matches={currentQ.matches} setMatches={(v:any)=>setCurrentQ(p=>({...p, matches: typeof v === 'function' ? v(p.matches) : v}))} />
-            <QuadsMatchesView matches={currentQ.matches} setMatches={(v:any)=>setCurrentQ(p=>({...p, matches: typeof v === 'function' ? v(p.matches) : v}))} />
-            <QuadsPlayoffBuilder matches={currentQ.matches} guysText={currentQ.guysText} girlsText={currentQ.girlsText} setBrackets={(v:any)=>setCurrentQ(p=>({...p, brackets: typeof v === 'function' ? v(p.brackets) : v}))} />
-            {currentQ.brackets.length > 0 && <BracketView brackets={currentQ.brackets} setBrackets={(v:any)=>setCurrentQ(p=>({...p, brackets: typeof v === 'function' ? v(p.brackets) : v}))} />}
-          </fieldset>
-        </> : <>
-          <TriplesLeaderboard matches={currentT.matches} guysText={currentT.guysText} girlsText={currentT.girlsText} />
-          <fieldset disabled={!isAdmin} className={!isAdmin ? "opacity-95" : ""}>
-            <section className="bg-white/95 backdrop-blur rounded-xl shadow ring-1 ring-slate-200 p-4"><h2 className="text-[16px] font-semibold text-sky-800 mb-2">Players (Triples – {activeDivision})</h2><div className="grid md:grid-cols-2 gap-4"><LineNumberTextarea id={`t-guys-${activeDivision}`} label="Guys (Triples)" value={currentT.guysText} onChange={(e)=>setCurrentT(p=>({...p, guysText:e.target.value}))} /><LineNumberTextarea id={`t-girls-${activeDivision}`} label="Girls (Triples)" value={currentT.girlsText} onChange={(e)=>setCurrentT(p=>({...p, girlsText:e.target.value}))} /></div></section>
-            <TriplesRoundGenerator guysText={currentT.guysText} girlsText={currentT.girlsText} matches={currentT.matches} setMatches={(v:any)=>setCurrentT(p=>({...p, matches: typeof v === 'function' ? v(p.matches) : v}))} />
-            <TriplesMatchesView matches={currentT.matches} setMatches={(v:any)=>setCurrentT(p=>({...p, matches: typeof v === 'function' ? v(p.matches) : v}))} />
-            <TriplesPlayoffBuilder matches={currentT.matches} guysText={currentT.guysText} girlsText={currentT.girlsText} setBrackets={(v:any)=>setCurrentT(p=>({...p, brackets: typeof v === 'function' ? v(p.brackets) : v}))} />
-            {currentT.brackets.length > 0 && <BracketView brackets={currentT.brackets} setBrackets={(v:any)=>setCurrentT(p=>({...p, brackets: typeof v === 'function' ? v(p.brackets) : v}))} />}
-          </fieldset>
-        </>}
-
-        <section className="bg-white/80 rounded-lg p-3 text-[11px] text-slate-600"><div className="flex items-center gap-2 flex-wrap"><button
-  className="px-2 py-1 border rounded text-[11px]"
-  onClick={handleResetApp}
->
-  {isAdmin ? "Reset App" : "Reset Local App"}
-</button><span>Each format now has separate UPPER and LOWER division data.</span></div></section>
-      </div>
-    </main>
-  );
-}
+) : activeTab === "QUADS" ? (
+  <>
+    <QuadsLeaderboard matches={currentQ.matches} guysText={currentQ.guysText} girlsText={currentQ.girlsText} />
+    <fieldset disabled={!isAdmin} className={!isAdmin ? "opacity-95" : ""}>
+      <section className="bg-white/95 backdrop-blur rounded-xl shadow ring-1 ring-slate-200 p-4">
+        <h2 className="text-[16px] font-semibold text-sky-800 mb-2">Players (Quads – {activeDivision})</h2>
+        <div className="grid md:grid-cols-2 gap-4">
+          <LineNumberTextarea id={`q-guys-${activeDivision}`} label="Guys (Quads)" value={currentQ.guysText} onChange={(e)=>setCurrentQ(p=>({...p, guysText:e.target.value}))} />
+          <LineNumberTextarea id={`q-girls-${activeDivision}`} label="Girls (Quads)" value={currentQ.girlsText} onChange={(e)=>setCurrentQ(p=>({...p, girlsText:e.target.value}))} />
+        </div>
+      </section>
+      <QuadsRoundGenerator guysText={currentQ.guysText} girlsText={currentQ.girlsText} matches={currentQ.matches} setMatches={(v:any)=>setCurrentQ(p=>({...p, matches: typeof v === 'function' ? v(p.matches) : v}))} />
+      <QuadsMatchesView matches={currentQ.matches} setMatches={(v:any)=>setCurrentQ(p=>({...p, matches: typeof v === 'function' ? v(p.matches) : v}))} />
+      <QuadsPlayoffBuilder matches={currentQ.matches} guysText={currentQ.guysText} girlsText={currentQ.girlsText} setBrackets={(v:any)=>setCurrentQ(p=>({...p, brackets: typeof v === 'function' ? v(p.brackets) : v}))} />
+      {currentQ.brackets.length > 0 && <BracketView brackets={currentQ.brackets} setBrackets={(v:any)=>setCurrentQ(p=>({...p, brackets: typeof v === 'function' ? v(p.brackets) : v}))} />}
+    </fieldset>
+  </>
+) : (
+  <>
+    <TriplesLeaderboard matches={currentT.matches} guysText={currentT.guysText} girlsText={currentT.girlsText} />
+    <fieldset disabled={!isAdmin} className={!isAdmin ? "opacity-95" : ""}>
+      <section className="bg-white/95 backdrop-blur rounded-xl shadow ring-1 ring-slate-200 p-4">
+        <h2 className="text-[16px] font-semibold text-sky-800 mb-2">Players (Triples – {activeDivision})</h2>
+        <div className="grid md:grid-cols-2 gap-4">
+          <LineNumberTextarea id={`t-guys-${activeDivision}`} label="Guys (Triples)" value={currentT.guysText} onChange={(e)=>setCurrentT(p=>({...p, guysText:e.target.value}))} />
+          <LineNumberTextarea id={`t-girls-${activeDivision}`} label="Girls (Triples)" value={currentT.girlsText} onChange={(e)=>setCurrentT(p=>({...p, girlsText:e.target.value}))} />
+        </div>
+      </section>
+      <TriplesRoundGenerator guysText={currentT.guysText} girlsText={currentT.girlsText} matches={currentT.matches} setMatches={(v:any)=>setCurrentT(p=>({...p, matches: typeof v === 'function' ? v(p.matches) : v}))} />
+      <TriplesMatchesView matches={currentT.matches} setMatches={(v:any)=>setCurrentT(p=>({...p, matches: typeof v === 'function' ? v(p.matches) : v}))} />
+      <TriplesPlayoffBuilder matches={currentT.matches} guysText={currentT.guysText} girlsText={currentT.girlsText} setBrackets={(v:any)=>setCurrentT(p=>({...p, brackets: typeof v === 'function' ? v(p.brackets) : v}))} />
+      {currentT.brackets.length > 0 && <BracketView brackets={currentT.brackets} setBrackets={(v:any)=>setCurrentT(p=>({...p, brackets: typeof v === 'function' ? v(p.brackets) : v}))} />}
+    </fieldset>
+  </>
+)}
