@@ -3101,7 +3101,7 @@ export default function BlindDrawTourneyApp() {
         <DivisionTabs />
 
         {activeTab === "DOUBLES" ? <>
-      <Leaderboard matches={currentD.matches} guysText={currentD.guysText} girlsText={currentD.girlsText} />
+
 
 <Leaderboard matches={currentD.matches} guysText={currentD.guysText} girlsText={currentD.girlsText} />
 
