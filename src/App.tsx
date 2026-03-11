@@ -1658,7 +1658,7 @@ function BracketCard({
           </span>
         )}
       </div>
-     <div className="text-sm space-y-6">
+    <div className="text-sm space-y-6">
   <TeamLine
     t={m.team1}
     active={winnerSide==='team1'}
@@ -1673,6 +1673,13 @@ function BracketCard({
     sourceId={m.team2SourceId}
   />
 </div>
+
+{m.score === 'BYE' ? (
+  <div className="mt-1 text-xs">
+    <span className="inline-block px-2 py-1 rounded bg-amber-50 text-amber-700 ring-1 ring-amber-200">
+      BYE — auto-advanced
+    </span>
+  </div>
 ) : m.score !== undefined ? (
   <div className="mt-1 text-xs text-slate-600">
     <span className="text-slate-500">Score:</span> {m.score}
