@@ -17,6 +17,7 @@ import { TriplesRoundGenerator } from './triples/RoundGenerator';
 import { TriplesLeaderboard } from './triples/Leaderboard';
 import { TriplesPlayoffBuilder } from './triples/PlayoffBuilder';
 import { KobPoolGenerator } from './kob/PoolGenerator';
+import { KobFinalsGenerator } from './kob/FinalsGenerator';
 import { KobMatchesView } from './kob/MatchesView';
 import { KobLeaderboard } from './kob/Leaderboard';
 
@@ -357,6 +358,13 @@ export default function BlindDrawTourneyApp() {
                 girlsText={currentKob.girlsText}
                 games={currentKob.matches as KobGameRow[]}
                 setGames={(v: any) => setCurrentKob(p => ({ ...p, matches: typeof v === 'function' ? v(p.matches) : v }))}
+              />
+              <KobFinalsGenerator
+                games={currentKob.matches as KobGameRow[]}
+                setGames={(v: any) => setCurrentKob(p => ({ ...p, matches: typeof v === 'function' ? v(p.matches) : v }))}
+                guysText={currentKob.guysText}
+                girlsText={currentKob.girlsText}
+                isAdmin={isAdmin}
               />
             </fieldset>
             <KobMatchesView
