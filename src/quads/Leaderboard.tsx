@@ -15,7 +15,8 @@ export type QuadsPlayerRow = {
 export function computeQuadsStandingsFull(
   matches: QuadsMatchRow[],
   guysText: string,
-  girlsText: string
+  girlsText: string,
+  scoreCap: 21 | 25 = 25
 ) {
   const guysList = Array.from(
     new Set((guysText || "").split(/\r?\n/).map((s) => s.trim()).filter(Boolean))
@@ -44,7 +45,7 @@ export function computeQuadsStandingsFull(
     if (!s) continue;
 
     const [a, b] = s;
-    if (!isValidQuadsScore(a, b)) continue;
+    if (!isValidQuadsScore(a, b, scoreCap)) continue;
 
     const diff = Math.abs(a - b);
     const t1Won = a > b;
@@ -86,10 +87,12 @@ export function QuadsLeaderboard({
   matches,
   guysText,
   girlsText,
+  scoreCap = 25,
 }: {
   matches: QuadsMatchRow[];
   guysText: string;
   girlsText: string;
+  scoreCap?: 21 | 25;
 }) {
   const guysList = useMemo(
     () => Array.from(new Set((guysText || '').split(/\r?\n/).map(s => s.trim()).filter(Boolean))),
@@ -116,7 +119,7 @@ export function QuadsLeaderboard({
     for (const m of matches) {
       const s = parseScore(m.scoreText); if (!s) continue;
       const [a, b] = s;
-      if (!isValidQuadsScore(a, b)) continue;
+      if (!isValidQuadsScore(a, b, scoreCap)) continue;
       const diff = Math.abs(a - b);
       const t1Won = a > b;
       const t1 = m.t1;
@@ -177,7 +180,7 @@ export function QuadsLeaderboard({
     <section>
       <h2 className="text-[18px] font-bold text-sky-900 mb-1">Leaderboard (Quads – Live)</h2>
       <p className="text-[11px] text-slate-500 mb-3">
-        Pool (quads): one game to 21, win by 2, cap 25. W/L/PD auto-update as you type scores.
+        Pool (quads): win by 2, cap {scoreCap === 21 ? '23' : '25'}. W/L/PD auto-update as you type scores.
       </p>
       <div className="grid md:grid-cols-2 gap-4">
         <Table title="Guys Standings (Quads)" rows={guysRows} />

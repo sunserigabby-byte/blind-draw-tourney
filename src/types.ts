@@ -47,6 +47,11 @@ export type QuadsMatchRow = {
   t2: string[];
   isTriple1?: boolean;
   isTriple2?: boolean;
+  t1GirlCount?: number;
+  t2GirlCount?: number;
+  tag1?: 'ULTIMATE_REVCO' | 'POWER_PUFF' | null;
+  tag2?: 'ULTIMATE_REVCO' | 'POWER_PUFF' | null;
+  sitOuts?: string[];
   scoreText?: string;
 };
 
@@ -57,5 +62,18 @@ export type TriplesMatchRow = {
   t1: string[];
   t2: string[];
   girlsNeeded: number;
+  sitOuts?: string[];
+  scoreText?: string;
+};
+
+// King/Queen of the Beach — individual tournament with rotating partners
+// Each pool of 4 plays 3 games; every player partners with every other once.
+export type KobGameRow = {
+  id: string;
+  pool: number;    // pool number (1, 2, 3, …)
+  game: number;    // game within pool (1, 2, 3)
+  t1: [string, string];
+  t2: [string, string];
+  court?: number;
   scoreText?: string;
 };

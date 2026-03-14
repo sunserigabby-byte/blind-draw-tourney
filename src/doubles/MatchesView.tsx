@@ -17,6 +17,28 @@ export function MatchesView({
 
   useEffect(() => { if (rounds.length) setOpen(new Set([rounds[rounds.length - 1]])); }, [matches.length]);
 
+  // Per-round completion stats
+  const roundStats = useMemo(() => {
+    const map = new Map<number, { total: number; scored: number }>();
+    for (const r of rounds) {
+      const rm = matches.filter(m => m.round === r);
+      const scored = rm.filter(m => {
+        const p = parseScore(m.scoreText);
+        return p !== null && isValidDoublesScore(p[0], p[1]);
+      }).length;
+      map.set(r, { total: rm.length, scored });
+    }
+    return map;
+  }, [matches, rounds]);
+
+  // The "live" round: latest round that still has pending scores
+  const liveRound = useMemo(() => {
+    return [...rounds].reverse().find(r => {
+      const s = roundStats.get(r);
+      return s && s.scored < s.total;
+    }) ?? null;
+  }, [rounds, roundStats]);
+
   const update = (id: string, patch: Partial<MatchRow>) => setMatches(prev => prev.map(m => m.id === id ? { ...m, ...patch } : m));
   const requestDelete = (round: number) => { setConfirmR(round); };
   const doDelete = (round: number) => { setMatches(prev => prev.filter(m => m.round !== round)); setConfirmR(null); };
@@ -36,12 +58,15 @@ export function MatchesView({
         {rounds.map(r => {
           const roundSitOuts =
             matches.find((m) => m.round === r && (m.sitOuts?.length || 0) > 0)?.sitOuts || [];
+          const { total, scored } = roundStats.get(r) ?? { total: 0, scored: 0 };
+          const allDone = total > 0 && scored === total;
+          const isLive = r === liveRound;
 
           return (
-            <div key={r} className="border rounded-xl overflow-hidden shadow-sm bg-white">
+            <div key={r} className={`border rounded-xl overflow-hidden shadow-sm bg-white ${isLive ? 'ring-2 ring-sky-400' : ''}`}>
               <div className="px-3 py-2 bg-slate-50/80 border-b flex justify-between items-center">
                 <button
-                  className="text-left font-medium text-[14px] text-slate-800"
+                  className="text-left font-medium text-[14px] text-slate-800 flex items-center gap-2"
                   onClick={() => {
                     const n = new Set(open);
                     if (n.has(r)) n.delete(r); else n.add(r);
@@ -49,8 +74,22 @@ export function MatchesView({
                   }}
                 >
                   Round {r}
-                  <span className="ml-2 text-[11px] text-slate-500">
-                    {open.has(r) ? 'Click to collapse' : 'Click to expand'}
+                  <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium tabular-nums ${
+                    allDone
+                      ? 'bg-emerald-100 text-emerald-700'
+                      : scored > 0
+                      ? 'bg-amber-100 text-amber-700'
+                      : 'bg-slate-100 text-slate-500'
+                  }`}>
+                    {scored}/{total}{allDone ? ' ✓' : ''}
+                  </span>
+                  {isLive && (
+                    <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-sky-500 text-white font-semibold animate-pulse">
+                      LIVE
+                    </span>
+                  )}
+                  <span className="text-[11px] text-slate-400 font-normal">
+                    {open.has(r) ? '▲' : '▼'}
                   </span>
                 </button>
                 <button

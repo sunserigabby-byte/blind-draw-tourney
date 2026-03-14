@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import type { MatchRow, QuadsMatchRow, TriplesMatchRow, BracketMatch } from './types';
+import type { MatchRow, QuadsMatchRow, TriplesMatchRow, BracketMatch, KobGameRow } from './types';
 import { apiGetState, apiSaveState } from './api';
 import { SunnyLogo } from './components/SunnyLogo';
 import { LineNumberTextarea } from './components/LinedTextarea';
@@ -16,8 +16,11 @@ import { TriplesMatchesView } from './triples/MatchesView';
 import { TriplesRoundGenerator } from './triples/RoundGenerator';
 import { TriplesLeaderboard } from './triples/Leaderboard';
 import { TriplesPlayoffBuilder } from './triples/PlayoffBuilder';
+import { KobPoolGenerator } from './kob/PoolGenerator';
+import { KobMatchesView } from './kob/MatchesView';
+import { KobLeaderboard } from './kob/Leaderboard';
 
-type TabKey = "DOUBLES" | "QUADS" | "TRIPLES";
+type TabKey = "DOUBLES" | "QUADS" | "TRIPLES" | "KOB";
 type DivisionKey = "UPPER" | "LOWER";
 type DivisionState<TMatch> = { guysText: string; girlsText: string; matches: TMatch[]; brackets: BracketMatch[] };
 
@@ -39,8 +42,11 @@ export default function BlindDrawTourneyApp() {
   const [dLower, setDLower] = useState<DivisionState<MatchRow>>(emptyDivisionState<MatchRow>());
   const [qUpper, setQUpper] = useState<DivisionState<QuadsMatchRow>>(emptyDivisionState<QuadsMatchRow>());
   const [qLower, setQLower] = useState<DivisionState<QuadsMatchRow>>(emptyDivisionState<QuadsMatchRow>());
+  const [qScoreCap, setQScoreCap] = useState<21 | 25>(25);
   const [tUpper, setTUpper] = useState<DivisionState<TriplesMatchRow>>(emptyDivisionState<TriplesMatchRow>());
   const [tLower, setTLower] = useState<DivisionState<TriplesMatchRow>>(emptyDivisionState<TriplesMatchRow>());
+  const [kobUpper, setKobUpper] = useState<DivisionState<KobGameRow>>(emptyDivisionState<KobGameRow>());
+  const [kobLower, setKobLower] = useState<DivisionState<KobGameRow>>(emptyDivisionState<KobGameRow>());
 
   async function handleResetApp() {
     const ok = window.confirm(
@@ -54,6 +60,8 @@ export default function BlindDrawTourneyApp() {
     const emptyQLower = emptyDivisionState<QuadsMatchRow>();
     const emptyTUpper = emptyDivisionState<TriplesMatchRow>();
     const emptyTLower = emptyDivisionState<TriplesMatchRow>();
+    const emptyKobUpper = emptyDivisionState<KobGameRow>();
+    const emptyKobLower = emptyDivisionState<KobGameRow>();
 
     setDUpper(emptyDUpper);
     setDLower(emptyDLower);
@@ -61,6 +69,8 @@ export default function BlindDrawTourneyApp() {
     setQLower(emptyQLower);
     setTUpper(emptyTUpper);
     setTLower(emptyTLower);
+    setKobUpper(emptyKobUpper);
+    setKobLower(emptyKobLower);
     setActiveTab("DOUBLES");
     setActiveDivision("UPPER");
 
@@ -103,11 +113,13 @@ export default function BlindDrawTourneyApp() {
     activeDivision,
     doubles: { UPPER: dUpper, LOWER: dLower },
     quads: { UPPER: qUpper, LOWER: qLower },
+    qScoreCap,
     triples: { UPPER: tUpper, LOWER: tLower },
+    kob: { UPPER: kobUpper, LOWER: kobLower },
     guysText: dUpper.guysText, girlsText: dUpper.girlsText, matches: dUpper.matches, brackets: dUpper.brackets,
     qGuysText: qUpper.guysText, qGirlsText: qUpper.girlsText, qMatches: qUpper.matches, qBrackets: qUpper.brackets,
     tGuysText: tUpper.guysText, tGirlsText: tUpper.girlsText, tMatches: tUpper.matches, tBrackets: tUpper.brackets,
-  } as any), [activeTab, activeDivision, dUpper, dLower, qUpper, qLower, tUpper, tLower]);
+  } as any), [activeTab, activeDivision, dUpper, dLower, qUpper, qLower, tUpper, tLower, kobUpper, kobLower]);
 
   useEffect(() => {
     (async () => {
@@ -121,7 +133,10 @@ export default function BlindDrawTourneyApp() {
           if (data.quads?.LOWER) setQLower(data.quads.LOWER);
           if (data.triples?.UPPER) setTUpper(data.triples.UPPER); else setTUpper({ guysText: data.tGuysText || "", girlsText: data.tGirlsText || "", matches: Array.isArray(data.tMatches) ? data.tMatches : [], brackets: Array.isArray(data.tBrackets) ? data.tBrackets : [] });
           if (data.triples?.LOWER) setTLower(data.triples.LOWER);
-          if (data.activeTab === "DOUBLES" || data.activeTab === "QUADS" || data.activeTab === "TRIPLES") setActiveTab(data.activeTab);
+          if (data.kob?.UPPER) setKobUpper(data.kob.UPPER);
+          if (data.kob?.LOWER) setKobLower(data.kob.LOWER);
+          if (data.qScoreCap === 21 || data.qScoreCap === 25) setQScoreCap(data.qScoreCap);
+          if (data.activeTab === "DOUBLES" || data.activeTab === "QUADS" || data.activeTab === "TRIPLES" || data.activeTab === "KOB") setActiveTab(data.activeTab);
           if (data.activeDivision === "UPPER" || data.activeDivision === "LOWER") setActiveDivision(data.activeDivision);
         }
         setLoadingRemote(false);
@@ -171,6 +186,8 @@ export default function BlindDrawTourneyApp() {
   const setCurrentQ = activeDivision === "UPPER" ? setQUpper : setQLower;
   const currentT = activeDivision === "UPPER" ? tUpper : tLower;
   const setCurrentT = activeDivision === "UPPER" ? setTUpper : setTLower;
+  const currentKob = activeDivision === "UPPER" ? kobUpper : kobLower;
+  const setCurrentKob = activeDivision === "UPPER" ? setKobUpper : setKobLower;
 
   return (
     <main className="min-h-screen bg-gradient-to-b from-sky-100 via-sky-50 to-white text-slate-800 antialiased">
@@ -184,6 +201,7 @@ export default function BlindDrawTourneyApp() {
             <button className={"px-3 py-1 rounded-t-md border-b-2 " + (activeTab === "DOUBLES" ? "bg-white text-sky-900 border-sky-400" : "bg-transparent text-sky-100/80 border-transparent hover:bg-sky-800/60")} onClick={() => setActiveTab("DOUBLES")}>Revco Doubles</button>
             <button className={"px-3 py-1 rounded-t-md border-b-2 " + (activeTab === "QUADS" ? "bg-white text-sky-900 border-sky-400" : "bg-transparent text-sky-100/80 border-transparent hover:bg-sky-800/60")} onClick={() => setActiveTab("QUADS")}>Revco Quads</button>
             <button className={"px-3 py-1 rounded-t-md border-b-2 " + (activeTab === "TRIPLES" ? "bg-white text-sky-900 border-sky-400" : "bg-transparent text-sky-100/80 border-transparent hover:bg-sky-800/60")} onClick={() => setActiveTab("TRIPLES")}>Revco Triples</button>
+            <button className={"px-3 py-1 rounded-t-md border-b-2 " + (activeTab === "KOB" ? "bg-white text-sky-900 border-sky-400" : "bg-transparent text-sky-100/80 border-transparent hover:bg-sky-800/60")} onClick={() => setActiveTab("KOB")}>KOB / QOB</button>
           </div>
         </div>
       </header>
@@ -255,22 +273,36 @@ export default function BlindDrawTourneyApp() {
           </>
         ) : activeTab === "QUADS" ? (
           <>
-            <QuadsLeaderboard matches={currentQ.matches} guysText={currentQ.guysText} girlsText={currentQ.girlsText} />
+            <QuadsLeaderboard matches={currentQ.matches} guysText={currentQ.guysText} girlsText={currentQ.girlsText} scoreCap={qScoreCap} />
             <fieldset disabled={!isAdmin} className={!isAdmin ? "opacity-95" : ""}>
               <section className="bg-white/95 backdrop-blur rounded-xl shadow ring-1 ring-slate-200 p-4">
-                <h2 className="text-[16px] font-semibold text-sky-800 mb-2">Players (Quads – {activeDivision})</h2>
+                <div className="flex items-center justify-between flex-wrap gap-3 mb-2">
+                  <h2 className="text-[16px] font-semibold text-sky-800">Players (Quads – {activeDivision})</h2>
+                  <div className="flex items-center gap-2 text-[12px]">
+                    <span className="text-slate-600 font-medium">Pool play cap:</span>
+                    {([21, 25] as const).map(c => (
+                      <button
+                        key={c}
+                        className={"px-2.5 py-1 rounded-lg border text-[12px] font-medium " + (qScoreCap === c ? "bg-sky-700 text-white border-sky-700" : "bg-white text-slate-700 border-slate-300 hover:bg-slate-50")}
+                        onClick={() => setQScoreCap(c)}
+                      >
+                        {c}
+                      </button>
+                    ))}
+                  </div>
+                </div>
                 <div className="grid md:grid-cols-2 gap-4">
                   <LineNumberTextarea id={`q-guys-${activeDivision}`} label="Guys (Quads)" value={currentQ.guysText} onChange={(e) => setCurrentQ(p => ({ ...p, guysText: e.target.value }))} />
                   <LineNumberTextarea id={`q-girls-${activeDivision}`} label="Girls (Quads)" value={currentQ.girlsText} onChange={(e) => setCurrentQ(p => ({ ...p, girlsText: e.target.value }))} />
                 </div>
               </section>
               <QuadsRoundGenerator guysText={currentQ.guysText} girlsText={currentQ.girlsText} matches={currentQ.matches} setMatches={(v: any) => setCurrentQ(p => ({ ...p, matches: typeof v === 'function' ? v(p.matches) : v }))} />
-              <QuadsMatchesView matches={currentQ.matches} setMatches={(v: any) => setCurrentQ(p => ({ ...p, matches: typeof v === 'function' ? v(p.matches) : v }))} />
-              <QuadsPlayoffBuilder matches={currentQ.matches} guysText={currentQ.guysText} girlsText={currentQ.girlsText} setBrackets={(v: any) => setCurrentQ(p => ({ ...p, brackets: typeof v === 'function' ? v(p.brackets) : v }))} />
+              <QuadsMatchesView matches={currentQ.matches} setMatches={(v: any) => setCurrentQ(p => ({ ...p, matches: typeof v === 'function' ? v(p.matches) : v }))} isAdmin={isAdmin} scoreCap={qScoreCap} />
+              <QuadsPlayoffBuilder matches={currentQ.matches} guysText={currentQ.guysText} girlsText={currentQ.girlsText} setBrackets={(v: any) => setCurrentQ(p => ({ ...p, brackets: typeof v === 'function' ? v(p.brackets) : v }))} baseDivision={activeDivision} scoreCap={qScoreCap} />
               {currentQ.brackets.length > 0 && <BracketView brackets={currentQ.brackets} setBrackets={(v: any) => setCurrentQ(p => ({ ...p, brackets: typeof v === 'function' ? v(p.brackets) : v }))} />}
             </fieldset>
           </>
-        ) : (
+        ) : activeTab === "TRIPLES" ? (
           <>
             <TriplesLeaderboard matches={currentT.matches} guysText={currentT.guysText} girlsText={currentT.girlsText} />
             <fieldset disabled={!isAdmin} className={!isAdmin ? "opacity-95" : ""}>
@@ -282,10 +314,58 @@ export default function BlindDrawTourneyApp() {
                 </div>
               </section>
               <TriplesRoundGenerator guysText={currentT.guysText} girlsText={currentT.girlsText} matches={currentT.matches} setMatches={(v: any) => setCurrentT(p => ({ ...p, matches: typeof v === 'function' ? v(p.matches) : v }))} />
-              <TriplesMatchesView matches={currentT.matches} setMatches={(v: any) => setCurrentT(p => ({ ...p, matches: typeof v === 'function' ? v(p.matches) : v }))} />
+              <TriplesMatchesView matches={currentT.matches} setMatches={(v: any) => setCurrentT(p => ({ ...p, matches: typeof v === 'function' ? v(p.matches) : v }))} isAdmin={isAdmin} />
               <TriplesPlayoffBuilder matches={currentT.matches} guysText={currentT.guysText} girlsText={currentT.girlsText} setBrackets={(v: any) => setCurrentT(p => ({ ...p, brackets: typeof v === 'function' ? v(p.brackets) : v }))} />
               {currentT.brackets.length > 0 && <BracketView brackets={currentT.brackets} setBrackets={(v: any) => setCurrentT(p => ({ ...p, brackets: typeof v === 'function' ? v(p.brackets) : v }))} />}
             </fieldset>
+          </>
+        ) : (
+          /* ── KOB / QOB ── */
+          <>
+            <KobLeaderboard
+              games={currentKob.matches as KobGameRow[]}
+              guysText={currentKob.guysText}
+              girlsText={currentKob.girlsText}
+            />
+            <fieldset disabled={!isAdmin} className={!isAdmin ? "opacity-95" : ""}>
+              <section className="bg-white/95 backdrop-blur rounded-xl shadow ring-1 ring-slate-200 p-4">
+                <h2 className="text-[16px] font-semibold text-sky-800 mb-2">
+                  Players (KOB / QOB – {activeDivision})
+                </h2>
+                <p className="text-[11px] text-slate-500 mb-3">
+                  King &amp; Queen of the Beach — individual tournament with rotating partners.
+                  Pools of 4: each player partners with every other player exactly once (3 games).
+                  Rally scoring to 21, cap 23, win by 2.
+                </p>
+                <div className="grid md:grid-cols-2 gap-4">
+                  <LineNumberTextarea
+                    id={`kob-guys-${activeDivision}`}
+                    label="Men (KOB)"
+                    value={currentKob.guysText}
+                    onChange={(e) => setCurrentKob(p => ({ ...p, guysText: e.target.value }))}
+                  />
+                  <LineNumberTextarea
+                    id={`kob-girls-${activeDivision}`}
+                    label="Women (QOB)"
+                    value={currentKob.girlsText}
+                    onChange={(e) => setCurrentKob(p => ({ ...p, girlsText: e.target.value }))}
+                  />
+                </div>
+              </section>
+              <KobPoolGenerator
+                guysText={currentKob.guysText}
+                girlsText={currentKob.girlsText}
+                games={currentKob.matches as KobGameRow[]}
+                setGames={(v: any) => setCurrentKob(p => ({ ...p, matches: typeof v === 'function' ? v(p.matches) : v }))}
+              />
+            </fieldset>
+            <KobMatchesView
+              games={currentKob.matches as KobGameRow[]}
+              setGames={(v: any) => setCurrentKob(p => ({ ...p, matches: typeof v === 'function' ? v(p.matches) : v }))}
+              isAdmin={isAdmin}
+              guys={currentKob.guysText.split(/\r?\n/).map(s => s.trim()).filter(Boolean)}
+              girls={currentKob.girlsText.split(/\r?\n/).map(s => s.trim()).filter(Boolean)}
+            />
           </>
         )}
 

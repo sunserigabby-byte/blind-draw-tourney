@@ -38,9 +38,12 @@ export function isValidDoublesScore(a: number, b: number) {
   return max >= 21 && diff >= 2;
 }
 
-export function isValidQuadsScore(a: number, b: number) {
+export function isValidQuadsScore(a: number, b: number, cap: 21 | 25 = 25) {
   const diff = Math.abs(a - b);
   const max = Math.max(a, b);
+  // cap 21: to 21, win by 2, hard cap 23 (deuce resolves at 23-21)
+  // cap 25: to 21, win by 2, hard cap 25 (deuce resolves at 25-23)
+  if (cap === 21) return max >= 21 && max <= 23 && diff >= 2;
   return max >= 21 && max <= 25 && diff >= 2;
 }
 
@@ -48,6 +51,13 @@ export function isValidTriplesScore(a: number, b: number) {
   const diff = Math.abs(a - b);
   const max = Math.max(a, b);
   return max >= 21 && diff >= 2;
+}
+
+export function isValidKobScore(a: number, b: number) {
+  // Rally to 21, cap 23, win by 2
+  const diff = Math.abs(a - b);
+  const max = Math.max(a, b);
+  return max >= 21 && max <= 23 && diff >= 2;
 }
 
 export function nextPow2(n: number) {

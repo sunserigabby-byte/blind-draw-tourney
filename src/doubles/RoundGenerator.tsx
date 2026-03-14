@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import type { MatchRow } from '../types';
 import { slug, uniq, clampN, shuffle } from '../utils';
+import { HoldPanel } from '../components/HoldPanel';
 
 // ─── Same-gender history helpers (used for display + scheduling) ──────────────
 
@@ -35,6 +36,13 @@ export function RoundGenerator({
   const [roundsToGen, setRoundsToGen] = useState(1);
   const [startCourt, setStartCourt] = useState(1);
   const [seedStr, setSeedStr] = useState("");
+  const [heldOut, setHeldOut] = useState<Set<string>>(new Set());
+
+  const toggleHold = (name: string) => setHeldOut(prev => {
+    const next = new Set(prev);
+    if (next.has(slug(name))) next.delete(slug(name)); else next.add(slug(name));
+    return next;
+  });
 
   const guys = useMemo(
     () => uniq((guysText || "").split(/\r?\n/).map(s => s.trim()).filter(Boolean)),
@@ -476,8 +484,10 @@ export function RoundGenerator({
     const stats = buildPlayerUsageStats(history);
     const sitOuts: string[] = [];
 
-    let availableGuys = [...guys];
-    let availableGirls = [...girls];
+    // Players marked as held out are removed from this round and logged as sit-outs
+    const heldPlayers = [...guys, ...girls].filter(p => heldOut.has(slug(p)));
+    let availableGuys = guys.filter(p => !heldOut.has(slug(p)));
+    let availableGirls = girls.filter(p => !heldOut.has(slug(p)));
 
     if ((availableGuys.length + availableGirls.length) % 2 === 1) {
       const singleSit = chooseSingleSitOut(

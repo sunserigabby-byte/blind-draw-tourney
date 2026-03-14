@@ -5,9 +5,11 @@ import { uniq, parseScore, isValidTriplesScore } from '../utils';
 export function TriplesMatchesView({
   matches,
   setMatches,
+  isAdmin,
 }: {
   matches: TriplesMatchRow[];
   setMatches: (f: (prev: TriplesMatchRow[]) => TriplesMatchRow[] | TriplesMatchRow[]) => void;
+  isAdmin?: boolean;
 }) {
   const rounds = useMemo(() => uniq(matches.map(m => m.round)).sort((a, b) => a - b), [matches]);
   const [open, setOpen] = useState(() => new Set<number>(rounds.length ? [rounds[rounds.length - 1]] : []));
@@ -16,20 +18,57 @@ export function TriplesMatchesView({
   const update = (id: string, patch: Partial<TriplesMatchRow>) => setMatches(prev => prev.map(m => m.id === id ? { ...m, ...patch } : m));
   const doDelete = (round: number) => { setMatches(prev => prev.filter(m => m.round !== round)); setConfirmR(null); };
 
+  const roundStats = useMemo(() => {
+    const map = new Map<number, { total: number; scored: number }>();
+    for (const r of rounds) {
+      const rm = matches.filter(m => m.round === r);
+      const scored = rm.filter(m => {
+        const p = parseScore(m.scoreText);
+        return p !== null && isValidTriplesScore(p[0], p[1]);
+      }).length;
+      map.set(r, { total: rm.length, scored });
+    }
+    return map;
+  }, [matches, rounds]);
+
+  const liveRound = useMemo(() =>
+    [...rounds].reverse().find(r => {
+      const s = roundStats.get(r);
+      return s && s.scored < s.total;
+    }) ?? null
+  , [rounds, roundStats]);
+
   return (
     <section className="bg-white backdrop-blur rounded-2xl shadow-lg ring-1 ring-sky-200 p-6 border border-sky-100">
       <h2 className="text-[20px] font-bold text-sky-800 mb-2 tracking-tight">Matches & Results (Triples)</h2>
       <div className="w-24 h-1 bg-sky-500 mx-auto rounded-full mb-4" />
       {rounds.length === 0 && <p className="text-[13px] text-gray-600 max-w-lg mx-auto">No triples matches yet.</p>}
       <div className="mt-2 space-y-6">
-        {rounds.map(r => (
-          <div key={r} className="border rounded-xl overflow-hidden shadow-sm bg-white">
+        {rounds.map(r => {
+          const { total, scored } = roundStats.get(r) ?? { total: 0, scored: 0 };
+          const allDone = total > 0 && scored === total;
+          const isLive = r === liveRound;
+
+          return (
+          <div key={r} className={`border rounded-xl overflow-hidden shadow-sm bg-white ${isLive ? 'ring-2 ring-sky-400' : ''}`}>
             <div className="px-3 py-2 bg-slate-50/80 border-b flex justify-between items-center">
-              <button className="text-left font-medium text-[14px] text-slate-800" onClick={() => { const n = new Set(open); if (n.has(r)) n.delete(r); else n.add(r); setOpen(n); }}>
+              <button className="text-left font-medium text-[14px] text-slate-800 flex items-center gap-2" onClick={() => { const n = new Set(open); if (n.has(r)) n.delete(r); else n.add(r); setOpen(n); }}>
                 Round {r}
-                <span className="ml-2 text-[11px] text-slate-500">{open.has(r) ? 'Click to collapse' : 'Click to expand'}</span>
+                <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium tabular-nums ${
+                  allDone ? 'bg-emerald-100 text-emerald-700' : scored > 0 ? 'bg-amber-100 text-amber-700' : 'bg-slate-100 text-slate-500'
+                }`}>
+                  {scored}/{total}{allDone ? ' ✓' : ''}
+                </span>
+                {isLive && (
+                  <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-sky-500 text-white font-semibold animate-pulse">
+                    LIVE
+                  </span>
+                )}
+                <span className="text-[11px] text-slate-400 font-normal">{open.has(r) ? '▲' : '▼'}</span>
               </button>
-              <button className="text-[11px] px-2 py-1 rounded bg-red-600 text-white hover:bg-red-700" onClick={() => setConfirmR(r)}>Delete Round</button>
+              {isAdmin && (
+                <button className="text-[11px] px-2 py-1 rounded bg-red-600 text-white hover:bg-red-700" onClick={() => setConfirmR(r)}>Delete Round</button>
+              )}
             </div>
             {confirmR === r && (
               <div className="px-3 py-2 bg-red-50 border-b border-red-200 flex items-center justify-between text-[12px]">
@@ -67,6 +106,7 @@ export function TriplesMatchesView({
                               value={m.scoreText || ''}
                               onChange={(e) => update(m.id, { scoreText: e.target.value })}
                               placeholder="22-20"
+                              disabled={!isAdmin}
                             />
                           </td>
                         </tr>
@@ -77,7 +117,8 @@ export function TriplesMatchesView({
               </div>
             )}
           </div>
-        ))}
+          );
+        })}
       </div>
     </section>
   );
