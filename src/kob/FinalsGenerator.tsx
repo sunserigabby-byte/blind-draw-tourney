@@ -18,12 +18,14 @@ function computeStandings(games: KobGameRow[], roster: string[]): PlayerStats[] 
     const t1Win = s1 > s2;
     for (const p of g.t1) {
       const key = slug(p);
-      const cur = stats.get(key) ?? { name: p, W: 0, L: 0, PF: 0, PA: 0, GP: 0 };
+      if (!stats.has(key)) continue; // only track roster players
+      const cur = stats.get(key)!;
       stats.set(key, { ...cur, W: cur.W + (t1Win ? 1 : 0), L: cur.L + (t1Win ? 0 : 1), PF: cur.PF + s1, PA: cur.PA + s2, GP: cur.GP + 1 });
     }
     for (const p of g.t2) {
       const key = slug(p);
-      const cur = stats.get(key) ?? { name: p, W: 0, L: 0, PF: 0, PA: 0, GP: 0 };
+      if (!stats.has(key)) continue; // only track roster players
+      const cur = stats.get(key)!;
       stats.set(key, { ...cur, W: cur.W + (t1Win ? 0 : 1), L: cur.L + (t1Win ? 1 : 0), PF: cur.PF + s2, PA: cur.PA + s1, GP: cur.GP + 1 });
     }
   }
@@ -480,15 +482,13 @@ export function KobFinalsGenerator({
     [girlsText],
   );
 
-  const poolGames = useMemo(() => games.filter(g => !g.isFinals), [games]);
+  // KOB pool play = pools 1–499; QOB = pools 501–999
+  const kobPoolGames = useMemo(() => games.filter(g => !g.isFinals && g.pool >= 1   && g.pool <= 499), [games]);
+  const qobPoolGames = useMemo(() => games.filter(g => !g.isFinals && g.pool >= 501 && g.pool <= 999), [games]);
 
-  const hasAnyPoolPlay = poolGames.length > 0;
-  if (!hasAnyPoolPlay) return null;
-
-  // Determine which gender(s) have pool play data
-  const activeSlugs = new Set(poolGames.flatMap(g => [...g.t1, ...g.t2]).map(p => slug(p)));
-  const hasKob = guys.some(p => activeSlugs.has(slug(p)));
-  const hasQob = girls.some(p => activeSlugs.has(slug(p)));
+  const hasKob = kobPoolGames.length > 0;
+  const hasQob = qobPoolGames.length > 0;
+  if (!hasKob && !hasQob) return null;
 
   if (!hasKob && !hasQob) return null;
 
@@ -506,7 +506,7 @@ export function KobFinalsGenerator({
           <GenderSection
             genderLabel="Men — KOB"
             isKob={true}
-            poolGames={poolGames}
+            poolGames={kobPoolGames}
             roster={guys}
             allGames={games}
             setGames={setGames}
@@ -520,7 +520,7 @@ export function KobFinalsGenerator({
             <GenderSection
               genderLabel="Women — QOB"
               isKob={false}
-              poolGames={poolGames}
+              poolGames={qobPoolGames}
               roster={girls}
               allGames={games}
               setGames={setGames}

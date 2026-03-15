@@ -15,12 +15,14 @@ function computeStandings(games: KobGameRow[], roster: string[]): PlayerStats[] 
     const t1Win = s1 > s2;
     for (const p of g.t1) {
       const key = slug(p);
-      const cur = stats.get(key) ?? { name: p, W: 0, L: 0, PF: 0, PA: 0, GP: 0 };
+      if (!stats.has(key)) continue; // only track roster players
+      const cur = stats.get(key)!;
       stats.set(key, { ...cur, W: cur.W + (t1Win ? 1 : 0), L: cur.L + (t1Win ? 0 : 1), PF: cur.PF + s1, PA: cur.PA + s2, GP: cur.GP + 1 });
     }
     for (const p of g.t2) {
       const key = slug(p);
-      const cur = stats.get(key) ?? { name: p, W: 0, L: 0, PF: 0, PA: 0, GP: 0 };
+      if (!stats.has(key)) continue; // only track roster players
+      const cur = stats.get(key)!;
       stats.set(key, { ...cur, W: cur.W + (t1Win ? 0 : 1), L: cur.L + (t1Win ? 1 : 0), PF: cur.PF + s2, PA: cur.PA + s1, GP: cur.GP + 1 });
     }
   }
@@ -207,23 +209,31 @@ export function KobLeaderboard({
   const guys  = useMemo(() => uniq((guysText  || '').split(/\r?\n/).map(s => s.trim()).filter(Boolean)), [guysText]);
   const girls = useMemo(() => uniq((girlsText || '').split(/\r?\n/).map(s => s.trim()).filter(Boolean)), [girlsText]);
 
-  const poolGames      = useMemo(() => games.filter(g => !g.isFinals), [games]);
+  // Pool play: KOB = pools 1-499, QOB = pools 501-999
+  const kobPoolGames   = useMemo(() => games.filter(g => !g.isFinals && g.pool >= 1   && g.pool <= 499), [games]);
+  const qobPoolGames   = useMemo(() => games.filter(g => !g.isFinals && g.pool >= 501 && g.pool <= 999), [games]);
   const goldKobGames   = useMemo(() => games.filter(g => g.pool === 1001), [games]);
   const goldQobGames   = useMemo(() => games.filter(g => g.pool === 1002), [games]);
   const silverKobGames = useMemo(() => games.filter(g => g.pool === 1011), [games]);
   const silverQobGames = useMemo(() => games.filter(g => g.pool === 1012), [games]);
 
-  // Pool play rosters — players who have actually appeared in a pool game
-  const activeSlugs = useMemo(() => {
+  // Active roster = players who've actually appeared in pool games (by gender range)
+  const activeKobSlugs = useMemo(() => {
     const s = new Set<string>();
-    poolGames.forEach(g => [...g.t1, ...g.t2].forEach(p => s.add(slug(p))));
+    kobPoolGames.forEach(g => [...g.t1, ...g.t2].forEach(p => s.add(slug(p))));
     return s;
-  }, [poolGames]);
-  const activeGuys  = useMemo(() => guys.filter(p => activeSlugs.has(slug(p))), [guys, activeSlugs]);
-  const activeGirls = useMemo(() => girls.filter(p => activeSlugs.has(slug(p))), [girls, activeSlugs]);
+  }, [kobPoolGames]);
+  const activeQobSlugs = useMemo(() => {
+    const s = new Set<string>();
+    qobPoolGames.forEach(g => [...g.t1, ...g.t2].forEach(p => s.add(slug(p))));
+    return s;
+  }, [qobPoolGames]);
 
-  const kobPoolStandings = useMemo(() => computeStandings(poolGames, activeGuys),  [poolGames, activeGuys]);
-  const qobPoolStandings = useMemo(() => computeStandings(poolGames, activeGirls), [poolGames, activeGirls]);
+  const activeGuys  = useMemo(() => guys.filter(p => activeKobSlugs.has(slug(p))), [guys, activeKobSlugs]);
+  const activeGirls = useMemo(() => girls.filter(p => activeQobSlugs.has(slug(p))), [girls, activeQobSlugs]);
+
+  const kobPoolStandings = useMemo(() => computeStandings(kobPoolGames, activeGuys),  [kobPoolGames, activeGuys]);
+  const qobPoolStandings = useMemo(() => computeStandings(qobPoolGames, activeGirls), [qobPoolGames, activeGirls]);
 
   // Finals standings — roster derived from the games themselves
   const finalsRoster = (fGames: KobGameRow[]) =>
@@ -250,12 +260,14 @@ export function KobLeaderboard({
     ? new Set(goldQobGames.flatMap(g => [...g.t1, ...g.t2])).size
     : 4;
 
+  const allPoolGames = useMemo(() => [...kobPoolGames, ...qobPoolGames], [kobPoolGames, qobPoolGames]);
+
   const maxGP = useMemo(
     () => Math.max(0, ...[...kobPoolStandings, ...qobPoolStandings].map(s => s.GP)),
     [kobPoolStandings, qobPoolStandings],
   );
-  const totalPools   = uniq(poolGames.map(g => g.pool)).length;
-  const scoredPoolGames = poolGames.filter(g => { const p = parseScore(g.scoreText); return p && isValidKobScore(p[0], p[1]); }).length;
+  const totalPools = uniq(allPoolGames.map(g => g.pool)).length;
+  const scoredPoolGames = allPoolGames.filter(g => { const p = parseScore(g.scoreText); return p && isValidKobScore(p[0], p[1]); }).length;
 
   if (games.length === 0) return null;
 
@@ -295,7 +307,7 @@ export function KobLeaderboard({
       )}
 
       {/* ── Pool Play Standings ── */}
-      {poolGames.length > 0 && (
+      {allPoolGames.length > 0 && (
         <>
           <div className="text-[13px] font-semibold text-slate-600 mb-1">Pool Play Standings</div>
           <div className="flex items-center gap-3 mb-4 flex-wrap">

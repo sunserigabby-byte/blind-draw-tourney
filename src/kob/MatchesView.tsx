@@ -250,9 +250,12 @@ export function KobMatchesView({
     [games],
   );
 
-  const regularPools = useMemo(() => allPools.filter(p => !isFinalPool(p)), [allPools]);
-  const goldPools    = useMemo(() => allPools.filter(p => p === GOLD_KOB || p === GOLD_QOB), [allPools]);
-  const silverPools  = useMemo(() => allPools.filter(p => p === SILVER_KOB || p === SILVER_QOB), [allPools]);
+  // KOB (men) = pools 1–499; QOB (women) = pools 501–999
+  const kobRegularPools = useMemo(() => allPools.filter(p => p >= 1   && p <= 499), [allPools]);
+  const qobRegularPools = useMemo(() => allPools.filter(p => p >= 501 && p <= 999), [allPools]);
+  const regularPools    = useMemo(() => allPools.filter(p => !isFinalPool(p)), [allPools]);
+  const goldPools       = useMemo(() => allPools.filter(p => p === GOLD_KOB || p === GOLD_QOB), [allPools]);
+  const silverPools     = useMemo(() => allPools.filter(p => p === SILVER_KOB || p === SILVER_QOB), [allPools]);
 
   const [open, setOpen] = useState<Set<number>>(() => new Set(allPools));
   useEffect(() => {
@@ -280,7 +283,7 @@ export function KobMatchesView({
     return map;
   }, [games, allPools]);
 
-  // Live = most recent regular pool with unscored games
+  // Live = most recent regular pool (either gender) with unscored games
   const livePool = useMemo(
     () => [...regularPools].reverse().find(p => { const s = poolStats.get(p); return s && s.scored < s.total; }) ?? null,
     [regularPools, poolStats],
@@ -299,7 +302,7 @@ export function KobMatchesView({
       <section className="bg-white backdrop-blur rounded-2xl shadow-lg ring-1 ring-sky-200 p-6 border border-sky-100">
         <h2 className="text-[20px] font-bold text-sky-800 mb-2 tracking-tight">Pool Play — KOB / QOB</h2>
         <div className="w-24 h-1 bg-sky-500 mx-auto rounded-full mb-4" />
-        <p className="text-[13px] text-gray-600 max-w-lg mx-auto">No pools generated yet. Use the Pool Generator above.</p>
+        <p className="text-[13px] text-gray-600 max-w-lg mx-auto">No pools generated yet. Use the Pool Generators above.</p>
       </section>
     );
   }
@@ -307,13 +310,30 @@ export function KobMatchesView({
   return (
     <section className="bg-white backdrop-blur rounded-2xl shadow-lg ring-1 ring-sky-200 p-6 border border-sky-100">
 
-      {/* ── Pool Play ── */}
+      {/* ── Pool Play: KOB and QOB side by side ── */}
       {regularPools.length > 0 && (
         <>
-          <h2 className="text-[20px] font-bold text-sky-800 mb-2 tracking-tight">Pool Play — KOB / QOB</h2>
+          <h2 className="text-[20px] font-bold text-sky-800 mb-2 tracking-tight">Pool Play</h2>
           <div className="w-24 h-1 bg-sky-500 mx-auto rounded-full mb-4" />
-          <div className="space-y-4">
-            {regularPools.map(p => <PoolCard key={p} {...commonProps(p)} />)}
+          <div className="grid md:grid-cols-2 gap-6">
+            {/* KOB — Men */}
+            {kobRegularPools.length > 0 && (
+              <div>
+                <div className="text-[13px] font-semibold text-blue-700 mb-3">Men (KOB)</div>
+                <div className="space-y-4">
+                  {kobRegularPools.map(p => <PoolCard key={p} {...commonProps(p)} />)}
+                </div>
+              </div>
+            )}
+            {/* QOB — Women */}
+            {qobRegularPools.length > 0 && (
+              <div>
+                <div className="text-[13px] font-semibold text-pink-700 mb-3">Women (QOB)</div>
+                <div className="space-y-4">
+                  {qobRegularPools.map(p => <PoolCard key={p} {...commonProps(p)} />)}
+                </div>
+              </div>
+            )}
           </div>
         </>
       )}

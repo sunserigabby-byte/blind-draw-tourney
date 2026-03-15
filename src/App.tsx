@@ -335,7 +335,7 @@ export default function BlindDrawTourneyApp() {
                 </h2>
                 <p className="text-[11px] text-slate-500 mb-3">
                   King &amp; Queen of the Beach — individual tournament with rotating partners.
-                  Pools of 4: each player partners with every other player exactly once (3 games).
+                  Preferred pool of 4 (3 games) or 5 (5 games). Uneven rosters automatically split into mixed pool sizes.
                   Rally scoring to 21, cap 23, win by 2.
                 </p>
                 <div className="grid md:grid-cols-2 gap-4">
@@ -353,12 +353,25 @@ export default function BlindDrawTourneyApp() {
                   />
                 </div>
               </section>
-              <KobPoolGenerator
-                guysText={currentKob.guysText}
-                girlsText={currentKob.girlsText}
-                games={currentKob.matches as KobGameRow[]}
-                setGames={(v: any) => setCurrentKob(p => ({ ...p, matches: typeof v === 'function' ? v(p.matches) : v }))}
-              />
+              {/* Side-by-side KOB / QOB pool generators */}
+              <div className="grid md:grid-cols-2 gap-4">
+                <KobPoolGenerator
+                  label="Men (KOB)"
+                  playersText={currentKob.guysText}
+                  gender="kob"
+                  games={currentKob.matches as KobGameRow[]}
+                  setGames={(v: any) => setCurrentKob(p => ({ ...p, matches: typeof v === 'function' ? v(p.matches) : v }))}
+                  poolBase={0}
+                />
+                <KobPoolGenerator
+                  label="Women (QOB)"
+                  playersText={currentKob.girlsText}
+                  gender="qob"
+                  games={currentKob.matches as KobGameRow[]}
+                  setGames={(v: any) => setCurrentKob(p => ({ ...p, matches: typeof v === 'function' ? v(p.matches) : v }))}
+                  poolBase={500}
+                />
+              </div>
               <KobFinalsGenerator
                 games={currentKob.matches as KobGameRow[]}
                 setGames={(v: any) => setCurrentKob(p => ({ ...p, matches: typeof v === 'function' ? v(p.matches) : v }))}
