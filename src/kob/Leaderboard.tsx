@@ -312,7 +312,7 @@ export function KobLeaderboard({
           <div className="text-[13px] font-semibold text-slate-600 mb-1">Pool Play Standings</div>
           <div className="flex items-center gap-3 mb-4 flex-wrap">
             <span className="text-[11px] text-slate-500">
-              {totalPools} pool{totalPools !== 1 ? 's' : ''} · {scoredPoolGames}/{poolGames.length} games scored
+              {totalPools} pool{totalPools !== 1 ? 's' : ''} · {scoredPoolGames}/{allPoolGames.length} games scored
             </span>
             <span className="text-[11px] text-slate-400">🔵 qualifies for Gold Finals</span>
           </div>
