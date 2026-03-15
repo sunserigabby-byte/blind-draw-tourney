@@ -70,12 +70,16 @@ export type TriplesMatchRow = {
 // Each pool of 4 plays 3 games; every player partners with every other once.
 export type KobGameRow = {
   id: string;
-  pool: number;    // pool number (1, 2, 3, …); 1001 = KOB Finals, 1002 = QOB Finals
-  game: number;    // game within pool (1, 2, 3)
+  // Regular pools: 1, 2, 3, …
+  // Gold finals:   1001 = KOB, 1002 = QOB
+  // Silver finals: 1011 = KOB, 1012 = QOB
+  pool: number;
+  game: number;
   t1: [string, string];
   t2: [string, string];
   court?: number;
   scoreText?: string;
   isFinals?: boolean;
-  finalsLabel?: 'KOB Finals' | 'QOB Finals';
+  finalsLabel?: 'Gold KOB' | 'Gold QOB' | 'Silver KOB' | 'Silver QOB';
+  sitOut?: string;  // pool-of-5: name of the player sitting this game
 };

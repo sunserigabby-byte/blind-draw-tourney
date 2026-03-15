@@ -3,19 +3,30 @@ import type { KobGameRow } from '../types';
 import { uniq, shuffle } from '../utils';
 
 type KobMode = 'coed' | 'kob' | 'qob';
+type PoolSize = 4 | 5;
 
-// Standard round-robin partner rotation for pool of 4 players [A,B,C,D]:
+// Pool of 4 — 3 games, every player partners with every other exactly once.
 //   Game 1: A+B vs C+D
 //   Game 2: A+C vs B+D
 //   Game 3: A+D vs B+C
-// Every player partners with every other exactly once (3 games total).
 const POOL4_SCHEDULE: [[number, number], [number, number]][] = [
   [[0, 1], [2, 3]],
   [[0, 2], [1, 3]],
   [[0, 3], [1, 2]],
 ];
 
-function formPools(guys: string[], girls: string[], mode: KobMode): string[][] {
+// Pool of 5 — 5 games, every player partners with every other exactly once, each sits once.
+//   Verified: all C(5,2)=10 partnerships covered; every player plays 4 games, sits 1.
+//   Format: [team1_indices, team2_indices, sitter_index]
+const POOL5_SCHEDULE: [[number, number], [number, number], number][] = [
+  [[0, 1], [2, 3], 4],  // game 1: 0+1 vs 2+3, player[4] sits
+  [[0, 2], [1, 4], 3],  // game 2: 0+2 vs 1+4, player[3] sits
+  [[0, 3], [2, 4], 1],  // game 3: 0+3 vs 2+4, player[1] sits
+  [[0, 4], [1, 3], 2],  // game 4: 0+4 vs 1+3, player[2] sits
+  [[1, 2], [3, 4], 0],  // game 5: 1+2 vs 3+4, player[0] sits
+];
+
+function formPools(guys: string[], girls: string[], mode: KobMode, poolSize: PoolSize): string[][] {
   let players: string[];
 
   if (mode === 'kob') {
@@ -23,52 +34,76 @@ function formPools(guys: string[], girls: string[], mode: KobMode): string[][] {
   } else if (mode === 'qob') {
     players = [...girls];
   } else {
-    // Co-ed: interleave [G1,W1,G2,W2,...] so each pool of 4 gets 2M+2W when possible.
-    // With pool = [G1,G2,W1,W2], schedule gives:
-    //   Game 1: G1+G2 vs W1+W2 (same-gender warm-up)
-    //   Game 2: G1+W1 vs G2+W2 (mixed)
-    //   Game 3: G1+W2 vs G2+W1 (mixed)
-    // 2 of 3 games are mixed doubles.
+    // Co-ed: interleave so each chunk gets as many M+W pairs as possible.
     const g = [...guys];
     const w = [...girls];
     players = [];
-    // Pair-interleave: two guys then two girls so each chunk of 4 = [G,G,W,W]
-    while (g.length >= 2 && w.length >= 2) {
-      players.push(g.shift()!, g.shift()!, w.shift()!, w.shift()!);
+    if (poolSize === 4) {
+      // Pair-interleave: [G1,G2,W1,W2] so pool of 4 = 2M+2W
+      while (g.length >= 2 && w.length >= 2) {
+        players.push(g.shift()!, g.shift()!, w.shift()!, w.shift()!);
+      }
+    } else {
+      // Pool of 5 co-ed: aim for 3+2 or 2+3; just alternate pairs then singles
+      while (g.length >= 2 && w.length >= 2) {
+        players.push(g.shift()!, g.shift()!, w.shift()!, w.shift()!);
+      }
+      // leftover mixed single
+      while (g.length > 0 || w.length > 0) {
+        if (g.length > 0) players.push(g.shift()!);
+        if (w.length > 0) players.push(w.shift()!);
+      }
     }
-    // Remaining (unbalanced) go at the end
+    // Any remaining unbalanced go at the end
     players.push(...g, ...w);
   }
 
   const pools: string[][] = [];
-  for (let i = 0; i < players.length; i += 4) {
-    const chunk = players.slice(i, i + 4);
-    if (chunk.length === 4) pools.push(chunk);
-    // chunks of 2–3 are shown as overflow warnings; chunks of 1 are ignored
+  for (let i = 0; i < players.length; i += poolSize) {
+    const chunk = players.slice(i, i + poolSize);
+    if (chunk.length === poolSize) pools.push(chunk);
+    // Short chunks are excluded — shown as remainder warning
   }
   return pools;
 }
 
-function generateGames(pools: string[][], startCourt: number): KobGameRow[] {
+function generateGames(pools: string[][], startCourt: number, poolOffset: number): KobGameRow[] {
   const games: KobGameRow[] = [];
   const ts = Date.now();
 
   for (let pi = 0; pi < pools.length; pi++) {
     const pool = pools[pi];
-    const poolNum = pi + 1;
+    const poolNum = pi + 1 + poolOffset;
     const court = startCourt + pi;
+    const size = pool.length as PoolSize;
 
-    for (let gi = 0; gi < POOL4_SCHEDULE.length; gi++) {
-      const [[i1, i2], [i3, i4]] = POOL4_SCHEDULE[gi];
-      games.push({
-        id: `kob-${poolNum}-${gi + 1}-${ts}-${Math.random().toString(36).slice(2, 7)}`,
-        pool: poolNum,
-        game: gi + 1,
-        t1: [pool[i1], pool[i2]],
-        t2: [pool[i3], pool[i4]],
-        court,
-        scoreText: '',
-      });
+    if (size === 5) {
+      for (let gi = 0; gi < POOL5_SCHEDULE.length; gi++) {
+        const [[i1, i2], [i3, i4], sitterIdx] = POOL5_SCHEDULE[gi];
+        games.push({
+          id: `kob-${poolNum}-g${gi + 1}-${ts}-${Math.random().toString(36).slice(2, 7)}`,
+          pool: poolNum,
+          game: gi + 1,
+          t1: [pool[i1], pool[i2]],
+          t2: [pool[i3], pool[i4]],
+          court,
+          scoreText: '',
+          sitOut: pool[sitterIdx],
+        });
+      }
+    } else {
+      for (let gi = 0; gi < POOL4_SCHEDULE.length; gi++) {
+        const [[i1, i2], [i3, i4]] = POOL4_SCHEDULE[gi];
+        games.push({
+          id: `kob-${poolNum}-g${gi + 1}-${ts}-${Math.random().toString(36).slice(2, 7)}`,
+          pool: poolNum,
+          game: gi + 1,
+          t1: [pool[i1], pool[i2]],
+          t2: [pool[i3], pool[i4]],
+          court,
+          scoreText: '',
+        });
+      }
     }
   }
 
@@ -87,6 +122,7 @@ export function KobPoolGenerator({
   setGames: (f: (prev: KobGameRow[]) => KobGameRow[]) => void;
 }) {
   const [mode, setMode] = useState<KobMode>('coed');
+  const [poolSize, setPoolSize] = useState<PoolSize>(4);
   const [startCourt, setStartCourt] = useState(1);
   const [seedStr, setSeedStr] = useState('');
 
@@ -110,30 +146,29 @@ export function KobPoolGenerator({
   }, [girls, seedStr]);
 
   const previewPools = useMemo(
-    () => formPools(seededGuys, seededGirls, mode),
-    [seededGuys, seededGirls, mode],
+    () => formPools(seededGuys, seededGirls, mode, poolSize),
+    [seededGuys, seededGirls, mode, poolSize],
   );
 
   const totalPlayers =
     mode === 'kob' ? guys.length : mode === 'qob' ? girls.length : guys.length + girls.length;
-  const remainder = totalPlayers % 4;
-  const canGenerate = totalPlayers >= 4;
-  const hasExistingGames = games.length > 0;
-  const existingPoolCount = useMemo(() => uniq(games.map(g => g.pool)).length, [games]);
+  const remainder = totalPlayers % poolSize;
+  const canGenerate = totalPlayers >= poolSize;
+  const hasExistingGames = games.filter(g => !g.isFinals).length > 0;
+  const existingPoolCount = useMemo(
+    () => uniq(games.filter(g => !g.isFinals).map(g => g.pool)).length,
+    [games],
+  );
+  const gamesPerPool = poolSize === 5 ? 5 : 3;
 
   function onGenerate() {
-    const pools = formPools(seededGuys, seededGirls, mode);
-    // Offset pool numbers so new pools don't collide with existing ones
-    const poolOffset = existingPoolCount;
-    const newGames = generateGames(pools, startCourt).map(g => ({
-      ...g,
-      pool: g.pool + poolOffset,
-    }));
+    const pools = formPools(seededGuys, seededGirls, mode, poolSize);
+    const newGames = generateGames(pools, startCourt, existingPoolCount);
     setGames(prev => [...prev, ...newGames]);
   }
 
   function onReset() {
-    if (!window.confirm('Clear all KOB/QOB games and scores?')) return;
+    if (!window.confirm('Clear all KOB/QOB pool games and scores? Finals will also be cleared.')) return;
     setGames(() => []);
   }
 
@@ -145,6 +180,7 @@ export function KobPoolGenerator({
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <h3 className="text-[16px] font-semibold text-sky-800">Pool Generator (KOB / QOB)</h3>
         <div className="flex items-center gap-3 text-[12px] flex-wrap">
+          {/* Mode */}
           <div className="flex items-center gap-1.5">
             <span className="text-slate-600 font-medium">Mode:</span>
             {(['coed', 'kob', 'qob'] as KobMode[]).map(m => (
@@ -159,6 +195,25 @@ export function KobPoolGenerator({
                 onClick={() => setMode(m)}
               >
                 {modeLabel(m)}
+              </button>
+            ))}
+          </div>
+
+          {/* Pool size */}
+          <div className="flex items-center gap-1.5">
+            <span className="text-slate-600 font-medium">Pool size:</span>
+            {([4, 5] as PoolSize[]).map(s => (
+              <button
+                key={s}
+                className={
+                  'px-2 py-1 rounded border text-[11px] font-medium ' +
+                  (poolSize === s
+                    ? 'bg-sky-700 text-white border-sky-700'
+                    : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50')
+                }
+                onClick={() => setPoolSize(s)}
+              >
+                {s} ({s === 4 ? '3 games' : '5 games'})
               </button>
             ))}
           </div>
@@ -205,24 +260,29 @@ export function KobPoolGenerator({
       </div>
 
       <p className="text-[11px] text-slate-500 mt-2">
+        {poolSize === 4
+          ? 'Pool of 4: every player partners with every other once — 3 games.'
+          : 'Pool of 5: every player partners with every other once — 5 games, each player sits out once.'}
+        {' '}
         {mode === 'coed'
-          ? 'Co-ed: pools of 4 (2M + 2W). Each player partners with every other player exactly once — 3 games per pool. Separate KOB (men) and QOB (women) standings.'
+          ? 'Co-ed pools with as many M+W pairs as possible. Separate KOB and QOB standings.'
           : mode === 'kob'
-          ? 'KOB: men only — pools of 4, 3 games, rotating partners. Crown the King of the Beach!'
-          : 'QOB: women only — pools of 4, 3 games, rotating partners. Crown the Queen of the Beach!'}
+          ? 'Men only — crown the King of the Beach!'
+          : 'Women only — crown the Queen of the Beach!'}
         {' '}Rally scoring to 21, cap 23, win by 2.
       </p>
 
       {!canGenerate && (
         <div className="mt-2 px-3 py-2 rounded-lg bg-red-50 border border-red-200 text-[11px] text-red-700">
-          Need at least 4 players to generate pools.
+          Need at least {poolSize} players to generate pools.
         </div>
       )}
 
       {canGenerate && remainder > 0 && (
         <div className="mt-2 px-3 py-2 rounded-lg bg-amber-50 border border-amber-200 text-[11px] text-amber-800">
-          ⚠ {remainder} player{remainder !== 1 ? 's' : ''} won't fit into a complete pool of 4 and
-          will be excluded. Adjust the roster to a multiple of 4 for clean pools.
+          ⚠ {remainder} player{remainder !== 1 ? 's' : ''} won't fit into a complete pool of{' '}
+          {poolSize} and will be excluded. Adjust the roster to a multiple of {poolSize}, or switch
+          pool size.
         </div>
       )}
 
@@ -230,7 +290,7 @@ export function KobPoolGenerator({
         <div className="mt-4 border-t border-slate-200 pt-3">
           <div className="text-[12px] font-semibold text-slate-700 mb-2">
             Pool Preview — {previewPools.length} pool{previewPools.length !== 1 ? 's' : ''} ·{' '}
-            {previewPools.length * 3} games
+            {previewPools.length * gamesPerPool} games
           </div>
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
             {previewPools.map((pool, pi) => (
@@ -266,8 +326,7 @@ export function KobPoolGenerator({
 
       {hasExistingGames && (
         <div className="mt-3 text-[11px] text-slate-500">
-          {existingPoolCount} pool{existingPoolCount !== 1 ? 's' : ''} active · {games.length} games
-          total
+          {existingPoolCount} pool{existingPoolCount !== 1 ? 's' : ''} active · {games.filter(g => !g.isFinals).length} pool games total
         </div>
       )}
     </section>
