@@ -47,7 +47,7 @@ function GamesTable({
   update: (id: string, patch: Partial<KobGameRow>) => void;
   isFinals?: boolean;
 }) {
-  const hasSitOuts = poolGames.some(g => g.sitOut);
+  const hasSitOuts = poolGames.some(g => g.sitOut != null && (Array.isArray(g.sitOut) ? g.sitOut.length > 0 : true));
 
   const renderPlayer = (p: string, bold?: boolean) => (
     <span className="flex items-center gap-0.5 mr-2">
@@ -88,7 +88,7 @@ function GamesTable({
                 </td>
                 {hasSitOuts && (
                   <td className="py-1 px-2 text-slate-400 text-[11px] italic">
-                    {g.sitOut ?? '—'}
+                    {g.sitOut == null ? '—' : Array.isArray(g.sitOut) ? g.sitOut.join(', ') : g.sitOut}
                   </td>
                 )}
                 <td className="py-1 px-2">

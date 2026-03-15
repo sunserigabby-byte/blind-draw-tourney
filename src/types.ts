@@ -81,5 +81,5 @@ export type KobGameRow = {
   scoreText?: string;
   isFinals?: boolean;
   finalsLabel?: 'Gold KOB' | 'Gold QOB' | 'Silver KOB' | 'Silver QOB';
-  sitOut?: string;  // pool-of-5: name of the player sitting this game
+  sitOut?: string | string[];  // player(s) sitting this game (string for 1, string[] for 2+)
 };
