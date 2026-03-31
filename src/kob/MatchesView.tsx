@@ -260,7 +260,7 @@ export function KobMatchesView({
   const [open, setOpen] = useState<Set<number>>(() => new Set(allPools));
   useEffect(() => {
     setOpen(prev => { const n = new Set(prev); allPools.forEach(p => n.add(p)); return n; });
-  }, [allPools.length]);
+  }, [allPools]);
 
   const [confirmPool, setConfirmPool] = useState<number | null>(null);
 

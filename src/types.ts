@@ -66,6 +66,8 @@ export type TriplesMatchRow = {
   scoreText?: string;
 };
 
+export type PlayerStats = { name: string; W: number; L: number; PF: number; PA: number; GP: number };
+
 // King/Queen of the Beach — individual tournament with rotating partners
 // Each pool of 4 plays 3 games; every player partners with every other once.
 export type KobGameRow = {

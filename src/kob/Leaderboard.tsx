@@ -1,40 +1,6 @@
 import React, { useMemo } from 'react';
 import type { KobGameRow } from '../types';
-import { slug, uniq, parseScore, isValidKobScore } from '../utils';
-
-type PlayerStats = { name: string; W: number; L: number; PF: number; PA: number; GP: number };
-
-function computeStandings(games: KobGameRow[], roster: string[]): PlayerStats[] {
-  const stats = new Map<string, PlayerStats>();
-  for (const p of roster) stats.set(slug(p), { name: p, W: 0, L: 0, PF: 0, PA: 0, GP: 0 });
-
-  for (const g of games) {
-    const parsed = parseScore(g.scoreText);
-    if (!parsed || !isValidKobScore(parsed[0], parsed[1])) continue;
-    const [s1, s2] = parsed;
-    const t1Win = s1 > s2;
-    for (const p of g.t1) {
-      const key = slug(p);
-      if (!stats.has(key)) continue; // only track roster players
-      const cur = stats.get(key)!;
-      stats.set(key, { ...cur, W: cur.W + (t1Win ? 1 : 0), L: cur.L + (t1Win ? 0 : 1), PF: cur.PF + s1, PA: cur.PA + s2, GP: cur.GP + 1 });
-    }
-    for (const p of g.t2) {
-      const key = slug(p);
-      if (!stats.has(key)) continue; // only track roster players
-      const cur = stats.get(key)!;
-      stats.set(key, { ...cur, W: cur.W + (t1Win ? 0 : 1), L: cur.L + (t1Win ? 1 : 0), PF: cur.PF + s2, PA: cur.PA + s1, GP: cur.GP + 1 });
-    }
-  }
-
-  return [...stats.values()]
-    .filter(s => s.GP > 0)
-    .sort((a, b) => {
-      if (b.W !== a.W) return b.W - a.W;
-      const pd = (b.PF - b.PA) - (a.PF - a.PA);
-      return pd !== 0 ? pd : b.PF - a.PF;
-    });
-}
+import { slug, uniq, parseScore, isValidKobScore, computeStandings } from '../utils';
 
 function isFullyScored(games: KobGameRow[]) {
   return games.length > 0 && games.every(g => {
