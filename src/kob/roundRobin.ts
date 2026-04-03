@@ -82,28 +82,28 @@ export function generateRoundRobinSchedule(
 }
 
 /**
- * Seeding quality score (higher = better).
+ * Seeding quality score (lower = better).
  *
  * Two goals:
- * 1. Balanced TEAMS — strong partnered with weak (team seed sums close)
- * 2. Balanced MATCHUPS — similar-strength pairs face each other
- *    (e.g. seeds 1+4 vs 2+3, not 1+4 vs 7+8)
+ * 1. Close-skill partners — minimize the seed gap within each team.
+ *    e.g. seed 1+3 is better than seed 1+10.
+ * 2. Tier-matched opponents — teams at similar skill tiers play each other.
+ *    e.g. (1+3 vs 2+4) is better than (1+3 vs 8+10).
  *
- * We combine both: for each game, compute the team-sum difference
- * (want 0) and the average-seed difference between the two teams
- * (want close). Lower total = better.
+ * This produces games like: 1+3 vs 2+4 (top tier), 5+7 vs 6+8 (mid tier).
+ * Extreme pairings (1+10) only happen when forced by "play with everyone".
  */
 function seedingCost(games: number[][]): number {
   let cost = 0;
   for (const g of games) {
-    const t1Sum = g[0] + g[1];
-    const t2Sum = g[2] + g[3];
-    // Team balance: penalise unequal partner strength
-    cost += Math.abs(t1Sum - t2Sum) * 2;
-    // Matchup balance: penalise games between very different skill tiers
-    // Average seed of each team — closer means similar-level opponents
-    const t1Avg = t1Sum / 2;
-    const t2Avg = t2Sum / 2;
+    // Partner closeness: smaller gap = better partners
+    const gap1 = Math.abs(g[0] - g[1]);
+    const gap2 = Math.abs(g[2] - g[3]);
+    cost += (gap1 + gap2) * 3;
+
+    // Tier matching: similar-level teams should face each other
+    const t1Avg = (g[0] + g[1]) / 2;
+    const t2Avg = (g[2] + g[3]) / 2;
     cost += Math.abs(t1Avg - t2Avg);
   }
   return cost;
