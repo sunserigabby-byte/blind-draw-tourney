@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import type { MatchRow, QuadsMatchRow, TriplesMatchRow, BracketMatch, KobGameRow } from './types';
+import type { MatchRow, QuadsMatchRow, TriplesMatchRow, BracketMatch, KobGameRow, ScoreSettings } from './types';
 import { apiGetState, apiSaveState } from './api';
 import { SunnyLogo } from './components/SunnyLogo';
 import { LineNumberTextarea } from './components/LinedTextarea';
@@ -20,6 +20,7 @@ import { KobPoolGenerator } from './kob/PoolGenerator';
 import { KobFinalsGenerator } from './kob/FinalsGenerator';
 import { KobMatchesView } from './kob/MatchesView';
 import { KobLeaderboard } from './kob/Leaderboard';
+import { ScoreSettingsPanel } from './components/ScoreSettingsPanel';
 
 type TabKey = "DOUBLES" | "QUADS" | "TRIPLES" | "KOB";
 type DivisionKey = "UPPER" | "LOWER";
@@ -37,13 +38,19 @@ export default function BlindDrawTourneyApp() {
   const isAdmin = !!adminKey;
   const [loadingRemote, setLoadingRemote] = useState(true);
   const [remoteError, setRemoteError] = useState<string>("");
+  const [adminKeyError, setAdminKeyError] = useState<string>("");
+  const [otherAdminActive, setOtherAdminActive] = useState(false);
   const saveTimer = useRef<number | null>(null);
+  const [sessionId] = useState<string>(() => { try { let id = sessionStorage.getItem("SESSION_ID"); if (!id) { id = Math.random().toString(36).slice(2); sessionStorage.setItem("SESSION_ID", id); } return id; } catch { return Math.random().toString(36).slice(2); } });
 
   const [dUpper, setDUpper] = useState<DivisionState<MatchRow>>(emptyDivisionState<MatchRow>());
   const [dLower, setDLower] = useState<DivisionState<MatchRow>>(emptyDivisionState<MatchRow>());
   const [qUpper, setQUpper] = useState<DivisionState<QuadsMatchRow>>(emptyDivisionState<QuadsMatchRow>());
   const [qLower, setQLower] = useState<DivisionState<QuadsMatchRow>>(emptyDivisionState<QuadsMatchRow>());
-  const [qScoreCap, setQScoreCap] = useState<21 | 25>(25);
+  const [dScoreSettings, setDScoreSettings] = useState<ScoreSettings>({ playTo: 21, cap: null });
+  const [qScoreSettings, setQScoreSettings] = useState<ScoreSettings>({ playTo: 21, cap: 25 });
+  const [tScoreSettings, setTScoreSettings] = useState<ScoreSettings>({ playTo: 21, cap: null });
+  const [kobScoreSettings, setKobScoreSettings] = useState<ScoreSettings>({ playTo: 21, cap: 23 });
   const [tUpper, setTUpper] = useState<DivisionState<TriplesMatchRow>>(emptyDivisionState<TriplesMatchRow>());
   const [tLower, setTLower] = useState<DivisionState<TriplesMatchRow>>(emptyDivisionState<TriplesMatchRow>());
   const [kobUpper, setKobUpper] = useState<DivisionState<KobGameRow>>(emptyDivisionState<KobGameRow>());
@@ -114,13 +121,13 @@ export default function BlindDrawTourneyApp() {
     activeDivision,
     doubles: { UPPER: dUpper, LOWER: dLower },
     quads: { UPPER: qUpper, LOWER: qLower },
-    qScoreCap,
     triples: { UPPER: tUpper, LOWER: tLower },
     kob: { UPPER: kobUpper, LOWER: kobLower },
+    dScoreSettings, qScoreSettings, tScoreSettings, kobScoreSettings,
     guysText: dUpper.guysText, girlsText: dUpper.girlsText, matches: dUpper.matches, brackets: dUpper.brackets,
     qGuysText: qUpper.guysText, qGirlsText: qUpper.girlsText, qMatches: qUpper.matches, qBrackets: qUpper.brackets,
     tGuysText: tUpper.guysText, tGirlsText: tUpper.girlsText, tMatches: tUpper.matches, tBrackets: tUpper.brackets,
-  } as any), [activeTab, activeDivision, dUpper, dLower, qUpper, qLower, tUpper, tLower, kobUpper, kobLower]);
+  } as any), [activeTab, activeDivision, dUpper, dLower, qUpper, qLower, tUpper, tLower, kobUpper, kobLower, dScoreSettings, qScoreSettings, tScoreSettings, kobScoreSettings]);
 
   useEffect(() => {
     (async () => {
@@ -136,7 +143,11 @@ export default function BlindDrawTourneyApp() {
           if (data.triples?.LOWER) setTLower(data.triples.LOWER);
           if (data.kob?.UPPER) setKobUpper(data.kob.UPPER);
           if (data.kob?.LOWER) setKobLower(data.kob.LOWER);
-          if (data.qScoreCap === 21 || data.qScoreCap === 25) setQScoreCap(data.qScoreCap);
+          if (data.dScoreSettings) setDScoreSettings(data.dScoreSettings);
+          if (data.qScoreSettings) setQScoreSettings(data.qScoreSettings);
+          else if (data.qScoreCap === 21 || data.qScoreCap === 25) setQScoreSettings({ playTo: 21, cap: data.qScoreCap });
+          if (data.tScoreSettings) setTScoreSettings(data.tScoreSettings);
+          if (data.kobScoreSettings) setKobScoreSettings(data.kobScoreSettings);
           if (data.activeTab === "DOUBLES" || data.activeTab === "QUADS" || data.activeTab === "TRIPLES" || data.activeTab === "KOB") setActiveTab(data.activeTab);
           if (data.activeDivision === "UPPER" || data.activeDivision === "LOWER") setActiveDivision(data.activeDivision);
         }
@@ -156,6 +167,25 @@ export default function BlindDrawTourneyApp() {
     return () => { if (saveTimer.current) window.clearTimeout(saveTimer.current); };
   }, [snapshotState, isAdmin, adminKey]);
 
+  // Heartbeat: ping every 15s when admin, check if another admin is active
+  useEffect(() => {
+    if (!isAdmin) { setOtherAdminActive(false); return; }
+    const ping = async () => {
+      try {
+        const res = await fetch("/api/heartbeat", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ sessionId }),
+        });
+        const json = await res.json();
+        setOtherAdminActive(json.otherActive > 0);
+      } catch { /* ignore network errors */ }
+    };
+    ping();
+    const iv = window.setInterval(ping, 15_000);
+    return () => window.clearInterval(iv);
+  }, [isAdmin, sessionId]);
+
   const AdminBanner = () => (
     <section className="bg-white/90 rounded-lg p-3 text-[12px] text-slate-700 flex items-center justify-between gap-3 flex-wrap">
       <div className="flex items-center gap-2">
@@ -163,10 +193,42 @@ export default function BlindDrawTourneyApp() {
         <span className="font-semibold">{isAdmin ? "Admin Mode (editing enabled)" : "Viewer Mode (read-only)"}</span>
         {loadingRemote && <span className="text-slate-500">Loading shared data…</span>}
         {!!remoteError && <span className="text-red-600">{remoteError}</span>}
+        {otherAdminActive && (
+          <span className="px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 text-[11px] font-medium">
+            Another admin is also editing
+          </span>
+        )}
       </div>
       <div className="flex items-center gap-2">
         {!isAdmin
-          ? <button className="px-3 py-1.5 rounded bg-sky-700 text-white hover:bg-sky-800" onClick={() => { const k = prompt("Enter Admin Key to enable editing:"); if (!k) return; try { sessionStorage.setItem("ADMIN_KEY", k); } catch {} setAdminKey(k); }}>Unlock Editing</button>
+          ? <>
+              <button className="px-3 py-1.5 rounded bg-sky-700 text-white hover:bg-sky-800" onClick={async () => {
+                setAdminKeyError("");
+                const k = prompt("Enter Admin Key to enable editing:");
+                if (!k) return;
+                try {
+                  // Fetch current state, then POST it back unchanged to validate the key
+                  const getRes = await fetch("/api/state", { cache: "no-store" });
+                  const json = await getRes.json();
+                  const currentState = json?.data ?? null;
+                  const res = await fetch("/api/state", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json", "x-admin-key": k },
+                    body: JSON.stringify(currentState),
+                  });
+                  if (res.status === 401) {
+                    setAdminKeyError("Incorrect admin key. Please try again.");
+                    return;
+                  }
+                } catch {
+                  // Network error — allow offline use, accept the key
+                }
+                try { sessionStorage.setItem("ADMIN_KEY", k); } catch {}
+                setAdminKeyError("");
+                setAdminKey(k);
+              }}>Unlock Editing</button>
+              {!!adminKeyError && <span className="text-red-600 text-[11px] font-medium">{adminKeyError}</span>}
+            </>
           : <button className="px-3 py-1.5 rounded border" onClick={() => { try { sessionStorage.removeItem("ADMIN_KEY"); } catch {} setAdminKey(""); }}>Lock (Viewer Mode)</button>
         }
       </div>
@@ -215,9 +277,12 @@ export default function BlindDrawTourneyApp() {
           <>
             <fieldset disabled={!isAdmin} className={!isAdmin ? "opacity-95" : ""}>
               <section className="bg-white/95 backdrop-blur rounded-xl shadow ring-1 ring-slate-200 p-4">
-                <h2 className="text-[16px] font-semibold text-sky-800 mb-2">
-                  Players (Doubles – {activeDivision})
-                </h2>
+                <div className="flex items-center justify-between flex-wrap gap-3 mb-2">
+                  <h2 className="text-[16px] font-semibold text-sky-800">
+                    Players (Doubles – {activeDivision})
+                  </h2>
+                  <ScoreSettingsPanel settings={dScoreSettings} onChange={setDScoreSettings} />
+                </div>
                 <div className="grid md:grid-cols-2 gap-4">
                   <LineNumberTextarea
                     id={`d-guys-${activeDivision}`}
@@ -246,12 +311,14 @@ export default function BlindDrawTourneyApp() {
               matches={currentD.matches}
               setMatches={(v: any) => setCurrentD(p => ({ ...p, matches: typeof v === 'function' ? v(p.matches) : v }))}
               isAdmin={isAdmin}
+              scoreSettings={dScoreSettings}
             />
 
             <Leaderboard
               matches={currentD.matches}
               guysText={currentD.guysText}
               girlsText={currentD.girlsText}
+              scoreSettings={dScoreSettings}
             />
 
             <fieldset disabled={!isAdmin} className={!isAdmin ? "opacity-95" : ""}>
@@ -274,23 +341,12 @@ export default function BlindDrawTourneyApp() {
           </>
         ) : activeTab === "QUADS" ? (
           <>
-            <QuadsLeaderboard matches={currentQ.matches} guysText={currentQ.guysText} girlsText={currentQ.girlsText} scoreCap={qScoreCap} />
+            <QuadsLeaderboard matches={currentQ.matches} guysText={currentQ.guysText} girlsText={currentQ.girlsText} scoreSettings={qScoreSettings} />
             <fieldset disabled={!isAdmin} className={!isAdmin ? "opacity-95" : ""}>
               <section className="bg-white/95 backdrop-blur rounded-xl shadow ring-1 ring-slate-200 p-4">
                 <div className="flex items-center justify-between flex-wrap gap-3 mb-2">
                   <h2 className="text-[16px] font-semibold text-sky-800">Players (Quads – {activeDivision})</h2>
-                  <div className="flex items-center gap-2 text-[12px]">
-                    <span className="text-slate-600 font-medium">Pool play cap:</span>
-                    {([21, 25] as const).map(c => (
-                      <button
-                        key={c}
-                        className={"px-2.5 py-1 rounded-lg border text-[12px] font-medium " + (qScoreCap === c ? "bg-sky-700 text-white border-sky-700" : "bg-white text-slate-700 border-slate-300 hover:bg-slate-50")}
-                        onClick={() => setQScoreCap(c)}
-                      >
-                        {c}
-                      </button>
-                    ))}
-                  </div>
+                  <ScoreSettingsPanel settings={qScoreSettings} onChange={setQScoreSettings} />
                 </div>
                 <div className="grid md:grid-cols-2 gap-4">
                   <LineNumberTextarea id={`q-guys-${activeDivision}`} label="Guys (Quads)" value={currentQ.guysText} onChange={(e) => setCurrentQ(p => ({ ...p, guysText: e.target.value }))} />
@@ -298,24 +354,27 @@ export default function BlindDrawTourneyApp() {
                 </div>
               </section>
               <QuadsRoundGenerator guysText={currentQ.guysText} girlsText={currentQ.girlsText} matches={currentQ.matches} setMatches={(v: any) => setCurrentQ(p => ({ ...p, matches: typeof v === 'function' ? v(p.matches) : v }))} />
-              <QuadsMatchesView matches={currentQ.matches} setMatches={(v: any) => setCurrentQ(p => ({ ...p, matches: typeof v === 'function' ? v(p.matches) : v }))} isAdmin={isAdmin} scoreCap={qScoreCap} />
-              <QuadsPlayoffBuilder matches={currentQ.matches} guysText={currentQ.guysText} girlsText={currentQ.girlsText} setBrackets={(v: any) => setCurrentQ(p => ({ ...p, brackets: typeof v === 'function' ? v(p.brackets) : v }))} baseDivision={activeDivision} scoreCap={qScoreCap} />
+              <QuadsMatchesView matches={currentQ.matches} setMatches={(v: any) => setCurrentQ(p => ({ ...p, matches: typeof v === 'function' ? v(p.matches) : v }))} isAdmin={isAdmin} scoreSettings={qScoreSettings} />
+              <QuadsPlayoffBuilder matches={currentQ.matches} guysText={currentQ.guysText} girlsText={currentQ.girlsText} setBrackets={(v: any) => setCurrentQ(p => ({ ...p, brackets: typeof v === 'function' ? v(p.brackets) : v }))} baseDivision={activeDivision} scoreSettings={qScoreSettings} />
               {currentQ.brackets.length > 0 && <BracketView brackets={currentQ.brackets} setBrackets={(v: any) => setCurrentQ(p => ({ ...p, brackets: typeof v === 'function' ? v(p.brackets) : v }))} />}
             </fieldset>
           </>
         ) : activeTab === "TRIPLES" ? (
           <>
-            <TriplesLeaderboard matches={currentT.matches} guysText={currentT.guysText} girlsText={currentT.girlsText} />
+            <TriplesLeaderboard matches={currentT.matches} guysText={currentT.guysText} girlsText={currentT.girlsText} scoreSettings={tScoreSettings} />
             <fieldset disabled={!isAdmin} className={!isAdmin ? "opacity-95" : ""}>
               <section className="bg-white/95 backdrop-blur rounded-xl shadow ring-1 ring-slate-200 p-4">
-                <h2 className="text-[16px] font-semibold text-sky-800 mb-2">Players (Triples – {activeDivision})</h2>
+                <div className="flex items-center justify-between flex-wrap gap-3 mb-2">
+                  <h2 className="text-[16px] font-semibold text-sky-800">Players (Triples – {activeDivision})</h2>
+                  <ScoreSettingsPanel settings={tScoreSettings} onChange={setTScoreSettings} />
+                </div>
                 <div className="grid md:grid-cols-2 gap-4">
                   <LineNumberTextarea id={`t-guys-${activeDivision}`} label="Guys (Triples)" value={currentT.guysText} onChange={(e) => setCurrentT(p => ({ ...p, guysText: e.target.value }))} />
                   <LineNumberTextarea id={`t-girls-${activeDivision}`} label="Girls (Triples)" value={currentT.girlsText} onChange={(e) => setCurrentT(p => ({ ...p, girlsText: e.target.value }))} />
                 </div>
               </section>
               <TriplesRoundGenerator guysText={currentT.guysText} girlsText={currentT.girlsText} matches={currentT.matches} setMatches={(v: any) => setCurrentT(p => ({ ...p, matches: typeof v === 'function' ? v(p.matches) : v }))} />
-              <TriplesMatchesView matches={currentT.matches} setMatches={(v: any) => setCurrentT(p => ({ ...p, matches: typeof v === 'function' ? v(p.matches) : v }))} isAdmin={isAdmin} />
+              <TriplesMatchesView matches={currentT.matches} setMatches={(v: any) => setCurrentT(p => ({ ...p, matches: typeof v === 'function' ? v(p.matches) : v }))} isAdmin={isAdmin} scoreSettings={tScoreSettings} />
               <TriplesPlayoffBuilder matches={currentT.matches} guysText={currentT.guysText} girlsText={currentT.girlsText} setBrackets={(v: any) => setCurrentT(p => ({ ...p, brackets: typeof v === 'function' ? v(p.brackets) : v }))} />
               {currentT.brackets.length > 0 && <BracketView brackets={currentT.brackets} setBrackets={(v: any) => setCurrentT(p => ({ ...p, brackets: typeof v === 'function' ? v(p.brackets) : v }))} />}
             </fieldset>
@@ -327,16 +386,19 @@ export default function BlindDrawTourneyApp() {
               games={currentKob.matches as KobGameRow[]}
               guysText={currentKob.guysText}
               girlsText={currentKob.girlsText}
+              scoreSettings={kobScoreSettings}
             />
             <fieldset disabled={!isAdmin} className={!isAdmin ? "opacity-95" : ""}>
               <section className="bg-white/95 backdrop-blur rounded-xl shadow ring-1 ring-slate-200 p-4">
-                <h2 className="text-[16px] font-semibold text-sky-800 mb-2">
-                  Players (KOB / QOB – {activeDivision})
-                </h2>
+                <div className="flex items-center justify-between flex-wrap gap-3 mb-2">
+                  <h2 className="text-[16px] font-semibold text-sky-800">
+                    Players (KOB / QOB – {activeDivision})
+                  </h2>
+                  <ScoreSettingsPanel settings={kobScoreSettings} onChange={setKobScoreSettings} />
+                </div>
                 <p className="text-[11px] text-slate-500 mb-3">
                   King &amp; Queen of the Beach — individual tournament with rotating partners.
-                  Preferred pool of 4 (3 games) or 5 (5 games). Uneven rosters automatically split into mixed pool sizes.
-                  Rally scoring to 21, cap 23, win by 2.
+                  Pools or Round Robin mode. Uneven rosters automatically split into mixed pool sizes.
                 </p>
                 <div className="grid md:grid-cols-2 gap-4">
                   <LineNumberTextarea
@@ -386,6 +448,7 @@ export default function BlindDrawTourneyApp() {
               isAdmin={isAdmin}
               guys={currentKob.guysText.split(/\r?\n/).map(s => s.trim()).filter(Boolean)}
               girls={currentKob.girlsText.split(/\r?\n/).map(s => s.trim()).filter(Boolean)}
+              scoreSettings={kobScoreSettings}
             />
           </>
         )}

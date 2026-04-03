@@ -1,15 +1,17 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import type { MatchRow } from '../types';
-import { uniq, parseScore, isValidDoublesScore } from '../utils';
+import type { MatchRow, ScoreSettings } from '../types';
+import { uniq, parseScore, isValidScore, isScoredGame } from '../utils';
 
 export function MatchesView({
   matches,
   setMatches,
   isAdmin,
+  scoreSettings = { playTo: 21, cap: null },
 }: {
   matches: MatchRow[];
   setMatches: (f: (prev: MatchRow[]) => MatchRow[] | MatchRow[]) => void;
   isAdmin: boolean;
+  scoreSettings?: ScoreSettings;
 }) {
   const rounds = useMemo(() => uniq(matches.map(m => m.round)).sort((a, b) => a - b), [matches]);
   const [open, setOpen] = useState(() => new Set<number>(rounds.length ? [rounds[rounds.length - 1]] : []));
@@ -22,10 +24,7 @@ export function MatchesView({
     const map = new Map<number, { total: number; scored: number }>();
     for (const r of rounds) {
       const rm = matches.filter(m => m.round === r);
-      const scored = rm.filter(m => {
-        const p = parseScore(m.scoreText);
-        return p !== null && isValidDoublesScore(p[0], p[1]);
-      }).length;
+      const scored = rm.filter(m => isScoredGame(m.scoreText)).length;
       map.set(r, { total: rm.length, scored });
     }
     return map;
@@ -144,8 +143,11 @@ export function MatchesView({
                     <tbody>
                       {matches.filter(m => m.round === r).sort((a, b) => a.court - b.court).map((m, idx) => {
                         const parsed = parseScore(m.scoreText);
-                        const valid = parsed ? isValidDoublesScore(parsed[0], parsed[1]) : (m.scoreText ? false : true);
-                        const t1Win = parsed && valid ? parsed[0] > parsed[1] : null;
+                        const scored = parsed && parsed[0] !== parsed[1];
+                        const matchesRules = parsed ? isValidScore(parsed[0], parsed[1], scoreSettings) : false;
+                        const valid = !m.scoreText || matchesRules;
+                        const warning = scored && !matchesRules;
+                        const t1Win = scored ? parsed![0] > parsed![1] : null;
 
                         return (
                           <tr
@@ -183,12 +185,12 @@ export function MatchesView({
                               <input
                                 className={
                                   "w-40 border rounded px-2 py-1 text-[12px] " +
-                                  (valid ? 'border-slate-300' : 'border-red-500 bg-red-50')
+                                  (warning ? 'border-amber-400 bg-amber-50' : valid ? 'border-slate-300' : 'border-red-500 bg-red-50')
                                 }
                                 value={m.scoreText || ''}
                                 onChange={(e) => update(m.id, { scoreText: e.target.value })}
-                                placeholder="win by 2 (e.g., 22-20)"
-                                title="Pool play (doubles): one game to 21+, must win by 2 (no cap)"
+                                placeholder={`to ${scoreSettings.playTo}${scoreSettings.cap ? ', cap ' + scoreSettings.cap : ''}`}
+                                title={warning ? `Score doesn't match current rules (play to ${scoreSettings.playTo}${scoreSettings.cap ? ', cap ' + scoreSettings.cap : ', no cap'})` : ''}
                                 disabled={!isAdmin}
                               />
                             </td>

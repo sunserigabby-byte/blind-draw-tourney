@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import type { KobGameRow, PlayerStats } from '../types';
-import { slug, uniq, parseScore, isValidKobScore, computeStandings } from '../utils';
+import { slug, uniq, isScoredGame, computeStandings } from '../utils';
 import { SCHEDULES, POOL_INFO, VALID_SIZES, poolInfoLabel } from './schedules';
 import type { ValidSize } from './schedules';
 
@@ -63,10 +63,7 @@ function BracketPanel({
   const [court, setCourt] = useState(defaultCourt);
 
   const hasFinals = existingGames.length > 0;
-  const scoredCount = existingGames.filter(g => {
-    const p = parseScore(g.scoreText);
-    return p && isValidKobScore(p[0], p[1]);
-  }).length;
+  const scoredCount = existingGames.filter(g => isScoredGame(g.scoreText)).length;
   const allScored = hasFinals && scoredCount === existingGames.length;
 
   const finalistNames = finalists.slice(0, finalsSize).map(s => s.name);

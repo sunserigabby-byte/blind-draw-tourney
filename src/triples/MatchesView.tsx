@@ -1,15 +1,17 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import type { TriplesMatchRow } from '../types';
-import { uniq, parseScore, isValidTriplesScore } from '../utils';
+import type { TriplesMatchRow, ScoreSettings } from '../types';
+import { uniq, parseScore, isValidScore, isScoredGame } from '../utils';
 
 export function TriplesMatchesView({
   matches,
   setMatches,
   isAdmin,
+  scoreSettings = { playTo: 21, cap: null },
 }: {
   matches: TriplesMatchRow[];
   setMatches: (f: (prev: TriplesMatchRow[]) => TriplesMatchRow[] | TriplesMatchRow[]) => void;
   isAdmin?: boolean;
+  scoreSettings?: ScoreSettings;
 }) {
   const rounds = useMemo(() => uniq(matches.map(m => m.round)).sort((a, b) => a - b), [matches]);
   const [open, setOpen] = useState(() => new Set<number>(rounds.length ? [rounds[rounds.length - 1]] : []));
@@ -22,10 +24,7 @@ export function TriplesMatchesView({
     const map = new Map<number, { total: number; scored: number }>();
     for (const r of rounds) {
       const rm = matches.filter(m => m.round === r);
-      const scored = rm.filter(m => {
-        const p = parseScore(m.scoreText);
-        return p !== null && isValidTriplesScore(p[0], p[1]);
-      }).length;
+      const scored = rm.filter(m => isScoredGame(m.scoreText)).length;
       map.set(r, { total: rm.length, scored });
     }
     return map;
@@ -93,8 +92,11 @@ export function TriplesMatchesView({
                   <tbody>
                     {matches.filter(m => m.round === r).sort((a, b) => a.court - b.court).map((m, idx) => {
                       const parsed = parseScore(m.scoreText);
-                      const valid = parsed ? isValidTriplesScore(parsed[0], parsed[1]) : (m.scoreText ? false : true);
-                      const t1Win = parsed && valid ? parsed[0] > parsed[1] : null;
+                      const scored = parsed && parsed[0] !== parsed[1];
+                      const matchesRules = parsed ? isValidScore(parsed[0], parsed[1], scoreSettings) : false;
+                      const valid = !m.scoreText || matchesRules;
+                      const warning = scored && !matchesRules;
+                      const t1Win = scored ? parsed![0] > parsed![1] : null;
                       return (
                         <tr key={m.id} className={(idx % 2 ? 'bg-slate-50/60 ' : '') + ' border-t'}>
                           <td className="py-1 px-2 tabular-nums">{m.court}</td>
@@ -102,10 +104,11 @@ export function TriplesMatchesView({
                           <td className={`py-1 px-2 ${t1Win === false ? 'bg-emerald-50' : ''}`}>{m.t2.join(', ')}</td>
                           <td className="py-1 px-2">
                             <input
-                              className={'w-40 border rounded px-2 py-1 text-[12px] ' + (valid ? 'border-slate-300' : 'border-red-500 bg-red-50')}
+                              className={'w-40 border rounded px-2 py-1 text-[12px] ' + (warning ? 'border-amber-400 bg-amber-50' : valid ? 'border-slate-300' : 'border-red-500 bg-red-50')}
                               value={m.scoreText || ''}
                               onChange={(e) => update(m.id, { scoreText: e.target.value })}
-                              placeholder="22-20"
+                              placeholder={`to ${scoreSettings.playTo}${scoreSettings.cap ? ', cap ' + scoreSettings.cap : ''}`}
+                              title={warning ? `Score doesn't match current rules (play to ${scoreSettings.playTo}${scoreSettings.cap ? ', cap ' + scoreSettings.cap : ', no cap'})` : ''}
                               disabled={!isAdmin}
                             />
                           </td>

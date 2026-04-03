@@ -1,6 +1,6 @@
 import React, { useMemo } from 'react';
-import type { TriplesMatchRow } from '../types';
-import { slug, parseScore, isValidTriplesScore } from '../utils';
+import type { TriplesMatchRow, ScoreSettings } from '../types';
+import { slug, parseScore } from '../utils';
 
 export type TriplesBucket = { name: string; W: number; L: number; PD: number };
 
@@ -15,7 +15,7 @@ export function computeTriplesStandings(matches: TriplesMatchRow[], guysText: st
   for (const n of girlsList) ensure(h, n);
   for (const m of matches) {
     const s = parseScore(m.scoreText); if (!s) continue;
-    const [a, b] = s; if (!isValidTriplesScore(a, b)) continue;
+    const [a, b] = s; if (a === b) continue;
     const diff = Math.abs(a - b); const t1Won = a > b;
     const apply = (name: string, won: boolean) => {
       const map = girlsSet.has(slug(name)) ? h : g;
@@ -33,10 +33,12 @@ export function TriplesLeaderboard({
   matches,
   guysText,
   girlsText,
+  scoreSettings = { playTo: 21, cap: null },
 }: {
   matches: TriplesMatchRow[];
   guysText: string;
   girlsText: string;
+  scoreSettings?: ScoreSettings;
 }) {
   const { guysRows, girlsRows } = useMemo(
     () => computeTriplesStandings(matches, guysText, girlsText),
@@ -76,7 +78,7 @@ export function TriplesLeaderboard({
   return (
     <section>
       <h2 className="text-[18px] font-bold text-sky-900 mb-1">Leaderboard (Triples – Live)</h2>
-      <p className="text-[11px] text-slate-500 mb-3">Pool (triples): one game to 21+, win by 2, no cap.</p>
+      <p className="text-[11px] text-slate-500 mb-3">Play to {scoreSettings.playTo}{scoreSettings.cap ? `, cap ${scoreSettings.cap}` : ', no cap'}, win by 2.</p>
       <div className="grid md:grid-cols-2 gap-4">
         <Table title="Guys Standings (Triples)" rows={guysRows} />
         <Table title="Girls Standings (Triples)" rows={girlsRows} />

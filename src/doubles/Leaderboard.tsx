@@ -1,6 +1,6 @@
 import React, { useMemo } from 'react';
-import type { MatchRow } from '../types';
-import { slug, parseScore, isValidDoublesScore } from '../utils';
+import type { MatchRow, ScoreSettings } from '../types';
+import { slug, parseScore, isValidScore } from '../utils';
 
 type Bucket = { name: string; W: number; L: number; PD: number };
 
@@ -8,7 +8,6 @@ export function computeStandings(matches: MatchRow[], guysText: string, girlsTex
   const guysList = Array.from(new Set((guysText || '').split(/\r?\n/).map(s => s.trim()).filter(Boolean)));
   const girlsList = Array.from(new Set((girlsText || '').split(/\r?\n/).map(s => s.trim()).filter(Boolean)));
   const guysSet = new Set(guysList.map(slug));
-  const girlsSet = new Set(girlsList.map(slug));
   const g = new Map<string, Bucket>(), h = new Map<string, Bucket>();
   const ensure = (map: Map<string, Bucket>, n: string) => {
     if (!map.has(n)) map.set(n, { name: n, W: 0, L: 0, PD: 0 });
@@ -19,7 +18,7 @@ export function computeStandings(matches: MatchRow[], guysText: string, girlsTex
   for (const m of matches) {
     const s = parseScore(m.scoreText); if (!s) continue;
     const [a, b] = s;
-    if (!isValidDoublesScore(a, b)) continue;
+    if (a === b) continue;
     const t1 = [m.t1p1, m.t1p2], t2 = [m.t2p1, m.t2p2];
     const diff = Math.abs(a - b);
     const t1Won = a > b;
@@ -39,10 +38,12 @@ export function Leaderboard({
   matches,
   guysText,
   girlsText,
+  scoreSettings = { playTo: 21, cap: null },
 }: {
   matches: MatchRow[];
   guysText: string;
   girlsText: string;
+  scoreSettings?: ScoreSettings;
 }) {
   const guysList = useMemo(
     () => Array.from(new Set((guysText || '').split(/\r?\n/).map(s => s.trim()).filter(Boolean))),
@@ -69,7 +70,7 @@ export function Leaderboard({
     for (const m of matches) {
       const s = parseScore(m.scoreText); if (!s) continue;
       const [a, b] = s;
-      if (!isValidDoublesScore(a, b)) continue;
+      if (a === b) continue;
       const t1 = [m.t1p1, m.t1p2], t2 = [m.t2p1, m.t2p2];
       const diff = Math.abs(a - b); const t1Won = a > b;
       const apply = (name: string, won: boolean) => {
@@ -126,7 +127,7 @@ export function Leaderboard({
     <section>
       <h2 className="text-[18px] font-bold text-sky-900 mb-1">Leaderboard (Doubles – Live)</h2>
       <p className="text-[11px] text-slate-500 mb-3">
-        Pool (doubles): one game to 21+, win by 2, no cap. W/L/PD auto-update as you type scores.
+        Play to {scoreSettings.playTo}{scoreSettings.cap ? `, cap ${scoreSettings.cap}` : ', no cap'}, win by 2. W/L/PD auto-update as you type scores.
       </p>
       <div className="grid md:grid-cols-2 gap-4">
         <Table title="Guys Standings" rows={guysRows} />

@@ -1,12 +1,9 @@
 import React, { useMemo } from 'react';
-import type { KobGameRow } from '../types';
-import { slug, uniq, parseScore, isValidKobScore, computeStandings } from '../utils';
+import type { KobGameRow, ScoreSettings } from '../types';
+import { slug, uniq, parseScore, isValidScore, isScoredGame, computeStandings } from '../utils';
 
 function isFullyScored(games: KobGameRow[]) {
-  return games.length > 0 && games.every(g => {
-    const p = parseScore(g.scoreText);
-    return p && isValidKobScore(p[0], p[1]);
-  });
+  return games.length > 0 && games.every(g => isScoredGame(g.scoreText));
 }
 
 // ── Pool standings table ───────────────────────────────────────────────────────
@@ -166,11 +163,12 @@ function FinalsCard({
 
 // ── Main export ────────────────────────────────────────────────────────────────
 export function KobLeaderboard({
-  games, guysText, girlsText,
+  games, guysText, girlsText, scoreSettings = { playTo: 21, cap: 23 },
 }: {
   games: KobGameRow[];
   guysText: string;
   girlsText: string;
+  scoreSettings?: ScoreSettings;
 }) {
   const guys  = useMemo(() => uniq((guysText  || '').split(/\r?\n/).map(s => s.trim()).filter(Boolean)), [guysText]);
   const girls = useMemo(() => uniq((girlsText || '').split(/\r?\n/).map(s => s.trim()).filter(Boolean)), [girlsText]);
@@ -233,7 +231,7 @@ export function KobLeaderboard({
     [kobPoolStandings, qobPoolStandings],
   );
   const totalPools = uniq(allPoolGames.map(g => g.pool)).length;
-  const scoredPoolGames = allPoolGames.filter(g => { const p = parseScore(g.scoreText); return p && isValidKobScore(p[0], p[1]); }).length;
+  const scoredPoolGames = allPoolGames.filter(g => isScoredGame(g.scoreText)).length;
 
   if (games.length === 0) return null;
 

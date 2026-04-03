@@ -81,18 +81,18 @@ export function QuadsPlayoffBuilder({
   girlsText,
   setBrackets,
   baseDivision = 'UPPER',
-  scoreCap = 25,
+  scoreSettings,
 }: {
   matches: QuadsMatchRow[];
   guysText: string;
   girlsText: string;
   setBrackets: (f: (prev: BracketMatch[]) => BracketMatch[] | BracketMatch[]) => void;
   baseDivision?: 'UPPER' | 'LOWER';
-  scoreCap?: 21 | 25;
+  scoreSettings?: { playTo: number; cap: number | null };
 }) {
   const { guysRows, girlsRows, allRows } = useMemo(
-    () => computeQuadsStandingsFull(matches, guysText, girlsText, scoreCap),
-    [matches, guysText, girlsText, scoreCap],
+    () => computeQuadsStandingsFull(matches, guysText, girlsText),
+    [matches, guysText, girlsText],
   );
 
   const statMap = useMemo(() => {

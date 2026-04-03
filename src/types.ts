@@ -68,6 +68,9 @@ export type TriplesMatchRow = {
 
 export type PlayerStats = { name: string; W: number; L: number; PF: number; PA: number; GP: number };
 
+// Configurable score rules — changeable per format anytime during the tournament
+export type ScoreSettings = { playTo: number; cap: number | null };
+
 // King/Queen of the Beach — individual tournament with rotating partners
 // Each pool of 4 plays 3 games; every player partners with every other once.
 export type KobGameRow = {

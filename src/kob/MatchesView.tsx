@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import type { KobGameRow } from '../types';
-import { uniq, parseScore, isValidKobScore } from '../utils';
+import type { KobGameRow, ScoreSettings } from '../types';
+import { uniq, parseScore, isValidScore, isScoredGame } from '../utils';
 
 // Pool number constants
 const GOLD_KOB  = 1001;
@@ -40,12 +40,14 @@ function GamesTable({
   isAdmin,
   update,
   isFinals,
+  scoreSettings,
 }: {
   poolGames: KobGameRow[];
   guySlug: (n: string) => boolean;
   isAdmin?: boolean;
   update: (id: string, patch: Partial<KobGameRow>) => void;
   isFinals?: boolean;
+  scoreSettings: ScoreSettings;
 }) {
   const hasSitOuts = poolGames.some(g => g.sitOut != null && (Array.isArray(g.sitOut) ? g.sitOut.length > 0 : true));
 
@@ -73,8 +75,11 @@ function GamesTable({
         <tbody>
           {poolGames.map((g, idx) => {
             const parsed = parseScore(g.scoreText);
-            const valid  = parsed ? isValidKobScore(parsed[0], parsed[1]) : !g.scoreText;
-            const t1Win  = parsed && valid ? parsed[0] > parsed[1] : null;
+            const scored = parsed && parsed[0] !== parsed[1];
+            const matchesRules = parsed ? isValidScore(parsed[0], parsed[1], scoreSettings) : false;
+            const valid  = !g.scoreText || matchesRules;
+            const warning = scored && !matchesRules;
+            const t1Win  = scored ? parsed![0] > parsed![1] : null;
             const winBg  = isFinals ? 'bg-amber-50' : 'bg-emerald-50';
 
             return (
@@ -93,10 +98,11 @@ function GamesTable({
                 )}
                 <td className="py-1 px-2">
                   <input
-                    className={'w-28 border rounded px-2 py-1 text-[12px] ' + (valid ? 'border-slate-300' : 'border-red-500 bg-red-50')}
+                    className={'w-28 border rounded px-2 py-1 text-[12px] ' + (warning ? 'border-amber-400 bg-amber-50' : valid ? 'border-slate-300' : 'border-red-500 bg-red-50')}
                     value={g.scoreText || ''}
                     onChange={e => update(g.id, { scoreText: e.target.value })}
-                    placeholder="21-15"
+                    placeholder={`to ${scoreSettings.playTo}${scoreSettings.cap ? ', cap ' + scoreSettings.cap : ''}`}
+                    title={warning ? `Score doesn't match current rules (play to ${scoreSettings.playTo}${scoreSettings.cap ? ', cap ' + scoreSettings.cap : ', no cap'})` : ''}
                     disabled={!isAdmin}
                   />
                 </td>
@@ -123,6 +129,7 @@ function PoolCard({
   doDelete,
   open,
   toggleOpen,
+  scoreSettings,
 }: {
   pool: number;
   allGames: KobGameRow[];
@@ -136,6 +143,7 @@ function PoolCard({
   doDelete: (p: number) => void;
   open: Set<number>;
   toggleOpen: (p: number) => void;
+  scoreSettings: ScoreSettings;
 }) {
   const { total, scored } = poolStats.get(pool) ?? { total: 0, scored: 0 };
   const allDone  = total > 0 && scored === total;
@@ -224,6 +232,7 @@ function PoolCard({
             isAdmin={isAdmin}
             update={update}
             isFinals={isFinals}
+            scoreSettings={scoreSettings}
           />
         </div>
       )}
@@ -238,12 +247,14 @@ export function KobMatchesView({
   isAdmin,
   guys,
   girls,
+  scoreSettings = { playTo: 21, cap: 23 },
 }: {
   games: KobGameRow[];
   setGames: (f: (prev: KobGameRow[]) => KobGameRow[]) => void;
   isAdmin?: boolean;
   guys: string[];
   girls: string[];
+  scoreSettings?: ScoreSettings;
 }) {
   const allPools = useMemo(
     () => uniq(games.map(g => g.pool)).sort((a, b) => a - b),
@@ -277,7 +288,7 @@ export function KobMatchesView({
     const map = new Map<number, { total: number; scored: number }>();
     for (const p of allPools) {
       const pm = games.filter(g => g.pool === p);
-      const scored = pm.filter(g => { const r = parseScore(g.scoreText); return r && isValidKobScore(r[0], r[1]); }).length;
+      const scored = pm.filter(g => isScoredGame(g.scoreText)).length;
       map.set(p, { total: pm.length, scored });
     }
     return map;
@@ -294,7 +305,7 @@ export function KobMatchesView({
 
   const commonProps = (pool: number) => ({
     pool, allGames: games, poolStats, livePool, guySlug, isAdmin,
-    update, confirmPool, setConfirmPool, doDelete, open, toggleOpen,
+    update, confirmPool, setConfirmPool, doDelete, open, toggleOpen, scoreSettings,
   });
 
   if (allPools.length === 0) {

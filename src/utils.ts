@@ -32,32 +32,40 @@ export function parseScore(text?: string): [number, number] | null {
   return [a, b];
 }
 
+// ── Universal configurable score validation ─────────────────────────────────
+// Returns true if the score meets the current rules.
+// Rules: winner must reach `playTo`, win by 2 — unless at `cap`, then win by 1.
+import type { ScoreSettings } from './types';
+
+export function isValidScore(a: number, b: number, settings: ScoreSettings): boolean {
+  const max = Math.max(a, b);
+  const diff = Math.abs(a - b);
+  if (a === b) return false;                         // ties never valid
+  if (max < settings.playTo) return false;           // nobody reached play-to
+  if (settings.cap !== null && max > settings.cap) return false; // over cap
+  if (settings.cap !== null && max === settings.cap) return diff >= 1; // at cap, win by 1 OK
+  return diff >= 2;                                  // under cap or no cap, win by 2
+}
+
+// Returns true if score parses and has a clear winner (used for standings).
+// This is intentionally lenient — standings count any parseable score regardless of rules.
+export function isScoredGame(scoreText?: string): boolean {
+  const p = parseScore(scoreText);
+  return p !== null && p[0] !== p[1];
+}
+
+// Legacy wrappers — kept so existing code still compiles during migration
 export function isValidDoublesScore(a: number, b: number) {
-  const diff = Math.abs(a - b);
-  const max = Math.max(a, b);
-  return max >= 21 && diff >= 2;
+  return isValidScore(a, b, { playTo: 21, cap: null });
 }
-
 export function isValidQuadsScore(a: number, b: number, cap: 21 | 25 = 25) {
-  const diff = Math.abs(a - b);
-  const max = Math.max(a, b);
-  // cap 21: to 21, win by 2, hard cap 23 (deuce resolves at 23-21)
-  // cap 25: to 21, win by 2, hard cap 25 (deuce resolves at 25-23)
-  if (cap === 21) return max >= 21 && max <= 23 && diff >= 2;
-  return max >= 21 && max <= 25 && diff >= 2;
+  return isValidScore(a, b, { playTo: 21, cap });
 }
-
 export function isValidTriplesScore(a: number, b: number) {
-  const diff = Math.abs(a - b);
-  const max = Math.max(a, b);
-  return max >= 21 && diff >= 2;
+  return isValidScore(a, b, { playTo: 21, cap: null });
 }
-
 export function isValidKobScore(a: number, b: number) {
-  // Rally to 21, cap 23, win by 2
-  const diff = Math.abs(a - b);
-  const max = Math.max(a, b);
-  return max >= 21 && max <= 23 && diff >= 2;
+  return isValidScore(a, b, { playTo: 21, cap: 23 });
 }
 
 // ── KOB/QOB standings computation (shared by FinalsGenerator + Leaderboard) ──
@@ -70,7 +78,7 @@ export function computeStandings(games: KobGameRow[], roster: string[]): PlayerS
 
   for (const g of games) {
     const parsed = parseScore(g.scoreText);
-    if (!parsed || !isValidKobScore(parsed[0], parsed[1])) continue;
+    if (!parsed || parsed[0] === parsed[1]) continue;
     const [s1, s2] = parsed;
     const t1Win = s1 > s2;
     for (const p of g.t1) {

@@ -3,6 +3,7 @@ import type { KobGameRow } from '../types';
 import { uniq, shuffle } from '../utils';
 import { SCHEDULES, POOL_INFO, VALID_SIZES, poolInfoLabel } from './schedules';
 import type { ScheduleEntry } from './schedules';
+import { generateRoundRobinSchedule, totalPartnerships } from './roundRobin';
 
 // ── Flexible pool distribution ──────────────────────────────────────────────
 // Find counts of pools of sizes {4,5,6,7,8} that sum to exactly N,
@@ -72,7 +73,7 @@ function formFlexiblePools(players: string[], preferred: number): { pools: strin
   return { pools, leftover: [] };
 }
 
-// ── Game generation ──────────────────────────────────────────────────────────
+// ── Game generation (pool mode) ─────────────────────────────────────────────
 
 function generateGames(
   pools: string[][],
@@ -116,6 +117,47 @@ function generateGames(
   return games;
 }
 
+// ── Round-robin game generation ─────────────────────────────────────────────
+
+function generateRoundRobinGames(
+  players: string[],
+  targetRounds: number | 'all',
+  startCourt: number,
+  poolBase: number,
+  existingCount: number,
+  seeded: boolean = false,
+): KobGameRow[] {
+  const { rounds } = generateRoundRobinSchedule(players.length, targetRounds, seeded);
+  const games: KobGameRow[] = [];
+  const ts = Date.now();
+  const poolNum = poolBase + existingCount + 1;
+  let gameNum = 0;
+
+  for (const round of rounds) {
+    for (const g of round.games) {
+      gameNum++;
+      const sitOut: string | string[] | undefined =
+        round.sitters.length === 0 ? undefined :
+        round.sitters.length === 1 ? players[round.sitters[0]] :
+        round.sitters.map(i => players[i]);
+
+      games.push({
+        id: `kob-rr-${poolNum}-g${gameNum}-${ts}-${Math.random().toString(36).slice(2,7)}`,
+        pool: poolNum,
+        game: gameNum,
+        t1: [players[g.t1[0]], players[g.t1[1]]],
+        t2: [players[g.t2[0]], players[g.t2[1]]],
+        court: startCourt + g.courtOffset,
+        scoreText: '',
+        // Only attach sitters to the first game of each round (avoid repeating)
+        ...(g.courtOffset === 0 && sitOut !== undefined ? { sitOut } : {}),
+      });
+    }
+  }
+
+  return games;
+}
+
 // ── Main export ──────────────────────────────────────────────────────────────
 export function KobPoolGenerator({
   label,
@@ -132,9 +174,13 @@ export function KobPoolGenerator({
   setGames: (f: (prev: KobGameRow[]) => KobGameRow[]) => void;
   poolBase: number;
 }) {
+  const [mode, setMode] = useState<'pools' | 'roundrobin'>('pools');
   const [poolSizeStr, setPoolSizeStr] = useState('4');
   const [startCourt, setStartCourt] = useState(gender === 'kob' ? 1 : 5);
   const [seedStr, setSeedStr] = useState('');
+  const [rrMode, setRrMode] = useState<'all' | 'custom'>('all');
+  const [rrRoundsStr, setRrRoundsStr] = useState('5');
+  const [rrSeeded, setRrSeeded] = useState(false);
 
   const poolSize = Math.max(4, parseInt(poolSizeStr) || 4);
   const supported = poolSize >= 4 && poolSize <= 8;
@@ -160,14 +206,15 @@ export function KobPoolGenerator({
   );
   const hasExistingGames = existingGames.length > 0;
 
+  // ── Pool mode preview ──
   const { pools: previewPools, leftover } = useMemo(
-    () => (supported ? formFlexiblePools(seededPlayers, poolSize) : { pools: [], leftover: seededPlayers }),
-    [seededPlayers, poolSize, supported],
+    () => (supported && mode === 'pools' ? formFlexiblePools(seededPlayers, poolSize) : { pools: [], leftover: [] as string[] }),
+    [seededPlayers, poolSize, supported, mode],
   );
 
-  const canGenerate = supported && previewPools.length > 0;
+  const canGeneratePools = mode === 'pools' && supported && previewPools.length > 0;
 
-  // Summary
+  // Pool summary stats
   const sizeCounts: Record<number, number> = {};
   for (const p of previewPools) sizeCounts[p.length] = (sizeCounts[p.length] ?? 0) + 1;
   const totalGames = previewPools.reduce((sum, p) => sum + (POOL_INFO[p.length]?.games ?? 0), 0);
@@ -177,13 +224,30 @@ export function KobPoolGenerator({
     .join(' + ');
   const hasWarningSize = previewPools.some(p => !!POOL_INFO[p.length]?.warning);
   const needsMultiCourt = previewPools.some(p => (POOL_INFO[p.length]?.courts ?? 1) > 1);
-
-  // Court count estimate for the preview
   const totalCourts = previewPools.reduce((sum, p) => sum + (POOL_INFO[p.length]?.courts ?? 1), 0);
 
+  // ── Round-robin preview ──
+  const rrRounds = Math.max(1, parseInt(rrRoundsStr) || 1);
+  const rrTarget = rrMode === 'all' ? ('all' as const) : rrRounds;
+
+  const rrPreview = useMemo(() => {
+    if (mode !== 'roundrobin' || players.length < 4) return null;
+    return generateRoundRobinSchedule(players.length, rrTarget, rrSeeded);
+  }, [mode, players.length, rrTarget, rrSeeded]);
+
+  const rrTotalPossible = players.length >= 4 ? totalPartnerships(players.length) : 0;
+  const rrCourtsPerRound = Math.floor(players.length / 4);
+  const rrSittersPerRound = players.length - rrCourtsPerRound * 4;
+  const canGenerateRR = mode === 'roundrobin' && players.length >= 4 && rrPreview && rrPreview.rounds.length > 0;
+
   function onGenerate() {
-    const newGames = generateGames(previewPools, startCourt, existingPoolCount, poolBase);
-    setGames(prev => [...prev, ...newGames]);
+    if (mode === 'pools') {
+      const newGames = generateGames(previewPools, startCourt, existingPoolCount, poolBase);
+      setGames(prev => [...prev, ...newGames]);
+    } else {
+      const newGames = generateRoundRobinGames(seededPlayers, rrTarget, startCourt, poolBase, existingPoolCount, rrSeeded);
+      setGames(prev => [...prev, ...newGames]);
+    }
   }
 
   function onReset() {
@@ -210,131 +274,311 @@ export function KobPoolGenerator({
     return courts > 1 ? `Courts ${cursor}–${cursor + courts - 1}` : `Court ${cursor}`;
   };
 
+  const canGenerate = mode === 'pools' ? canGeneratePools : canGenerateRR;
+
   return (
     <section className={`bg-white/90 backdrop-blur rounded-xl shadow ring-1 ${ringClass} p-4`}>
       <h3 className={`text-[15px] font-semibold ${accentClass} mb-3`}>{label} — Pool Generator</h3>
 
-      {/* Controls */}
-      <div className="flex flex-wrap items-center gap-3 mb-3">
-        <label className="flex items-center gap-1.5 text-[12px]">
-          <span className="text-slate-600 font-medium">Players per pool:</span>
-          <input
-            type="number"
-            min={4}
-            max={8}
-            value={poolSizeStr}
-            onChange={e => setPoolSizeStr(e.target.value)}
-            className={`w-16 border rounded px-2 py-1 text-[13px] font-semibold text-center ${
-              !supported ? 'border-red-400 bg-red-50' : 'border-slate-300'
-            }`}
-          />
-        </label>
-
-        <label className="flex items-center gap-1 text-[11px]">
-          Start court
-          <input
-            type="number" min={1} value={startCourt}
-            onChange={e => setStartCourt(Math.max(1, parseInt(e.target.value) || 1))}
-            className="w-14 border rounded px-2 py-1 text-[11px]"
-          />
-        </label>
-
-        <label className="flex items-center gap-1 text-[11px]">
-          Seed
-          <input
-            type="text" value={seedStr}
-            onChange={e => setSeedStr(e.target.value)}
-            placeholder="opt."
-            className="w-16 border rounded px-2 py-0.5 text-[11px]"
-          />
-        </label>
-
+      {/* Mode toggle */}
+      <div className="flex gap-1 mb-3 bg-slate-100 rounded-lg p-0.5 w-fit">
         <button
-          className={`px-3 py-1.5 rounded-lg shadow-sm active:scale-[.99] disabled:opacity-40 text-[11px] font-medium ${genBtnClass}`}
-          onClick={onGenerate}
-          disabled={!canGenerate}
+          className={`px-3 py-1 rounded-md text-[11px] font-medium transition-colors ${
+            mode === 'pools' ? 'bg-white shadow text-slate-800' : 'text-slate-500 hover:text-slate-700'
+          }`}
+          onClick={() => setMode('pools')}
         >
-          {hasExistingGames ? 'Add More' : 'Generate'}
+          Pools
         </button>
-
-        {hasExistingGames && (
-          <button className="px-2 py-1.5 rounded-lg bg-red-600 text-white hover:bg-red-700 text-[11px]" onClick={onReset}>
-            Clear
-          </button>
-        )}
+        <button
+          className={`px-3 py-1 rounded-md text-[11px] font-medium transition-colors ${
+            mode === 'roundrobin' ? 'bg-white shadow text-slate-800' : 'text-slate-500 hover:text-slate-700'
+          }`}
+          onClick={() => setMode('roundrobin')}
+        >
+          Round Robin
+        </button>
       </div>
 
-      {/* Pool size info chip */}
-      {supported && (
-        <div className="text-[11px] text-slate-500 mb-2">
-          {poolInfoLabel(poolSize)}
-          {POOL_INFO[poolSize]?.courts > 1 && (
-            <span className="ml-1 px-1.5 py-0.5 rounded bg-sky-100 text-sky-700 font-medium">
-              runs on {POOL_INFO[poolSize].courts} simultaneous courts
-            </span>
+      {/* ═══ POOLS MODE ═══ */}
+      {mode === 'pools' && (
+        <>
+          {/* Controls */}
+          <div className="flex flex-wrap items-center gap-3 mb-3">
+            <label className="flex items-center gap-1.5 text-[12px]">
+              <span className="text-slate-600 font-medium">Players per pool:</span>
+              <input
+                type="number"
+                min={4}
+                max={8}
+                value={poolSizeStr}
+                onChange={e => setPoolSizeStr(e.target.value)}
+                className={`w-16 border rounded px-2 py-1 text-[13px] font-semibold text-center ${
+                  !supported ? 'border-red-400 bg-red-50' : 'border-slate-300'
+                }`}
+              />
+            </label>
+
+            <label className="flex items-center gap-1 text-[11px]">
+              Start court
+              <input
+                type="number" min={1} value={startCourt}
+                onChange={e => setStartCourt(Math.max(1, parseInt(e.target.value) || 1))}
+                className="w-14 border rounded px-2 py-1 text-[11px]"
+              />
+            </label>
+
+            <label className="flex items-center gap-1 text-[11px]">
+              Seed
+              <input
+                type="text" value={seedStr}
+                onChange={e => setSeedStr(e.target.value)}
+                placeholder="opt."
+                className="w-16 border rounded px-2 py-0.5 text-[11px]"
+              />
+            </label>
+
+            <button
+              className={`px-3 py-1.5 rounded-lg shadow-sm active:scale-[.99] disabled:opacity-40 text-[11px] font-medium ${genBtnClass}`}
+              onClick={onGenerate}
+              disabled={!canGenerate}
+            >
+              {hasExistingGames ? 'Add More' : 'Generate'}
+            </button>
+
+            {hasExistingGames && (
+              <button className="px-2 py-1.5 rounded-lg bg-red-600 text-white hover:bg-red-700 text-[11px]" onClick={onReset}>
+                Clear
+              </button>
+            )}
+          </div>
+
+          {/* Pool size info chip */}
+          {supported && (
+            <div className="text-[11px] text-slate-500 mb-2">
+              {poolInfoLabel(poolSize)}
+              {POOL_INFO[poolSize]?.courts > 1 && (
+                <span className="ml-1 px-1.5 py-0.5 rounded bg-sky-100 text-sky-700 font-medium">
+                  runs on {POOL_INFO[poolSize].courts} simultaneous courts
+                </span>
+              )}
+            </div>
           )}
-        </div>
+
+          {!supported && poolSizeStr !== '' && (
+            <div className="px-3 py-2 rounded-lg bg-red-50 border border-red-200 text-[11px] text-red-700 mb-2">
+              Pool size must be between 4 and 8.
+            </div>
+          )}
+
+          {/* Summary */}
+          {previewPools.length > 0 && (
+            <p className="text-[11px] text-slate-500 mb-2">
+              {players.length} player{players.length !== 1 ? 's' : ''} →{' '}
+              {previewPools.length} pool{previewPools.length !== 1 ? 's' : ''} ({sizeLabel}) ·{' '}
+              {totalGames} games · {totalCourts} court{totalCourts !== 1 ? 's' : ''}
+            </p>
+          )}
+
+          {leftover.length > 0 && (
+            <div className="px-3 py-2 rounded-lg bg-amber-50 border border-amber-200 text-[11px] text-amber-800 mb-2">
+              {leftover.length} player{leftover.length !== 1 ? 's' : ''} ({leftover.join(', ')}) can't fit into complete pools of 4–8 and will be excluded.
+            </div>
+          )}
+
+          {hasWarningSize && (
+            <div className="px-3 py-2 rounded-lg bg-amber-50 border border-amber-200 text-[11px] text-amber-700 mb-2">
+              Schedule includes a pool of 7 — players in that pool sit 3 games out of 7. Consider adjusting the roster to avoid a pool of 7.
+            </div>
+          )}
+
+          {needsMultiCourt && (
+            <div className="px-3 py-2 rounded-lg bg-sky-50 border border-sky-200 text-[11px] text-sky-700 mb-2">
+              Pool of 8 uses 2 courts simultaneously — 4 rounds of 2 side-by-side games, no sitting.
+            </div>
+          )}
+
+          {/* Preview grid */}
+          {previewPools.length > 0 && (
+            <div className="border-t border-slate-200 pt-3">
+              <div className={`text-[11px] font-semibold mb-2 ${accentClass}`}>
+                Preview — {previewPools.length} pool{previewPools.length !== 1 ? 's' : ''}
+              </div>
+              <div className="grid grid-cols-2 gap-2 max-h-64 overflow-y-auto">
+                {previewPools.map((pool, pi) => {
+                  const info = POOL_INFO[pool.length];
+                  return (
+                    <div key={pi} className="border rounded-lg p-2 bg-slate-50 text-[11px]">
+                      <div className={`font-semibold mb-0.5 ${accentClass}`}>
+                        Pool {poolBase + existingPoolCount + pi + 1} · {pool.length}p
+                      </div>
+                      <div className="text-[10px] text-slate-400 mb-1">
+                        {poolCourtLabel(pi, pool.length, startCourt)} · {info?.games ?? '?'} games
+                        {info?.warning && <span className="ml-1 text-amber-600">⚠</span>}
+                      </div>
+                      {pool.map((player, i) => (
+                        <div key={i} className="text-slate-700 truncate">{player}</div>
+                      ))}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </>
       )}
 
-      {!supported && poolSizeStr !== '' && (
-        <div className="px-3 py-2 rounded-lg bg-red-50 border border-red-200 text-[11px] text-red-700 mb-2">
-          Pool size must be between 4 and 8.
-        </div>
-      )}
+      {/* ═══ ROUND ROBIN MODE ═══ */}
+      {mode === 'roundrobin' && (
+        <>
+          {/* Controls */}
+          <div className="flex flex-wrap items-center gap-3 mb-3">
+            {/* Round-robin sub-mode */}
+            <div className="flex gap-1 bg-slate-50 border rounded-lg p-0.5">
+              <button
+                className={`px-2.5 py-1 rounded-md text-[11px] font-medium transition-colors ${
+                  rrMode === 'all' ? 'bg-white shadow text-slate-800' : 'text-slate-500 hover:text-slate-700'
+                }`}
+                onClick={() => setRrMode('all')}
+              >
+                Play with everyone
+              </button>
+              <button
+                className={`px-2.5 py-1 rounded-md text-[11px] font-medium transition-colors ${
+                  rrMode === 'custom' ? 'bg-white shadow text-slate-800' : 'text-slate-500 hover:text-slate-700'
+                }`}
+                onClick={() => setRrMode('custom')}
+              >
+                Choose rounds
+              </button>
+            </div>
 
-      {/* Summary */}
-      {previewPools.length > 0 && (
-        <p className="text-[11px] text-slate-500 mb-2">
-          {players.length} player{players.length !== 1 ? 's' : ''} →{' '}
-          {previewPools.length} pool{previewPools.length !== 1 ? 's' : ''} ({sizeLabel}) ·{' '}
-          {totalGames} games · {totalCourts} court{totalCourts !== 1 ? 's' : ''}
-        </p>
-      )}
+            {rrMode === 'custom' && (
+              <label className="flex items-center gap-1.5 text-[12px]">
+                <span className="text-slate-600 font-medium">Rounds:</span>
+                <input
+                  type="number"
+                  min={1}
+                  value={rrRoundsStr}
+                  onChange={e => setRrRoundsStr(e.target.value)}
+                  className="w-16 border rounded px-2 py-1 text-[13px] font-semibold text-center border-slate-300"
+                />
+              </label>
+            )}
 
-      {leftover.length > 0 && (
-        <div className="px-3 py-2 rounded-lg bg-amber-50 border border-amber-200 text-[11px] text-amber-800 mb-2">
-          ⚠ {leftover.length} player{leftover.length !== 1 ? 's' : ''} ({leftover.join(', ')}) can't fit into complete pools of 4–8 and will be excluded.
-        </div>
-      )}
+            <label className="flex items-center gap-1.5 text-[11px] cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={rrSeeded}
+                onChange={e => setRrSeeded(e.target.checked)}
+                className="rounded border-slate-300"
+              />
+              <span className="text-slate-600 font-medium">Seeded</span>
+            </label>
 
-      {hasWarningSize && (
-        <div className="px-3 py-2 rounded-lg bg-amber-50 border border-amber-200 text-[11px] text-amber-700 mb-2">
-          ⚠ Schedule includes a pool of 7 — players in that pool sit 3 games out of 7. Consider adjusting the roster to avoid a pool of 7.
-        </div>
-      )}
+            <label className="flex items-center gap-1 text-[11px]">
+              Start court
+              <input
+                type="number" min={1} value={startCourt}
+                onChange={e => setStartCourt(Math.max(1, parseInt(e.target.value) || 1))}
+                className="w-14 border rounded px-2 py-1 text-[11px]"
+              />
+            </label>
 
-      {needsMultiCourt && (
-        <div className="px-3 py-2 rounded-lg bg-sky-50 border border-sky-200 text-[11px] text-sky-700 mb-2">
-          Pool of 8 uses 2 courts simultaneously — 4 rounds of 2 side-by-side games, no sitting.
-        </div>
-      )}
+            <label className="flex items-center gap-1 text-[11px]">
+              Seed
+              <input
+                type="text" value={seedStr}
+                onChange={e => setSeedStr(e.target.value)}
+                placeholder="opt."
+                className="w-16 border rounded px-2 py-0.5 text-[11px]"
+              />
+            </label>
 
-      {/* Preview grid */}
-      {previewPools.length > 0 && (
-        <div className="border-t border-slate-200 pt-3">
-          <div className={`text-[11px] font-semibold mb-2 ${accentClass}`}>
-            Preview — {previewPools.length} pool{previewPools.length !== 1 ? 's' : ''}
+            <button
+              className={`px-3 py-1.5 rounded-lg shadow-sm active:scale-[.99] disabled:opacity-40 text-[11px] font-medium ${genBtnClass}`}
+              onClick={onGenerate}
+              disabled={!canGenerate}
+            >
+              {hasExistingGames ? 'Add More' : 'Generate'}
+            </button>
+
+            {hasExistingGames && (
+              <button className="px-2 py-1.5 rounded-lg bg-red-600 text-white hover:bg-red-700 text-[11px]" onClick={onReset}>
+                Clear
+              </button>
+            )}
           </div>
-          <div className="grid grid-cols-2 gap-2 max-h-64 overflow-y-auto">
-            {previewPools.map((pool, pi) => {
-              const info = POOL_INFO[pool.length];
-              return (
-                <div key={pi} className="border rounded-lg p-2 bg-slate-50 text-[11px]">
-                  <div className={`font-semibold mb-0.5 ${accentClass}`}>
-                    Pool {poolBase + existingPoolCount + pi + 1} · {pool.length}p
+
+          {players.length < 4 && players.length > 0 && (
+            <div className="px-3 py-2 rounded-lg bg-red-50 border border-red-200 text-[11px] text-red-700 mb-2">
+              Need at least 4 players for round robin.
+            </div>
+          )}
+
+          {rrSeeded && players.length >= 4 && (
+            <div className="px-3 py-2 rounded-lg bg-violet-50 border border-violet-200 text-[11px] text-violet-700 mb-2">
+              Seeded mode: roster order = skill rank (line 1 = strongest). Strong players are paired with weaker players for balanced games.
+            </div>
+          )}
+
+          {/* Round-robin summary */}
+          {rrPreview && rrPreview.rounds.length > 0 && (
+            <div className="text-[11px] text-slate-500 mb-2">
+              {players.length} players · {rrPreview.rounds.length} round{rrPreview.rounds.length !== 1 ? 's' : ''} ·{' '}
+              {rrPreview.rounds.reduce((s, r) => s + r.games.length, 0)} total games ·{' '}
+              {rrCourtsPerRound} court{rrCourtsPerRound !== 1 ? 's' : ''}/round
+              {rrSittersPerRound > 0 && ` · ${rrSittersPerRound} sit out/round`}
+            </div>
+          )}
+
+          {/* Partnership coverage */}
+          {rrPreview && rrPreview.rounds.length > 0 && (
+            <div className={`px-3 py-2 rounded-lg border text-[11px] mb-2 ${
+              rrPreview.coveredCount >= rrPreview.totalCount
+                ? 'bg-emerald-50 border-emerald-200 text-emerald-700'
+                : 'bg-sky-50 border-sky-200 text-sky-700'
+            }`}>
+              {rrPreview.coveredCount >= rrPreview.totalCount
+                ? `All ${rrPreview.totalCount} partnerships covered — every player partners with every other player at least once.`
+                : `${rrPreview.coveredCount} of ${rrPreview.totalCount} partnerships covered (${Math.round(100 * rrPreview.coveredCount / rrPreview.totalCount)}%). Not everyone will partner together — add more rounds to increase coverage.`
+              }
+            </div>
+          )}
+
+          {/* Round-by-round preview */}
+          {rrPreview && rrPreview.rounds.length > 0 && (
+            <div className="border-t border-slate-200 pt-3">
+              <div className={`text-[11px] font-semibold mb-2 ${accentClass}`}>
+                Preview — {rrPreview.rounds.length} round{rrPreview.rounds.length !== 1 ? 's' : ''}
+              </div>
+              <div className="space-y-2 max-h-72 overflow-y-auto">
+                {rrPreview.rounds.map((round, ri) => (
+                  <div key={ri} className="border rounded-lg p-2 bg-slate-50 text-[11px]">
+                    <div className={`font-semibold mb-1 ${accentClass}`}>Round {ri + 1}</div>
+                    {round.games.map((g, gi) => (
+                      <div key={gi} className="text-slate-700 mb-0.5">
+                        <span className="text-slate-400 text-[10px] mr-1">Ct {startCourt + g.courtOffset}:</span>
+                        <span className="font-medium">{seededPlayers[g.t1[0]]}</span>
+                        {' & '}
+                        <span className="font-medium">{seededPlayers[g.t1[1]]}</span>
+                        <span className="text-slate-400 mx-1">vs</span>
+                        <span className="font-medium">{seededPlayers[g.t2[0]]}</span>
+                        {' & '}
+                        <span className="font-medium">{seededPlayers[g.t2[1]]}</span>
+                      </div>
+                    ))}
+                    {round.sitters.length > 0 && (
+                      <div className="text-slate-400 text-[10px] mt-0.5">
+                        Sits: {round.sitters.map(i => seededPlayers[i]).join(', ')}
+                      </div>
+                    )}
                   </div>
-                  <div className="text-[10px] text-slate-400 mb-1">
-                    {poolCourtLabel(pi, pool.length, startCourt)} · {info?.games ?? '?'} games
-                    {info?.warning && <span className="ml-1 text-amber-600">⚠</span>}
-                  </div>
-                  {pool.map((player, i) => (
-                    <div key={i} className="text-slate-700 truncate">{player}</div>
-                  ))}
-                </div>
-              );
-            })}
-          </div>
-        </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </>
       )}
 
       {hasExistingGames && (
