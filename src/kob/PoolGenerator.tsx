@@ -73,6 +73,39 @@ function formFlexiblePools(players: string[], preferred: number): { pools: strin
   return { pools, leftover: [] };
 }
 
+// ── Snake-draft seeding for pools ───────────────────────────────────────────
+// Distributes seeds evenly across pools so each pool has a mix of skill levels.
+// e.g. 12 players into 3 pools of 4:
+//   Pool 1: seeds 1, 6, 7, 12   Pool 2: seeds 2, 5, 8, 11   Pool 3: seeds 3, 4, 9, 10
+
+function snakeDraftPools(players: string[], poolSizes: number[]): string[][] {
+  const numPools = poolSizes.length;
+  const pools: string[][] = Array.from({ length: numPools }, () => []);
+
+  // Build snake order: 0,1,2,...,n-1, n-1,...,2,1,0, 0,1,2,... repeating
+  const order: number[] = [];
+  let forward = true;
+  while (order.length < players.length) {
+    const round = forward
+      ? Array.from({ length: numPools }, (_, i) => i)
+      : Array.from({ length: numPools }, (_, i) => numPools - 1 - i);
+    for (const pi of round) {
+      if (order.length < players.length && pools[pi].length < poolSizes[pi]) {
+        order.push(pi);
+        pools[pi].push(''); // placeholder to track size
+      }
+    }
+    forward = !forward;
+  }
+
+  // Reset and fill with actual players
+  const result: string[][] = Array.from({ length: numPools }, () => []);
+  for (let i = 0; i < players.length; i++) {
+    result[order[i]].push(players[i]);
+  }
+  return result;
+}
+
 // ── Game generation (pool mode) ─────────────────────────────────────────────
 
 function generateGames(
@@ -181,6 +214,7 @@ export function KobPoolGenerator({
   const [rrMode, setRrMode] = useState<'all' | 'custom'>('all');
   const [rrRoundsStr, setRrRoundsStr] = useState('5');
   const [rrSeeded, setRrSeeded] = useState(false);
+  const [poolSeeded, setPoolSeeded] = useState(false);
 
   const poolSize = Math.max(4, parseInt(poolSizeStr) || 4);
   const supported = poolSize >= 4 && poolSize <= 8;
@@ -207,10 +241,15 @@ export function KobPoolGenerator({
   const hasExistingGames = existingGames.length > 0;
 
   // ── Pool mode preview ──
-  const { pools: previewPools, leftover } = useMemo(
-    () => (supported && mode === 'pools' ? formFlexiblePools(seededPlayers, poolSize) : { pools: [], leftover: [] as string[] }),
-    [seededPlayers, poolSize, supported, mode],
-  );
+  const { pools: previewPools, leftover } = useMemo(() => {
+    if (!supported || mode !== 'pools') return { pools: [], leftover: [] as string[] };
+    const base = formFlexiblePools(seededPlayers, poolSize);
+    if (!poolSeeded || base.pools.length <= 1) return base;
+    // Snake-draft: redistribute players across the same pool sizes for even seeding
+    const sizes = base.pools.map(p => p.length);
+    const allPlayers = seededPlayers.slice(0, sizes.reduce((a, b) => a + b, 0));
+    return { pools: snakeDraftPools(allPlayers, sizes), leftover: base.leftover };
+  }, [seededPlayers, poolSize, supported, mode, poolSeeded]);
 
   const canGeneratePools = mode === 'pools' && supported && previewPools.length > 0;
 
@@ -319,6 +358,16 @@ export function KobPoolGenerator({
               />
             </label>
 
+            <label className="flex items-center gap-1.5 text-[11px] cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={poolSeeded}
+                onChange={e => setPoolSeeded(e.target.checked)}
+                className="rounded border-slate-300"
+              />
+              <span className="text-slate-600 font-medium">Seeded</span>
+            </label>
+
             <label className="flex items-center gap-1 text-[11px]">
               Start court
               <input
@@ -329,7 +378,7 @@ export function KobPoolGenerator({
             </label>
 
             <label className="flex items-center gap-1 text-[11px]">
-              Seed
+              Shuffle seed
               <input
                 type="text" value={seedStr}
                 onChange={e => setSeedStr(e.target.value)}
@@ -352,6 +401,12 @@ export function KobPoolGenerator({
               </button>
             )}
           </div>
+
+          {poolSeeded && previewPools.length > 1 && (
+            <div className="px-3 py-2 rounded-lg bg-violet-50 border border-violet-200 text-[11px] text-violet-700 mb-2">
+              Seeded: roster order = skill rank (line 1 = strongest). Seeds are snake-drafted across pools so each pool has a mix of skill levels.
+            </div>
+          )}
 
           {/* Pool size info chip */}
           {supported && (

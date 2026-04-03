@@ -84,27 +84,26 @@ export function generateRoundRobinSchedule(
 /**
  * Seeding quality score (lower = better).
  *
- * Two goals:
- * 1. Close-skill partners — minimize the seed gap within each team.
- *    e.g. seed 1+3 is better than seed 1+10.
- * 2. Tier-matched opponents — teams at similar skill tiers play each other.
- *    e.g. (1+3 vs 2+4) is better than (1+3 vs 8+10).
+ * Primary goal: TIER-MATCHED OPPONENTS — both teams at similar skill level.
+ *   e.g. 1+10 vs 2+9 (both avg 5.5) is good.
+ *        1+10 vs 2+3 (avg 5.5 vs 2.5) is bad.
  *
- * This produces games like: 1+3 vs 2+4 (top tier), 5+7 vs 6+8 (mid tier).
- * Extreme pairings (1+10) only happen when forced by "play with everyone".
+ * Secondary: mild preference for close-skill partners, but extreme pairings
+ * (1+12) are fine as long as opponents are similar. This keeps extreme
+ * pairings mixed into all rounds rather than pushed to the end.
  */
 function seedingCost(games: number[][]): number {
   let cost = 0;
   for (const g of games) {
-    // Partner closeness: smaller gap = better partners
-    const gap1 = Math.abs(g[0] - g[1]);
-    const gap2 = Math.abs(g[2] - g[3]);
-    cost += (gap1 + gap2) * 3;
-
-    // Tier matching: similar-level teams should face each other
+    // Tier matching (HIGH weight): opponents must be at similar skill level
     const t1Avg = (g[0] + g[1]) / 2;
     const t2Avg = (g[2] + g[3]) / 2;
-    cost += Math.abs(t1Avg - t2Avg);
+    cost += Math.abs(t1Avg - t2Avg) * 4;
+
+    // Partner closeness (LOW weight): mild preference for close-skill partners
+    const gap1 = Math.abs(g[0] - g[1]);
+    const gap2 = Math.abs(g[2] - g[3]);
+    cost += (gap1 + gap2);
   }
   return cost;
 }
