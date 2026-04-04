@@ -33,6 +33,57 @@ function finalsRingColor(pool: number, allDone: boolean) {
   return 'ring-2 ring-emerald-400';
 }
 
+// ── Helper: swap a player in a game with another player from the pool ────────
+function swapPlayer(
+  game: KobGameRow,
+  position: 't1-0' | 't1-1' | 't2-0' | 't2-1',
+  newPlayer: string,
+  allPoolGames: KobGameRow[],
+  update: (id: string, patch: Partial<KobGameRow>) => void,
+) {
+  const oldPlayer =
+    position === 't1-0' ? game.t1[0] :
+    position === 't1-1' ? game.t1[1] :
+    position === 't2-0' ? game.t2[0] : game.t2[1];
+
+  if (oldPlayer === newPlayer) return;
+
+  // Find where newPlayer currently is in this game (could be other team or sitting)
+  const inT1 = game.t1.indexOf(newPlayer);
+  const inT2 = game.t2.indexOf(newPlayer);
+  const sitters = game.sitOut == null ? [] : Array.isArray(game.sitOut) ? [...game.sitOut] : [game.sitOut];
+  const inSit = sitters.indexOf(newPlayer);
+
+  const newT1: [string, string] = [...game.t1];
+  const newT2: [string, string] = [...game.t2];
+  let newSitters = [...sitters];
+
+  // Place newPlayer in the target position
+  if (position === 't1-0') newT1[0] = newPlayer;
+  else if (position === 't1-1') newT1[1] = newPlayer;
+  else if (position === 't2-0') newT2[0] = newPlayer;
+  else newT2[1] = newPlayer;
+
+  // Put oldPlayer where newPlayer was (swap)
+  if (inT1 >= 0) { if (newT1[inT1] === newPlayer) newT1[inT1] = oldPlayer; }
+  else if (inT2 >= 0) { if (newT2[inT2] === newPlayer) newT2[inT2] = oldPlayer; }
+  else if (inSit >= 0) { newSitters[inSit] = oldPlayer; }
+  else {
+    // newPlayer was sitting but stored differently, or from another game — put oldPlayer in sitters
+    newSitters = newSitters.map(s => s === newPlayer ? oldPlayer : s);
+    if (!newSitters.includes(oldPlayer)) {
+      // Not found in sitters — just add oldPlayer to sitters and remove newPlayer
+      newSitters.push(oldPlayer);
+      newSitters = newSitters.filter(s => s !== newPlayer);
+    }
+  }
+
+  const sitOut = newSitters.length === 0 ? undefined :
+    newSitters.length === 1 ? newSitters[0] : newSitters;
+
+  update(game.id, { t1: newT1, t2: newT2, ...(sitOut !== undefined ? { sitOut } : { sitOut: undefined }) });
+}
+
 // ── Shared game table ──────────────────────────────────────────────────────────
 function GamesTable({
   poolGames,
@@ -52,6 +103,17 @@ function GamesTable({
   const hasSitOuts = poolGames.some(g => g.sitOut != null && (Array.isArray(g.sitOut) ? g.sitOut.length > 0 : true));
   const hasMixedCourts = new Set(poolGames.map(g => g.court).filter(Boolean)).size > 1;
 
+  // All unique players in this pool (for dropdown options)
+  const allPlayers = useMemo(() => {
+    const s = new Set<string>();
+    for (const g of poolGames) {
+      g.t1.forEach(p => s.add(p));
+      g.t2.forEach(p => s.add(p));
+      if (g.sitOut) (Array.isArray(g.sitOut) ? g.sitOut : [g.sitOut]).forEach(p => s.add(p));
+    }
+    return Array.from(s).sort();
+  }, [poolGames]);
+
   const renderPlayer = (p: string, bold?: boolean) => (
     <span className="flex items-center gap-0.5 mr-2">
       <span className={guySlug(p) ? 'text-blue-400 text-[9px] font-bold' : 'text-pink-400 text-[9px] font-bold'}>
@@ -60,6 +122,21 @@ function GamesTable({
       <span className={bold ? 'font-semibold' : ''}>{p}</span>
     </span>
   );
+
+  const renderPlayerSlot = (g: KobGameRow, player: string, position: 't1-0' | 't1-1' | 't2-0' | 't2-1', bold?: boolean) => {
+    if (!isAdmin) return renderPlayer(player, bold);
+    return (
+      <select
+        className={`text-[12px] border-0 bg-transparent cursor-pointer pr-4 py-0.5 ${bold ? 'font-semibold' : ''} ${guySlug(player) ? 'text-blue-700' : 'text-pink-700'}`}
+        value={player}
+        onChange={e => swapPlayer(g, position, e.target.value, poolGames, update)}
+      >
+        {allPlayers.map(p => (
+          <option key={p} value={p}>{p}</option>
+        ))}
+      </select>
+    );
+  };
 
   return (
     <div className="overflow-x-auto">
@@ -91,10 +168,16 @@ function GamesTable({
                   <td className="py-1 px-2 tabular-nums text-slate-500">{g.court ?? '—'}</td>
                 )}
                 <td className={`py-1 px-2 ${t1Win === true ? winBg : ''}`}>
-                  <div className="flex flex-wrap">{g.t1.map(p => renderPlayer(p, t1Win === true))}</div>
+                  <div className="flex flex-wrap">
+                    {renderPlayerSlot(g, g.t1[0], 't1-0', t1Win === true)}
+                    {renderPlayerSlot(g, g.t1[1], 't1-1', t1Win === true)}
+                  </div>
                 </td>
                 <td className={`py-1 px-2 ${t1Win === false ? winBg : ''}`}>
-                  <div className="flex flex-wrap">{g.t2.map(p => renderPlayer(p, t1Win === false))}</div>
+                  <div className="flex flex-wrap">
+                    {renderPlayerSlot(g, g.t2[0], 't2-0', t1Win === false)}
+                    {renderPlayerSlot(g, g.t2[1], 't2-1', t1Win === false)}
+                  </div>
                 </td>
                 {hasSitOuts && (
                   <td className="py-1 px-2 text-slate-400 text-[11px] italic">
