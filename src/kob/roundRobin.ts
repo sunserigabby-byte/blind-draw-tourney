@@ -91,18 +91,20 @@ export function generateRoundRobinSchedule(
 /**
  * Seeding quality score (lower = better).
  *
- * Each team should pair a strong player with a weak player (diverse partners).
- * e.g. 1+10 (big gap = good) over 1+2 (small gap = stacked).
- * We penalise small partner gaps — this prevents stacked teams like 1+2 vs 3+4
- * and naturally creates matchups like 1+10 vs 2+9.
+ * The only rule: teams playing each other should be balanced (similar total
+ * strength). This allows a natural mix of matchup types:
+ *   - 1+3 vs 2+4 (strong vs strong) ✓ balanced
+ *   - 2+8 vs 3+7 (strong+weak mix)  ✓ balanced
+ *   - 5+6 vs 4+7 (mid-tier)         ✓ balanced
+ * The partnership-maximizing algorithm creates variety in WHO plays together;
+ * the seeding just ensures no blowout matchups like 1+2 vs 14+15.
  */
 function seedingCost(games: number[][]): number {
   let cost = 0;
   for (const g of games) {
-    // Reward large partner gaps (strong+weak) by penalising small gaps
-    const gap1 = Math.abs(g[0] - g[1]);
-    const gap2 = Math.abs(g[2] - g[3]);
-    cost -= (gap1 + gap2); // negative = larger gaps reduce cost
+    const t1Sum = g[0] + g[1];
+    const t2Sum = g[2] + g[3];
+    cost += Math.abs(t1Sum - t2Sum);
   }
   return cost;
 }
