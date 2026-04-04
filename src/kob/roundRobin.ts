@@ -66,7 +66,12 @@ export function generateRoundRobinSchedule(
     const active = playerOrder.slice(sitSlots).sort((a, b) => a - b);
 
     // Find best pairing of active players into games
-    const bestGames = findBestPairing(active, courts, covered, seeded);
+    // Alternate seeded rounds (balanced tier-matched games) with variety rounds
+    // (cross-tier mixing). This gives a natural blend of competitive same-tier
+    // games and fun cross-tier matchups.
+    const costMode: 'seeded' | 'variety' | 'none' =
+      seeded ? (r % 3 === 2 ? 'variety' : 'seeded') : 'none';
+    const bestGames = findBestPairing(active, courts, covered, costMode);
 
     const roundGames: RoundGame[] = [];
     for (let c = 0; c < bestGames.length; c++) {
@@ -91,9 +96,9 @@ export function generateRoundRobinSchedule(
 /**
  * Seeding quality score (lower = better).
  *
- * Balanced teams: avoid putting the two strongest (or two weakest) together.
- * Team seed sums should be roughly equal so no team is stacked.
- * Opponents mix freely across tiers for variety — no tier-matching constraint.
+ * 1. Balanced teams (primary): avoid stacking both strongest or weakest together.
+ * 2. Mild tier matching (secondary): some games between similar-level teams for
+ *    competitive fun, but not so strong that it creates tier bubbles.
  */
 function seedingCost(games: number[][]): number {
   let cost = 0;
@@ -101,7 +106,12 @@ function seedingCost(games: number[][]): number {
     // Team balance: penalise when both strong or both weak are on one team
     const t1Sum = g[0] + g[1];
     const t2Sum = g[2] + g[3];
-    cost += Math.abs(t1Sum - t2Sum);
+    cost += Math.abs(t1Sum - t2Sum) * 2;
+
+    // Mild tier matching: slight preference for similar-level opponents
+    const t1Avg = t1Sum / 2;
+    const t2Avg = t2Sum / 2;
+    cost += Math.abs(t1Avg - t2Avg);
   }
   return cost;
 }
@@ -109,19 +119,23 @@ function seedingCost(games: number[][]): number {
 /**
  * Greedy search: partition `active` players into `numCourts` games of 4,
  * maximising the number of NEW partnerships (teammate pairs).
- * When seeded, uses team balance as a tiebreaker.
+ * costMode: 'seeded' = prefer balanced tier-matched games,
+ *           'variety' = prefer cross-tier mixing,
+ *           'none' = no seeding preference.
  */
 function findBestPairing(
   active: number[],
   numCourts: number,
   covered: Set<string>,
-  seeded: boolean,
+  costMode: 'seeded' | 'variety' | 'none',
 ): number[][] {
   const best = { games: [] as number[][], score: -1, cost: Infinity };
 
   function search(remaining: number[], games: number[][], score: number) {
     if (games.length === numCourts) {
-      const cost = seeded ? seedingCost(games) : 0;
+      let cost = 0;
+      if (costMode === 'seeded') cost = seedingCost(games);
+      else if (costMode === 'variety') cost = -seedingCost(games); // invert: prefer imbalanced/cross-tier
       if (score > best.score || (score === best.score && cost < best.cost)) {
         best.games = games.map(g => [...g]);
         best.score = score;
