@@ -38,7 +38,8 @@ export function generateRoundRobinSchedule(
   seeded: boolean = false,
   courtOverride?: number,
 ): { rounds: Round[]; coveredCount: number; totalCount: number } {
-  const courts = courtOverride ?? Math.floor(numPlayers / 4);
+  const maxCourts = Math.floor(numPlayers / 4);
+  const courts = Math.min(courtOverride ?? maxCourts, maxCourts);
   const playersPerRound = courts * 4;
   const totalCount = totalPartnerships(numPlayers);
 

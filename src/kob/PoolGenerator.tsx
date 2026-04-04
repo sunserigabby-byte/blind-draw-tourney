@@ -272,19 +272,33 @@ export function KobPoolGenerator({
   const totalCourts = previewPools.reduce((sum, p) => sum + (POOL_INFO[p.length]?.courts ?? 1), 0);
 
   // ── Round-robin preview ──
-  const rrRounds = Math.max(1, parseInt(rrRoundsStr) || 1);
-  const rrTarget = rrMode === 'all' ? ('all' as const) : rrRounds;
+  const rrGamesPerPlayer = Math.max(1, parseInt(rrRoundsStr) || 1);
   const maxAutoCourts = Math.floor(players.length / 4);
-  const rrCourts = rrCourtsStr ? Math.max(1, Math.min(maxAutoCourts, parseInt(rrCourtsStr) || maxAutoCourts)) : undefined;
+  const rrCourtsActual = rrCourtsStr ? Math.max(1, Math.min(maxAutoCourts, parseInt(rrCourtsStr) || maxAutoCourts)) : maxAutoCourts;
+  const activePerRound = rrCourtsActual * 4;
+
+  // Calculate rounds needed to give everyone their target games
+  const rrCalculatedRounds = players.length >= 4 && rrMode === 'custom'
+    ? Math.ceil((rrGamesPerPlayer * players.length) / activePerRound)
+    : 0;
+  const rrTarget = rrMode === 'all' ? ('all' as const) : rrCalculatedRounds;
+
+  // Check if games divide evenly
+  const rrTotalSlots = rrCalculatedRounds * activePerRound;
+  const rrTotalNeeded = rrGamesPerPlayer * players.length;
+  const rrExtraSlots = rrTotalSlots - rrTotalNeeded;
+  // If extra slots > 0, some players play 1 extra game
+  const rrMinGames = rrGamesPerPlayer;
+  const rrMaxGames = rrExtraSlots > 0 ? rrGamesPerPlayer + 1 : rrGamesPerPlayer;
+  const rrIsExact = rrExtraSlots === 0;
 
   const rrPreview = useMemo(() => {
     if (mode !== 'roundrobin' || players.length < 4) return null;
-    return generateRoundRobinSchedule(players.length, rrTarget, rrSeeded, rrCourts);
-  }, [mode, players.length, rrTarget, rrSeeded, rrCourts]);
+    return generateRoundRobinSchedule(players.length, rrTarget, rrSeeded, rrCourtsActual);
+  }, [mode, players.length, rrTarget, rrSeeded, rrCourtsActual]);
 
   const rrTotalPossible = players.length >= 4 ? totalPartnerships(players.length) : 0;
-  const rrCourtsPerRound = rrCourts ?? maxAutoCourts;
-  const rrSittersPerRound = players.length - rrCourtsPerRound * 4;
+  const rrSittersPerRound = players.length - activePerRound;
   const canGenerateRR = mode === 'roundrobin' && players.length >= 4 && rrPreview && rrPreview.rounds.length > 0;
 
   function onGenerate() {
@@ -512,13 +526,13 @@ export function KobPoolGenerator({
                 }`}
                 onClick={() => setRrMode('custom')}
               >
-                Choose rounds
+                Choose games
               </button>
             </div>
 
             {rrMode === 'custom' && (
               <label className="flex items-center gap-1.5 text-[12px]">
-                <span className="text-slate-600 font-medium">Rounds:</span>
+                <span className="text-slate-600 font-medium">Games per player:</span>
                 <input
                   type="number"
                   min={1}
@@ -601,10 +615,15 @@ export function KobPoolGenerator({
           {/* Round-robin summary */}
           {rrPreview && rrPreview.rounds.length > 0 && (
             <div className="text-[11px] text-slate-500 mb-2">
-              {players.length} players · {rrPreview.rounds.length} round{rrPreview.rounds.length !== 1 ? 's' : ''} ·{' '}
-              {rrPreview.rounds.reduce((s, r) => s + r.games.length, 0)} total games ·{' '}
-              {rrCourtsPerRound} court{rrCourtsPerRound !== 1 ? 's' : ''}/round
+              {players.length} players · {rrCourtsActual} court{rrCourtsActual !== 1 ? 's' : ''} ·{' '}
+              {rrPreview.rounds.length} round{rrPreview.rounds.length !== 1 ? 's' : ''} ·{' '}
+              {rrPreview.rounds.reduce((s, r) => s + r.games.length, 0)} total games
               {rrSittersPerRound > 0 && ` · ${rrSittersPerRound} sit out/round`}
+              {rrMode === 'custom' && (
+                rrIsExact
+                  ? ` · ${rrGamesPerPlayer} games each`
+                  : ` · ${rrMinGames}–${rrMaxGames} games each`
+              )}
             </div>
           )}
 
