@@ -83,7 +83,6 @@ function BracketPanel({
   onClear: () => void;
 }) {
   const [court, setCourt] = useState(defaultCourt);
-  const [finalsSize, setFinalsSize] = useState(4);
   const [gamesMode, setGamesMode] = useState<'all' | 'custom'>('all');
   const [gamesStr, setGamesStr] = useState('4');
   const [courtsStr, setCourtsStr] = useState('1');
@@ -92,26 +91,26 @@ function BracketPanel({
   const scoredCount = existingGames.filter(g => isScoredGame(g.scoreText)).length;
   const allScored = hasFinals && scoredCount === existingGames.length;
 
-  const actualSize = Math.max(4, Math.min(finalists.length, finalsSize));
-  const finalistNames = finalists.slice(0, actualSize).map(s => s.name);
-  const ready = finalistNames.length >= 4;
+  const playerCount = finalists.length;
+  const finalistNames = finalists.map(s => s.name);
+  const ready = playerCount >= 4;
 
-  const maxCourts = Math.floor(actualSize / 4);
-  const courts = Math.max(1, Math.min(maxCourts, parseInt(courtsStr) || 1));
+  const maxCourts = Math.floor(playerCount / 4);
+  const courts = Math.max(1, Math.min(maxCourts || 1, parseInt(courtsStr) || 1));
   const gamesPerPlayer = gamesMode === 'all' ? ('all' as const) : Math.max(1, parseInt(gamesStr) || 1);
 
   // Preview calculations
   const activePerRound = courts * 4;
-  const sittersPerRound = actualSize - activePerRound;
-  const totalPoss = totalPartnerships(actualSize);
+  const sittersPerRound = playerCount - activePerRound;
+  const totalPoss = totalPartnerships(playerCount);
   const previewRounds = gamesPerPlayer === 'all'
     ? null // can't easily calculate without running the algorithm
-    : Math.ceil((gamesPerPlayer * actualSize) / activePerRound);
+    : Math.ceil((gamesPerPlayer * playerCount) / activePerRound);
   const previewTotalGames = previewRounds ? previewRounds * courts : null;
 
   // Check if games divide evenly
   const isExact = previewRounds
-    ? (previewRounds * activePerRound) === ((typeof gamesPerPlayer === 'number' ? gamesPerPlayer : 0) * actualSize)
+    ? (previewRounds * activePerRound) === ((typeof gamesPerPlayer === 'number' ? gamesPerPlayer : 0) * playerCount)
     : true;
 
   return (
@@ -147,16 +146,7 @@ function BracketPanel({
             <>
               {/* Controls row */}
               <div className="flex items-center gap-3 flex-wrap text-[12px]">
-                <label className="flex items-center gap-1.5">
-                  <span className="text-slate-600 font-medium">Players:</span>
-                  <input
-                    type="number" min={4} max={finalists.length}
-                    value={finalsSize}
-                    onChange={e => setFinalsSize(Math.max(4, parseInt(e.target.value) || 4))}
-                    className="w-14 border border-slate-300 rounded px-2 py-1 text-[12px] text-center font-semibold"
-                    disabled={!isAdmin}
-                  />
-                </label>
+                <span className="text-slate-600 font-medium">{playerCount} players</span>
 
                 <div className="flex gap-1 bg-slate-50 border rounded-lg p-0.5">
                   <button
@@ -212,7 +202,7 @@ function BracketPanel({
 
               {/* Preview summary */}
               <div className="text-[11px] text-slate-500">
-                {actualSize} players · {courts} court{courts !== 1 ? 's' : ''}
+                {playerCount} players · {courts} court{courts !== 1 ? 's' : ''}
                 {sittersPerRound > 0 && ` · ${sittersPerRound} sit/round`}
                 {previewRounds && ` · ${previewRounds} rounds · ${previewTotalGames} total games`}
                 {gamesMode === 'custom' && previewRounds && (
@@ -288,7 +278,12 @@ function GenderSection({
   goldPoolNum: number;
   silverPoolNum: number;
 }) {
+  const [goldSize, setGoldSize] = useState(8);
   const overallStandings = useMemo(() => computeStandings(poolGames, roster), [poolGames, roster]);
+
+  // Split: top goldSize go to Gold, rest go to Silver
+  const goldFinalists = overallStandings.slice(0, goldSize);
+  const silverFinalists = overallStandings.slice(goldSize);
 
   const goldGames = allGames.filter(g => g.pool === goldPoolNum);
   const silverGames = allGames.filter(g => g.pool === silverPoolNum);
@@ -305,6 +300,8 @@ function GenderSection({
     setGames(prev => [...prev.filter(g => g.pool !== silverPoolNum), ...newGames]);
   };
 
+  const hasBrackets = goldGames.length > 0 || silverGames.length > 0;
+
   return (
     <div className="space-y-3">
       <div className="flex items-center gap-3 flex-wrap">
@@ -314,6 +311,20 @@ function GenderSection({
         <span className="text-[11px] text-slate-500">
           {overallStandings.length} players ranked
         </span>
+        {!hasBrackets && overallStandings.length >= 4 && (
+          <label className="flex items-center gap-1.5 text-[12px]">
+            <span className="text-slate-600 font-medium">Gold bracket size:</span>
+            <input
+              type="number" min={4} max={overallStandings.length}
+              value={goldSize}
+              onChange={e => setGoldSize(Math.max(4, parseInt(e.target.value) || 4))}
+              className="w-14 border border-slate-300 rounded px-2 py-1 text-[12px] text-center font-semibold"
+            />
+            <span className="text-[11px] text-slate-400">
+              (top {goldSize} → Gold{silverFinalists.length >= 4 ? `, remaining ${silverFinalists.length} → Silver` : ''})
+            </span>
+          </label>
+        )}
       </div>
 
       {/* Gold bracket */}
@@ -322,7 +333,7 @@ function GenderSection({
         tier="gold"
         accentClass={isKob ? 'text-blue-700' : 'text-pink-700'}
         borderClass={isKob ? 'border-blue-200' : 'border-pink-200'}
-        finalists={overallStandings}
+        finalists={goldFinalists}
         existingGames={goldGames}
         defaultCourt={isKob ? 1 : 2}
         isAdmin={isAdmin}
@@ -330,19 +341,21 @@ function GenderSection({
         onClear={() => setGames(prev => prev.filter(g => g.pool !== goldPoolNum))}
       />
 
-      {/* Silver bracket */}
-      <BracketPanel
-        title={isKob ? 'Silver — Consolation KOB' : 'Silver — Consolation QOB'}
-        tier="silver"
-        accentClass="text-slate-600"
-        borderClass="border-slate-300"
-        finalists={overallStandings}
-        existingGames={silverGames}
-        defaultCourt={isKob ? 3 : 4}
-        isAdmin={isAdmin}
-        onGenerate={generateSilver}
-        onClear={() => setGames(prev => prev.filter(g => g.pool !== silverPoolNum))}
-      />
+      {/* Silver bracket — only show if enough remaining players */}
+      {(silverFinalists.length >= 4 || silverGames.length > 0) && (
+        <BracketPanel
+          title={isKob ? 'Silver — Consolation KOB' : 'Silver — Consolation QOB'}
+          tier="silver"
+          accentClass="text-slate-600"
+          borderClass="border-slate-300"
+          finalists={silverFinalists}
+          existingGames={silverGames}
+          defaultCourt={isKob ? 3 : 4}
+          isAdmin={isAdmin}
+          onGenerate={generateSilver}
+          onClear={() => setGames(prev => prev.filter(g => g.pool !== silverPoolNum))}
+        />
+      )}
     </div>
   );
 }
