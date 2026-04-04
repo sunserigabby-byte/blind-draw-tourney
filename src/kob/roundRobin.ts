@@ -46,6 +46,8 @@ export function generateRoundRobinSchedule(
   const covered = new Set<string>();
   const gamesPlayed = new Array(numPlayers).fill(0);
   const timesSat = new Array(numPlayers).fill(0);
+  // Track how many times each player has been on each court
+  const courtCount: number[][] = Array.from({ length: numPlayers }, () => new Array(courts).fill(0));
 
   const rounds: Round[] = [];
   const maxRounds = targetRounds === 'all' ? 200 : targetRounds;
@@ -68,6 +70,32 @@ export function generateRoundRobinSchedule(
     // Find best pairing of active players into games
     const bestGames = findBestPairing(active, courts, covered, seeded ? 'seeded' : 'none');
 
+    // Assign courts to games by minimising total court imbalance for all players.
+    // Try all permutations of court assignments (courts is small, max ~4).
+    const gameCount = bestGames.length;
+    let bestPerm: number[] = Array.from({ length: gameCount }, (_, i) => i);
+    if (courts > 1) {
+      let bestImbalance = Infinity;
+      const perm = bestPerm.slice();
+      const tryPerms = (start: number) => {
+        if (start === gameCount) {
+          let imb = 0;
+          for (let c = 0; c < gameCount; c++) {
+            const [a, b, c2, d] = bestGames[c];
+            for (const p of [a, b, c2, d]) imb += courtCount[p][perm[c]];
+          }
+          if (imb < bestImbalance) { bestImbalance = imb; bestPerm = perm.slice(); }
+          return;
+        }
+        for (let i = start; i < gameCount; i++) {
+          [perm[start], perm[i]] = [perm[i], perm[start]];
+          tryPerms(start + 1);
+          [perm[start], perm[i]] = [perm[i], perm[start]];
+        }
+      };
+      tryPerms(0);
+    }
+
     const roundGames: RoundGame[] = [];
     for (let c = 0; c < bestGames.length; c++) {
       const [a, b, c2, d] = bestGames[c];
@@ -77,9 +105,12 @@ export function generateRoundRobinSchedule(
       gamesPlayed[b]++;
       gamesPlayed[c2]++;
       gamesPlayed[d]++;
-      // Rotate court assignments each round so players move across all courts
-      const rotatedCourt = (c + r) % courts;
-      roundGames.push({ t1: [a, b], t2: [c2, d], courtOffset: rotatedCourt });
+      const assignedCourt = bestPerm[c];
+      courtCount[a][assignedCourt]++;
+      courtCount[b][assignedCourt]++;
+      courtCount[c2][assignedCourt]++;
+      courtCount[d][assignedCourt]++;
+      roundGames.push({ t1: [a, b], t2: [c2, d], courtOffset: assignedCourt });
     }
 
     for (const s of sitters) timesSat[s]++;
