@@ -306,7 +306,7 @@ export function KobPoolGenerator({
       const newGames = generateGames(previewPools, startCourt, existingPoolCount, poolBase);
       setGames(prev => [...prev, ...newGames]);
     } else {
-      const newGames = generateRoundRobinGames(seededPlayers, rrTarget, startCourt, poolBase, existingPoolCount, rrSeeded, rrCourts);
+      const newGames = generateRoundRobinGames(seededPlayers, rrTarget, startCourt, poolBase, existingPoolCount, rrSeeded, rrCourtsActual);
       setGames(prev => [...prev, ...newGames]);
     }
   }
