@@ -232,6 +232,8 @@ function PoolCard({
   open: Set<number>;
   toggleOpen: (p: number) => void;
   scoreSettings: ScoreSettings;
+  roster: string[];
+  addGame: (game: KobGameRow) => void;
 }) {
   const { total, scored } = poolStats.get(pool) ?? { total: 0, scored: 0 };
   const allDone  = total > 0 && scored === total;
@@ -322,8 +324,96 @@ function PoolCard({
             isFinals={isFinals}
             scoreSettings={scoreSettings}
           />
+          {isAdmin && (
+            <AddGameForm
+              poolNum={pool}
+              roster={roster}
+              existingGameCount={poolGames.length}
+              onAdd={addGame}
+            />
+          )}
         </div>
       )}
+    </div>
+  );
+}
+
+// ── Add manual game form ──────────────────────────────────────────────────────
+function AddGameForm({
+  poolNum,
+  roster,
+  existingGameCount,
+  onAdd,
+}: {
+  poolNum: number;
+  roster: string[];
+  existingGameCount: number;
+  onAdd: (game: KobGameRow) => void;
+}) {
+  const [t1p1, setT1p1] = useState(roster[0] || '');
+  const [t1p2, setT1p2] = useState(roster[1] || '');
+  const [t2p1, setT2p1] = useState(roster[2] || '');
+  const [t2p2, setT2p2] = useState(roster[3] || '');
+  const [courtStr, setCourtStr] = useState('1');
+  const [scoreText, setScoreText] = useState('');
+
+  const canAdd = t1p1 && t1p2 && t2p1 && t2p2 &&
+    new Set([t1p1, t1p2, t2p1, t2p2]).size === 4;
+
+  function handleAdd() {
+    if (!canAdd) return;
+    const ts = Date.now();
+    onAdd({
+      id: `kob-manual-${poolNum}-${ts}-${Math.random().toString(36).slice(2, 7)}`,
+      pool: poolNum,
+      game: existingGameCount + 1,
+      t1: [t1p1, t1p2],
+      t2: [t2p1, t2p2],
+      court: parseInt(courtStr) || 1,
+      scoreText,
+    });
+    setScoreText('');
+  }
+
+  const select = (value: string, onChange: (v: string) => void) => (
+    <select
+      className="border border-slate-300 rounded px-1.5 py-1 text-[12px] bg-white"
+      value={value}
+      onChange={e => onChange(e.target.value)}
+    >
+      <option value="">—</option>
+      {roster.map(p => <option key={p} value={p}>{p}</option>)}
+    </select>
+  );
+
+  return (
+    <div className="px-3 py-2 bg-sky-50/50 border-t border-sky-200 flex flex-wrap items-center gap-2 text-[12px]">
+      <span className="text-slate-600 font-medium">Add game:</span>
+      {select(t1p1, setT1p1)}
+      <span className="text-slate-400">&</span>
+      {select(t1p2, setT1p2)}
+      <span className="text-slate-500 font-medium">vs</span>
+      {select(t2p1, setT2p1)}
+      <span className="text-slate-400">&</span>
+      {select(t2p2, setT2p2)}
+      <label className="flex items-center gap-1 text-[11px]">
+        Ct
+        <input type="number" min={1} value={courtStr} onChange={e => setCourtStr(e.target.value)}
+          className="w-10 border rounded px-1 py-0.5 text-[11px] text-center" />
+      </label>
+      <input
+        className="w-20 border rounded px-2 py-1 text-[12px] border-slate-300"
+        value={scoreText}
+        onChange={e => setScoreText(e.target.value)}
+        placeholder="Score"
+      />
+      <button
+        className="px-2 py-1 rounded bg-sky-600 text-white hover:bg-sky-700 text-[11px] font-medium disabled:opacity-40"
+        onClick={handleAdd}
+        disabled={!canAdd}
+      >
+        Add
+      </button>
     </div>
   );
 }
@@ -391,9 +481,14 @@ export function KobMatchesView({
   const guySlug = (name: string) =>
     guys.map(g => g.toLowerCase().trim()).includes(name.toLowerCase().trim());
 
+  const allRoster = useMemo(() => [...guys, ...girls], [guys, girls]);
+
+  const addGame = (game: KobGameRow) => setGames(prev => [...prev, game]);
+
   const commonProps = (pool: number) => ({
     pool, allGames: games, poolStats, livePool, guySlug, isAdmin,
     update, confirmPool, setConfirmPool, doDelete, open, toggleOpen, scoreSettings,
+    roster: allRoster, addGame,
   });
 
   if (allPools.length === 0) {
