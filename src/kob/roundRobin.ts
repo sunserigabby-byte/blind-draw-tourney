@@ -77,7 +77,9 @@ export function generateRoundRobinSchedule(
       gamesPlayed[b]++;
       gamesPlayed[c2]++;
       gamesPlayed[d]++;
-      roundGames.push({ t1: [a, b], t2: [c2, d], courtOffset: c });
+      // Rotate court assignments each round so players move across all courts
+      const rotatedCourt = (c + r) % courts;
+      roundGames.push({ t1: [a, b], t2: [c2, d], courtOffset: rotatedCourt });
     }
 
     for (const s of sitters) timesSat[s]++;

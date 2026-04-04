@@ -50,6 +50,7 @@ function GamesTable({
   scoreSettings: ScoreSettings;
 }) {
   const hasSitOuts = poolGames.some(g => g.sitOut != null && (Array.isArray(g.sitOut) ? g.sitOut.length > 0 : true));
+  const hasMixedCourts = new Set(poolGames.map(g => g.court).filter(Boolean)).size > 1;
 
   const renderPlayer = (p: string, bold?: boolean) => (
     <span className="flex items-center gap-0.5 mr-2">
@@ -66,6 +67,7 @@ function GamesTable({
         <thead className="sticky top-0 bg-white/90 backdrop-blur">
           <tr className="text-left text-slate-600">
             <th className="py-1 px-2">Game</th>
+            {hasMixedCourts && <th className="py-1 px-2">Court</th>}
             <th className="py-1 px-2">Team 1</th>
             <th className="py-1 px-2">Team 2</th>
             {hasSitOuts && <th className="py-1 px-2 text-slate-400">Sits</th>}
@@ -85,6 +87,9 @@ function GamesTable({
             return (
               <tr key={g.id} className={(idx % 2 ? 'bg-slate-50/60 ' : '') + 'border-t'}>
                 <td className="py-1 px-2 tabular-nums text-slate-500 font-medium">G{g.game}</td>
+                {hasMixedCourts && (
+                  <td className="py-1 px-2 tabular-nums text-slate-500">{g.court ?? '—'}</td>
+                )}
                 <td className={`py-1 px-2 ${t1Win === true ? winBg : ''}`}>
                   <div className="flex flex-wrap">{g.t1.map(p => renderPlayer(p, t1Win === true))}</div>
                 </td>
