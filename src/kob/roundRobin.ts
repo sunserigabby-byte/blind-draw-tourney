@@ -91,26 +91,17 @@ export function generateRoundRobinSchedule(
 /**
  * Seeding quality score (lower = better).
  *
- * Primary goal: TIER-MATCHED OPPONENTS — both teams at similar skill level.
- *   e.g. 1+10 vs 2+9 (both avg 5.5) is good.
- *        1+10 vs 2+3 (avg 5.5 vs 2.5) is bad.
- *
- * Secondary: mild preference for close-skill partners, but extreme pairings
- * (1+12) are fine as long as opponents are similar. This keeps extreme
- * pairings mixed into all rounds rather than pushed to the end.
+ * Balanced teams: avoid putting the two strongest (or two weakest) together.
+ * Team seed sums should be roughly equal so no team is stacked.
+ * Opponents mix freely across tiers for variety — no tier-matching constraint.
  */
 function seedingCost(games: number[][]): number {
   let cost = 0;
   for (const g of games) {
-    // Tier matching (HIGH weight): opponents must be at similar skill level
-    const t1Avg = (g[0] + g[1]) / 2;
-    const t2Avg = (g[2] + g[3]) / 2;
-    cost += Math.abs(t1Avg - t2Avg) * 4;
-
-    // Partner closeness (LOW weight): mild preference for close-skill partners
-    const gap1 = Math.abs(g[0] - g[1]);
-    const gap2 = Math.abs(g[2] - g[3]);
-    cost += (gap1 + gap2);
+    // Team balance: penalise when both strong or both weak are on one team
+    const t1Sum = g[0] + g[1];
+    const t2Sum = g[2] + g[3];
+    cost += Math.abs(t1Sum - t2Sum);
   }
   return cost;
 }
