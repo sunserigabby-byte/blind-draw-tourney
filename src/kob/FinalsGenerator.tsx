@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import type { KobGameRow, PlayerStats } from '../types';
 import { slug, uniq, isScoredGame, computeStandings } from '../utils';
-import { SCHEDULES, POOL_INFO, VALID_SIZES, poolInfoLabel } from './schedules';
+import { SCHEDULES, POOL_INFO, VALID_SIZES, poolInfoLabel, reorderForRest, reorderRoundsForRest } from './schedules';
 import type { ValidSize } from './schedules';
 
 // ── Finals game builder (works with any size 4–8) ────────────────────────────
@@ -12,8 +12,13 @@ function buildFinalsGames(
   poolNum: number,
   court: number,
 ): KobGameRow[] {
-  const schedule = SCHEDULES[finalists.length];
-  if (!schedule) return [];
+  const rawSchedule = SCHEDULES[finalists.length];
+  if (!rawSchedule) return [];
+  // Reorder for rest: no player plays more than 2 games in a row
+  const courts = POOL_INFO[finalists.length]?.courts ?? 1;
+  const schedule = courts > 1
+    ? reorderRoundsForRest(rawSchedule, courts, 2)
+    : reorderForRest(rawSchedule, 2);
   const ts = Date.now();
   return schedule.map((entry, gi) => ({
     id: `finals-${poolNum}-g${gi + 1}-${ts}-${Math.random().toString(36).slice(2, 7)}`,
@@ -69,7 +74,11 @@ function BracketPanel({
   const finalistNames = finalists.slice(0, finalsSize).map(s => s.name);
   const ready = finalistNames.length === finalsSize;
   const info = POOL_INFO[finalsSize];
-  const schedule = SCHEDULES[finalsSize];
+  const rawSchedule = SCHEDULES[finalsSize];
+  const courts = info?.courts ?? 1;
+  const schedule = rawSchedule
+    ? (courts > 1 ? reorderRoundsForRest(rawSchedule, courts, 2) : reorderForRest(rawSchedule, 2))
+    : undefined;
 
   return (
     <div className={`border-2 ${borderClass} rounded-xl p-4`}>

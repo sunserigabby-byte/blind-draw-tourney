@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import type { KobGameRow } from '../types';
 import { uniq, shuffle } from '../utils';
-import { SCHEDULES, POOL_INFO, VALID_SIZES, poolInfoLabel } from './schedules';
+import { SCHEDULES, POOL_INFO, VALID_SIZES, poolInfoLabel, reorderForRest, reorderRoundsForRest } from './schedules';
 import type { ScheduleEntry } from './schedules';
 import { generateRoundRobinSchedule, totalPartnerships } from './roundRobin';
 
@@ -122,11 +122,15 @@ function generateGames(
     const pool = pools[pi];
     const poolNum = poolBase + existingCount + pi + 1;
     const poolCourt = courtCursor;
-    const schedule = SCHEDULES[pool.length];
+    const rawSchedule = SCHEDULES[pool.length];
     const courts = POOL_INFO[pool.length]?.courts ?? 1;
     courtCursor += courts;
 
-    if (!schedule) continue;
+    if (!rawSchedule) continue;
+    // Reorder so no player plays more than 2 games in a row
+    const schedule = courts > 1
+      ? reorderRoundsForRest(rawSchedule, courts, 2)
+      : reorderForRest(rawSchedule, 2);
 
     for (let gi = 0; gi < schedule.length; gi++) {
       const { t1: [i1,i2], t2: [i3,i4], sitters, courtOffset } = schedule[gi];
@@ -159,8 +163,9 @@ function generateRoundRobinGames(
   poolBase: number,
   existingCount: number,
   seeded: boolean = false,
+  courtOverride?: number,
 ): KobGameRow[] {
-  const { rounds } = generateRoundRobinSchedule(players.length, targetRounds, seeded);
+  const { rounds } = generateRoundRobinSchedule(players.length, targetRounds, seeded, courtOverride);
   const games: KobGameRow[] = [];
   const ts = Date.now();
   const poolNum = poolBase + existingCount + 1;
@@ -214,6 +219,7 @@ export function KobPoolGenerator({
   const [rrMode, setRrMode] = useState<'all' | 'custom'>('all');
   const [rrRoundsStr, setRrRoundsStr] = useState('5');
   const [rrSeeded, setRrSeeded] = useState(false);
+  const [rrCourtsStr, setRrCourtsStr] = useState('');
   const [poolSeeded, setPoolSeeded] = useState(false);
 
   const poolSize = Math.max(4, parseInt(poolSizeStr) || 4);
@@ -268,14 +274,16 @@ export function KobPoolGenerator({
   // ── Round-robin preview ──
   const rrRounds = Math.max(1, parseInt(rrRoundsStr) || 1);
   const rrTarget = rrMode === 'all' ? ('all' as const) : rrRounds;
+  const maxAutoCourts = Math.floor(players.length / 4);
+  const rrCourts = rrCourtsStr ? Math.max(1, Math.min(maxAutoCourts, parseInt(rrCourtsStr) || maxAutoCourts)) : undefined;
 
   const rrPreview = useMemo(() => {
     if (mode !== 'roundrobin' || players.length < 4) return null;
-    return generateRoundRobinSchedule(players.length, rrTarget, rrSeeded);
-  }, [mode, players.length, rrTarget, rrSeeded]);
+    return generateRoundRobinSchedule(players.length, rrTarget, rrSeeded, rrCourts);
+  }, [mode, players.length, rrTarget, rrSeeded, rrCourts]);
 
   const rrTotalPossible = players.length >= 4 ? totalPartnerships(players.length) : 0;
-  const rrCourtsPerRound = Math.floor(players.length / 4);
+  const rrCourtsPerRound = rrCourts ?? maxAutoCourts;
   const rrSittersPerRound = players.length - rrCourtsPerRound * 4;
   const canGenerateRR = mode === 'roundrobin' && players.length >= 4 && rrPreview && rrPreview.rounds.length > 0;
 
@@ -284,7 +292,7 @@ export function KobPoolGenerator({
       const newGames = generateGames(previewPools, startCourt, existingPoolCount, poolBase);
       setGames(prev => [...prev, ...newGames]);
     } else {
-      const newGames = generateRoundRobinGames(seededPlayers, rrTarget, startCourt, poolBase, existingPoolCount, rrSeeded);
+      const newGames = generateRoundRobinGames(seededPlayers, rrTarget, startCourt, poolBase, existingPoolCount, rrSeeded, rrCourts);
       setGames(prev => [...prev, ...newGames]);
     }
   }
@@ -529,6 +537,19 @@ export function KobPoolGenerator({
                 className="rounded border-slate-300"
               />
               <span className="text-slate-600 font-medium">Seeded</span>
+            </label>
+
+            <label className="flex items-center gap-1.5 text-[11px]">
+              <span className="text-slate-600 font-medium">Courts:</span>
+              <input
+                type="number"
+                min={1}
+                max={maxAutoCourts || 1}
+                value={rrCourtsStr}
+                onChange={e => setRrCourtsStr(e.target.value)}
+                placeholder={String(maxAutoCourts)}
+                className="w-14 border border-slate-300 rounded px-2 py-1 text-[11px] text-center"
+              />
             </label>
 
             <label className="flex items-center gap-1 text-[11px]">

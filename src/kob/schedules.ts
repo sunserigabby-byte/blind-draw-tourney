@@ -77,6 +77,134 @@ export const POOL_INFO: Record<number, PoolInfo> = {
 export const VALID_SIZES = [4, 5, 6, 7, 8] as const;
 export type ValidSize = typeof VALID_SIZES[number];
 
+/**
+ * Reorder a single-court schedule so no player plays more than `maxConsec`
+ * games in a row. Uses brute-force search for small schedules (≤8 games).
+ */
+export function reorderForRest(
+  schedule: ScheduleEntry[],
+  maxConsec: number = 2,
+): ScheduleEntry[] {
+  const n = schedule.length;
+  if (n <= 2) return schedule;
+
+  // Get all players in each game
+  const gamePlayers = schedule.map(e => new Set([...e.t1, ...e.t2]));
+
+  // Track best ordering
+  let bestOrder: number[] | null = null;
+  let bestMaxRun = Infinity;
+
+  function maxRun(order: number[]): number {
+    // For each player, find their max consecutive-game streak
+    const allPlayers = new Set<number>();
+    for (const gp of gamePlayers) gp.forEach(p => allPlayers.add(p));
+
+    let worst = 0;
+    for (const player of allPlayers) {
+      let run = 0, maxR = 0;
+      for (const gi of order) {
+        if (gamePlayers[gi].has(player)) { run++; maxR = Math.max(maxR, run); }
+        else run = 0;
+      }
+      worst = Math.max(worst, maxR);
+    }
+    return worst;
+  }
+
+  // Greedy search with backtracking for small schedules
+  function search(used: boolean[], order: number[]) {
+    if (order.length === n) {
+      const mr = maxRun(order);
+      if (mr < bestMaxRun) { bestMaxRun = mr; bestOrder = [...order]; }
+      return;
+    }
+    // Prune: if current best is already at maxConsec, stop
+    if (bestMaxRun <= maxConsec) return;
+
+    for (let i = 0; i < n; i++) {
+      if (used[i]) continue;
+
+      // Quick check: would this create a run > maxConsec?
+      // Check the last maxConsec games in order
+      let wouldViolate = false;
+      if (order.length >= maxConsec) {
+        const playersInNew = gamePlayers[i];
+        for (const player of playersInNew) {
+          let consecutive = 0;
+          for (let j = order.length - 1; j >= Math.max(0, order.length - maxConsec); j--) {
+            if (gamePlayers[order[j]].has(player)) consecutive++;
+            else break;
+          }
+          if (consecutive >= maxConsec) { wouldViolate = true; break; }
+        }
+      }
+      if (wouldViolate && bestMaxRun <= maxConsec) continue;
+
+      used[i] = true;
+      order.push(i);
+      search(used, order);
+      order.pop();
+      used[i] = false;
+    }
+  }
+
+  search(new Array(n).fill(false), []);
+  if (!bestOrder) return schedule;
+  return bestOrder.map(i => schedule[i]);
+}
+
+/**
+ * Reorder a multi-court schedule (like pool-of-8 with paired games).
+ * Groups games into rounds (by courtOffset pattern), then reorders rounds.
+ */
+export function reorderRoundsForRest(
+  schedule: ScheduleEntry[],
+  courtsPerRound: number,
+  maxConsec: number = 2,
+): ScheduleEntry[] {
+  if (courtsPerRound <= 1) return reorderForRest(schedule, maxConsec);
+
+  // Group into rounds
+  const rounds: ScheduleEntry[][] = [];
+  for (let i = 0; i < schedule.length; i += courtsPerRound) {
+    rounds.push(schedule.slice(i, i + courtsPerRound));
+  }
+
+  // Get players per round
+  const roundPlayers = rounds.map(r => {
+    const s = new Set<number>();
+    for (const e of r) { e.t1.forEach(p => s.add(p)); e.t2.forEach(p => s.add(p)); }
+    return s;
+  });
+
+  // Greedy reorder of rounds
+  const n = rounds.length;
+  const used = new Array(n).fill(false);
+  const order: number[] = [];
+
+  for (let step = 0; step < n; step++) {
+    let bestIdx = -1, bestScore = Infinity;
+    for (let i = 0; i < n; i++) {
+      if (used[i]) continue;
+      // Score: max consecutive for any player if we add this round
+      let worstRun = 0;
+      for (const player of roundPlayers[i]) {
+        let run = 1;
+        for (let j = order.length - 1; j >= 0; j--) {
+          if (roundPlayers[order[j]].has(player)) run++;
+          else break;
+        }
+        worstRun = Math.max(worstRun, run);
+      }
+      if (worstRun < bestScore) { bestScore = worstRun; bestIdx = i; }
+    }
+    if (bestIdx >= 0) { used[bestIdx] = true; order.push(bestIdx); }
+  }
+
+  return order.flatMap(i => rounds[i]);
+}
+
 export function poolInfoLabel(size: number): string {
   const info = POOL_INFO[size];
   if (!info) return `${size} players`;

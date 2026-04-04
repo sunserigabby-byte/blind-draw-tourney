@@ -36,29 +36,36 @@ export function generateRoundRobinSchedule(
   numPlayers: number,
   targetRounds: number | 'all',
   seeded: boolean = false,
+  courtOverride?: number,
 ): { rounds: Round[]; coveredCount: number; totalCount: number } {
-  const courts = Math.floor(numPlayers / 4);
+  const courts = courtOverride ?? Math.floor(numPlayers / 4);
   const playersPerRound = courts * 4;
   const totalCount = totalPartnerships(numPlayers);
 
   const covered = new Set<string>();
   const gamesPlayed = new Array(numPlayers).fill(0);
   const timesSat = new Array(numPlayers).fill(0);
+  const consecutivePlayed = new Array(numPlayers).fill(0);
 
   const rounds: Round[] = [];
   const maxRounds = targetRounds === 'all' ? 200 : targetRounds;
+  const sitSlots = numPlayers - playersPerRound;
 
   for (let r = 0; r < maxRounds; r++) {
     if (targetRounds === 'all' && covered.size >= totalCount) break;
 
-    // Pick active players: prioritise those who've sat the most, then played least
+    // Pick who sits: prioritize players with longest consecutive streaks,
+    // then those who've sat least, then fewest games. This gives rest to
+    // those who need it most while keeping games balanced.
     const playerOrder = Array.from({ length: numPlayers }, (_, i) => i).sort(
-      (a, b) => timesSat[b] - timesSat[a] || gamesPlayed[a] - gamesPlayed[b],
+      (a, b) =>
+        consecutivePlayed[b] - consecutivePlayed[a] ||  // longest streak sits first
+        timesSat[a] - timesSat[b] ||                     // sat least sits first
+        gamesPlayed[b] - gamesPlayed[a],                 // played most sits first
     );
-    const active = playerOrder.slice(0, playersPerRound).sort((a, b) => a - b);
-    const sitters = playerOrder.slice(playersPerRound).sort((a, b) => a - b);
-
-    for (const s of sitters) timesSat[s]++;
+    const sitters = playerOrder.slice(0, sitSlots).sort((a, b) => a - b);
+    const sitterSet = new Set(sitters);
+    const active = playerOrder.slice(sitSlots).sort((a, b) => a - b);
 
     // Find best pairing of active players into games
     const bestGames = findBestPairing(active, courts, covered, seeded);
@@ -74,6 +81,10 @@ export function generateRoundRobinSchedule(
       gamesPlayed[d]++;
       roundGames.push({ t1: [a, b], t2: [c2, d], courtOffset: c });
     }
+
+    // Update rest tracking after the round
+    for (const s of sitters) { timesSat[s]++; consecutivePlayed[s] = 0; }
+    for (const a of active) consecutivePlayed[a]++;
 
     rounds.push({ games: roundGames, sitters });
   }
