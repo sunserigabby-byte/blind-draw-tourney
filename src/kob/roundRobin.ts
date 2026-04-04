@@ -66,12 +66,7 @@ export function generateRoundRobinSchedule(
     const active = playerOrder.slice(sitSlots).sort((a, b) => a - b);
 
     // Find best pairing of active players into games
-    // Alternate seeded rounds (balanced tier-matched games) with variety rounds
-    // (cross-tier mixing). This gives a natural blend of competitive same-tier
-    // games and fun cross-tier matchups.
-    const costMode: 'seeded' | 'variety' | 'none' =
-      seeded ? (r % 3 === 2 ? 'variety' : 'seeded') : 'none';
-    const bestGames = findBestPairing(active, courts, covered, costMode);
+    const bestGames = findBestPairing(active, courts, covered, seeded ? 'seeded' : 'none');
 
     const roundGames: RoundGame[] = [];
     for (let c = 0; c < bestGames.length; c++) {
@@ -96,22 +91,18 @@ export function generateRoundRobinSchedule(
 /**
  * Seeding quality score (lower = better).
  *
- * 1. Balanced teams (primary): avoid stacking both strongest or weakest together.
- * 2. Mild tier matching (secondary): some games between similar-level teams for
- *    competitive fun, but not so strong that it creates tier bubbles.
+ * Each team should pair a strong player with a weak player (diverse partners).
+ * e.g. 1+10 (big gap = good) over 1+2 (small gap = stacked).
+ * We penalise small partner gaps — this prevents stacked teams like 1+2 vs 3+4
+ * and naturally creates matchups like 1+10 vs 2+9.
  */
 function seedingCost(games: number[][]): number {
   let cost = 0;
   for (const g of games) {
-    // Team balance: penalise when both strong or both weak are on one team
-    const t1Sum = g[0] + g[1];
-    const t2Sum = g[2] + g[3];
-    cost += Math.abs(t1Sum - t2Sum) * 2;
-
-    // Mild tier matching: slight preference for similar-level opponents
-    const t1Avg = t1Sum / 2;
-    const t2Avg = t2Sum / 2;
-    cost += Math.abs(t1Avg - t2Avg);
+    // Reward large partner gaps (strong+weak) by penalising small gaps
+    const gap1 = Math.abs(g[0] - g[1]);
+    const gap2 = Math.abs(g[2] - g[3]);
+    cost -= (gap1 + gap2); // negative = larger gaps reduce cost
   }
   return cost;
 }
@@ -119,8 +110,7 @@ function seedingCost(games: number[][]): number {
 /**
  * Greedy search: partition `active` players into `numCourts` games of 4,
  * maximising the number of NEW partnerships (teammate pairs).
- * costMode: 'seeded' = prefer balanced tier-matched games,
- *           'variety' = prefer cross-tier mixing,
+ * costMode: 'seeded' = prefer balanced teams (strong+weak together),
  *           'none' = no seeding preference.
  */
 function findBestPairing(
@@ -133,9 +123,7 @@ function findBestPairing(
 
   function search(remaining: number[], games: number[][], score: number) {
     if (games.length === numCourts) {
-      let cost = 0;
-      if (costMode === 'seeded') cost = seedingCost(games);
-      else if (costMode === 'variety') cost = -seedingCost(games); // invert: prefer imbalanced/cross-tier
+      const cost = costMode === 'seeded' ? seedingCost(games) : 0;
       if (score > best.score || (score === best.score && cost < best.cost)) {
         best.games = games.map(g => [...g]);
         best.score = score;
