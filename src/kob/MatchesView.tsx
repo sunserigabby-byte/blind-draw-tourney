@@ -218,6 +218,8 @@ function PoolCard({
   open,
   toggleOpen,
   scoreSettings,
+  roster,
+  addGame,
 }: {
   pool: number;
   allGames: KobGameRow[];
