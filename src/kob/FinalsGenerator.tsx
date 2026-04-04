@@ -1,44 +1,63 @@
 import React, { useMemo, useState } from 'react';
 import type { KobGameRow, PlayerStats } from '../types';
 import { slug, uniq, isScoredGame, computeStandings } from '../utils';
-import { SCHEDULES, POOL_INFO, VALID_SIZES, poolInfoLabel, reorderForRest, reorderRoundsForRest } from './schedules';
-import type { ValidSize } from './schedules';
+import { generateRoundRobinSchedule, totalPartnerships } from './roundRobin';
 
-// ── Finals game builder (works with any size 4–8) ────────────────────────────
+// ── Finals game builder using round-robin engine ────────────────────────────
 
 function buildFinalsGames(
   finalists: string[],
   label: KobGameRow['finalsLabel'],
   poolNum: number,
   court: number,
+  gamesPerPlayer: number | 'all',
+  courts: number,
 ): KobGameRow[] {
-  const rawSchedule = SCHEDULES[finalists.length];
-  if (!rawSchedule) return [];
-  // Reorder for rest: no player plays more than 2 games in a row
-  const courts = POOL_INFO[finalists.length]?.courts ?? 1;
-  const schedule = courts > 1
-    ? reorderRoundsForRest(rawSchedule, courts, 2)
-    : reorderForRest(rawSchedule, 2);
+  const n = finalists.length;
+  if (n < 4) return [];
+
+  const maxCourts = Math.floor(n / 4);
+  const actualCourts = Math.min(courts, maxCourts);
+  const activePerRound = actualCourts * 4;
+
+  // Calculate rounds needed
+  const targetRounds = gamesPerPlayer === 'all'
+    ? ('all' as const)
+    : Math.ceil((gamesPerPlayer * n) / activePerRound);
+
+  const { rounds } = generateRoundRobinSchedule(n, targetRounds, true, actualCourts);
+
+  const games: KobGameRow[] = [];
   const ts = Date.now();
-  return schedule.map((entry, gi) => ({
-    id: `finals-${poolNum}-g${gi + 1}-${ts}-${Math.random().toString(36).slice(2, 7)}`,
-    pool: poolNum,
-    game: gi + 1,
-    t1: [finalists[entry.t1[0]], finalists[entry.t1[1]]] as [string, string],
-    t2: [finalists[entry.t2[0]], finalists[entry.t2[1]]] as [string, string],
-    court: court + entry.courtOffset,
-    scoreText: '',
-    isFinals: true,
-    finalsLabel: label,
-    ...(entry.sitters.length === 1
-      ? { sitOut: finalists[entry.sitters[0]] }
-      : entry.sitters.length > 1
-        ? { sitOut: entry.sitters.map(i => finalists[i]) }
-        : {}),
-  }));
+  let gameNum = 0;
+
+  for (const round of rounds) {
+    for (const g of round.games) {
+      gameNum++;
+      const sitOut: string | string[] | undefined =
+        round.sitters.length === 0 ? undefined :
+        round.sitters.length === 1 ? finalists[round.sitters[0]] :
+        round.sitters.map(i => finalists[i]);
+
+      games.push({
+        id: `finals-${poolNum}-g${gameNum}-${ts}-${Math.random().toString(36).slice(2, 7)}`,
+        pool: poolNum,
+        game: gameNum,
+        t1: [finalists[g.t1[0]], finalists[g.t1[1]]] as [string, string],
+        t2: [finalists[g.t2[0]], finalists[g.t2[1]]] as [string, string],
+        court: court + g.courtOffset,
+        scoreText: '',
+        isFinals: true,
+        finalsLabel: label,
+        ...(g.courtOffset === 0 && sitOut !== undefined ? { sitOut } : {}),
+      });
+    }
+  }
+
+  return games;
 }
 
-// ── Bracket panel (read-only player list + generate button) ─────────────────
+// ── Bracket panel ─────────────────────────────────────────────────────────────
 
 function BracketPanel({
   title,
@@ -48,7 +67,6 @@ function BracketPanel({
   finalists,
   existingGames,
   defaultCourt,
-  finalsSize,
   isAdmin,
   onGenerate,
   onClear,
@@ -60,32 +78,45 @@ function BracketPanel({
   finalists: PlayerStats[];
   existingGames: KobGameRow[];
   defaultCourt: number;
-  finalsSize: ValidSize;
   isAdmin?: boolean;
-  onGenerate: (finalists: string[], court: number) => void;
+  onGenerate: (finalists: string[], court: number, gamesPerPlayer: number | 'all', courts: number) => void;
   onClear: () => void;
 }) {
   const [court, setCourt] = useState(defaultCourt);
+  const [finalsSize, setFinalsSize] = useState(4);
+  const [gamesMode, setGamesMode] = useState<'all' | 'custom'>('all');
+  const [gamesStr, setGamesStr] = useState('4');
+  const [courtsStr, setCourtsStr] = useState('1');
 
   const hasFinals = existingGames.length > 0;
   const scoredCount = existingGames.filter(g => isScoredGame(g.scoreText)).length;
   const allScored = hasFinals && scoredCount === existingGames.length;
 
-  const finalistNames = finalists.slice(0, finalsSize).map(s => s.name);
-  const ready = finalistNames.length === finalsSize;
-  const info = POOL_INFO[finalsSize];
-  const rawSchedule = SCHEDULES[finalsSize];
-  const courts = info?.courts ?? 1;
-  const schedule = rawSchedule
-    ? (courts > 1 ? reorderRoundsForRest(rawSchedule, courts, 2) : reorderForRest(rawSchedule, 2))
-    : undefined;
+  const actualSize = Math.max(4, Math.min(finalists.length, finalsSize));
+  const finalistNames = finalists.slice(0, actualSize).map(s => s.name);
+  const ready = finalistNames.length >= 4;
+
+  const maxCourts = Math.floor(actualSize / 4);
+  const courts = Math.max(1, Math.min(maxCourts, parseInt(courtsStr) || 1));
+  const gamesPerPlayer = gamesMode === 'all' ? ('all' as const) : Math.max(1, parseInt(gamesStr) || 1);
+
+  // Preview calculations
+  const activePerRound = courts * 4;
+  const sittersPerRound = actualSize - activePerRound;
+  const totalPoss = totalPartnerships(actualSize);
+  const previewRounds = gamesPerPlayer === 'all'
+    ? null // can't easily calculate without running the algorithm
+    : Math.ceil((gamesPerPlayer * actualSize) / activePerRound);
+  const previewTotalGames = previewRounds ? previewRounds * courts : null;
+
+  // Check if games divide evenly
+  const isExact = previewRounds
+    ? (previewRounds * activePerRound) === ((typeof gamesPerPlayer === 'number' ? gamesPerPlayer : 0) * actualSize)
+    : true;
 
   return (
     <div className={`border-2 ${borderClass} rounded-xl p-4`}>
       <div className={`font-bold text-[14px] mb-1 ${accentClass}`}>{title}</div>
-      <div className="text-[10px] text-slate-400 mb-3">
-        {finalsSize} players · {poolInfoLabel(finalsSize)}
-      </div>
 
       {hasFinals ? (
         <div className="space-y-2">
@@ -110,10 +141,88 @@ function BracketPanel({
         <div className="space-y-3">
           {!ready ? (
             <p className="text-[12px] text-slate-400 italic">
-              Not enough players with pool play results ({finalists.length} available, need {finalsSize}).
+              Not enough players with pool play results ({finalists.length} available, need at least 4).
             </p>
           ) : (
             <>
+              {/* Controls row */}
+              <div className="flex items-center gap-3 flex-wrap text-[12px]">
+                <label className="flex items-center gap-1.5">
+                  <span className="text-slate-600 font-medium">Players:</span>
+                  <input
+                    type="number" min={4} max={finalists.length}
+                    value={finalsSize}
+                    onChange={e => setFinalsSize(Math.max(4, parseInt(e.target.value) || 4))}
+                    className="w-14 border border-slate-300 rounded px-2 py-1 text-[12px] text-center font-semibold"
+                    disabled={!isAdmin}
+                  />
+                </label>
+
+                <div className="flex gap-1 bg-slate-50 border rounded-lg p-0.5">
+                  <button
+                    className={`px-2 py-0.5 rounded-md text-[11px] font-medium transition-colors ${
+                      gamesMode === 'all' ? 'bg-white shadow text-slate-800' : 'text-slate-500 hover:text-slate-700'
+                    }`}
+                    onClick={() => setGamesMode('all')}
+                  >
+                    Play with everyone
+                  </button>
+                  <button
+                    className={`px-2 py-0.5 rounded-md text-[11px] font-medium transition-colors ${
+                      gamesMode === 'custom' ? 'bg-white shadow text-slate-800' : 'text-slate-500 hover:text-slate-700'
+                    }`}
+                    onClick={() => setGamesMode('custom')}
+                  >
+                    Choose games
+                  </button>
+                </div>
+
+                {gamesMode === 'custom' && (
+                  <label className="flex items-center gap-1.5">
+                    <span className="text-slate-600 font-medium">Games/player:</span>
+                    <input
+                      type="number" min={1}
+                      value={gamesStr}
+                      onChange={e => setGamesStr(e.target.value)}
+                      className="w-14 border border-slate-300 rounded px-2 py-1 text-[12px] text-center font-semibold"
+                    />
+                  </label>
+                )}
+
+                <label className="flex items-center gap-1.5">
+                  <span className="text-slate-600 font-medium">Courts:</span>
+                  <input
+                    type="number" min={1} max={maxCourts}
+                    value={courtsStr}
+                    onChange={e => setCourtsStr(e.target.value)}
+                    className="w-14 border border-slate-300 rounded px-2 py-1 text-[12px] text-center font-semibold"
+                  />
+                </label>
+
+                <label className="flex items-center gap-1">
+                  <span className="text-slate-600 font-medium text-[11px]">Start ct:</span>
+                  <input
+                    type="number" min={1} value={court}
+                    onChange={e => setCourt(Math.max(1, parseInt(e.target.value) || 1))}
+                    className="w-14 border rounded px-2 py-1 text-[12px]"
+                    disabled={!isAdmin}
+                  />
+                </label>
+              </div>
+
+              {/* Preview summary */}
+              <div className="text-[11px] text-slate-500">
+                {actualSize} players · {courts} court{courts !== 1 ? 's' : ''}
+                {sittersPerRound > 0 && ` · ${sittersPerRound} sit/round`}
+                {previewRounds && ` · ${previewRounds} rounds · ${previewTotalGames} total games`}
+                {gamesMode === 'custom' && previewRounds && (
+                  isExact
+                    ? ` · ${gamesPerPlayer} games each`
+                    : ` · ${gamesPerPlayer}–${(gamesPerPlayer as number) + 1} games each`
+                )}
+                {gamesMode === 'all' && ` · ${totalPoss} partnerships to cover`}
+              </div>
+
               {/* Player list (read-only — ranked by standings) */}
               <div className="space-y-0.5">
                 {finalistNames.map((name, i) => {
@@ -137,56 +246,16 @@ function BracketPanel({
                 })}
               </div>
 
-              <div className="flex items-center gap-3 flex-wrap">
-                <label className="flex items-center gap-1 text-[12px]">
-                  Court
-                  <input
-                    type="number" min={1} value={court}
-                    onChange={e => setCourt(Math.max(1, parseInt(e.target.value) || 1))}
-                    className="w-16 border rounded px-2 py-1 text-[12px]"
-                    disabled={!isAdmin}
-                  />
-                </label>
-                {info && info.courts > 1 && (
-                  <span className="text-[10px] text-slate-400">Uses courts {court} & {court + 1}</span>
-                )}
-                {isAdmin && (
-                  <button
-                    className={`px-3 py-1.5 rounded-lg shadow-sm text-[12px] font-semibold disabled:opacity-40 text-white ${
-                      tier === 'gold' ? 'bg-amber-500 hover:bg-amber-600' : 'bg-slate-500 hover:bg-slate-600'
-                    }`}
-                    onClick={() => onGenerate(finalistNames, court)}
-                  >
-                    Generate {title}
-                  </button>
-                )}
-              </div>
-
-              {/* Schedule preview */}
-              {schedule && (
-                <div className="mt-1 border rounded-lg p-2 bg-slate-50 text-[11px]">
-                  <div className="font-medium text-slate-600 mb-1">Schedule preview:</div>
-                  {schedule.map((entry, gi) => (
-                    <div key={gi} className="text-slate-500">
-                      G{gi + 1}:{' '}
-                      <span className="text-slate-700 font-medium">
-                        {finalistNames[entry.t1[0]]} + {finalistNames[entry.t1[1]]}
-                      </span>
-                      {' '}vs{' '}
-                      <span className="text-slate-700 font-medium">
-                        {finalistNames[entry.t2[0]]} + {finalistNames[entry.t2[1]]}
-                      </span>
-                      {entry.sitters.length > 0 && (
-                        <span className="text-slate-400 ml-1">
-                          (sits: {entry.sitters.map(i => finalistNames[i]).join(', ')})
-                        </span>
-                      )}
-                      {entry.courtOffset > 0 && (
-                        <span className="text-slate-400 ml-1">· Court {court + entry.courtOffset}</span>
-                      )}
-                    </div>
-                  ))}
-                </div>
+              {isAdmin && (
+                <button
+                  className={`px-3 py-1.5 rounded-lg shadow-sm text-[12px] font-semibold disabled:opacity-40 text-white ${
+                    tier === 'gold' ? 'bg-amber-500 hover:bg-amber-600' : 'bg-slate-500 hover:bg-slate-600'
+                  }`}
+                  onClick={() => onGenerate(finalistNames, court, gamesPerPlayer, courts)}
+                  disabled={!ready}
+                >
+                  Generate {title}
+                </button>
               )}
             </>
           )}
@@ -219,34 +288,22 @@ function GenderSection({
   goldPoolNum: number;
   silverPoolNum: number;
 }) {
-  const [goldSize, setGoldSize] = useState<ValidSize>(4);
-  const [silverSize, setSilverSize] = useState<ValidSize>(4);
-
   const overallStandings = useMemo(() => computeStandings(poolGames, roster), [poolGames, roster]);
-
-  // Top goldSize go to Gold; next silverSize go to Silver
-  const goldFinalists = overallStandings.slice(0, goldSize);
-  const silverFinalists = overallStandings.slice(goldSize, goldSize + silverSize);
 
   const goldGames = allGames.filter(g => g.pool === goldPoolNum);
   const silverGames = allGames.filter(g => g.pool === silverPoolNum);
 
-  const generateGold = (finalists: string[], court: number) => {
+  const generateGold = (finalists: string[], court: number, gamesPerPlayer: number | 'all', courts: number) => {
     const label: KobGameRow['finalsLabel'] = isKob ? 'Gold KOB' : 'Gold QOB';
-    const newGames = buildFinalsGames(finalists, label, goldPoolNum, court);
+    const newGames = buildFinalsGames(finalists, label, goldPoolNum, court, gamesPerPlayer, courts);
     setGames(prev => [...prev.filter(g => g.pool !== goldPoolNum), ...newGames]);
   };
 
-  const generateSilver = (finalists: string[], court: number) => {
+  const generateSilver = (finalists: string[], court: number, gamesPerPlayer: number | 'all', courts: number) => {
     const label: KobGameRow['finalsLabel'] = isKob ? 'Silver KOB' : 'Silver QOB';
-    const newGames = buildFinalsGames(finalists, label, silverPoolNum, court);
+    const newGames = buildFinalsGames(finalists, label, silverPoolNum, court, gamesPerPlayer, courts);
     setGames(prev => [...prev.filter(g => g.pool !== silverPoolNum), ...newGames]);
   };
-
-  const hasBrackets = goldGames.length > 0 || silverGames.length > 0;
-
-  // How many remaining players after gold + silver
-  const remaining = overallStandings.length - goldSize - silverSize;
 
   return (
     <div className="space-y-3">
@@ -259,72 +316,33 @@ function GenderSection({
         </span>
       </div>
 
-      {/* Size pickers */}
-      <div className="flex items-center gap-4 flex-wrap text-[12px]">
-        <div className="flex items-center gap-1.5">
-          <span className="text-slate-600 font-medium">Gold:</span>
-          {VALID_SIZES.map(n => (
-            <button key={n}
-              className={`px-2 py-0.5 rounded border text-[11px] ${goldSize === n ? 'bg-amber-500 text-white border-amber-500' : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-50'}`}
-              onClick={() => setGoldSize(n)}
-              disabled={hasBrackets}
-            >{n}</button>
-          ))}
-        </div>
-        <div className="flex items-center gap-1.5">
-          <span className="text-slate-600 font-medium">Silver:</span>
-          {VALID_SIZES.map(n => (
-            <button key={n}
-              className={`px-2 py-0.5 rounded border text-[11px] ${silverSize === n ? 'bg-slate-500 text-white border-slate-500' : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-50'}`}
-              onClick={() => setSilverSize(n)}
-              disabled={hasBrackets}
-            >{n}</button>
-          ))}
-        </div>
-      </div>
-
-      {/* Cutoff summary */}
-      {overallStandings.length > 0 && !hasBrackets && (
-        <p className="text-[11px] text-slate-500">
-          Top {goldSize} from standings go to Gold. Next {silverSize} go to Silver.
-          {remaining > 0 &&
-            ` ${remaining} player${remaining !== 1 ? 's' : ''} won't make finals.`}
-          {remaining <= 0 && overallStandings.length > goldSize &&
-            ` All remaining go to Silver.`}
-        </p>
-      )}
-
       {/* Gold bracket */}
       <BracketPanel
-        title={isKob ? '🥇 Gold — King of the Beach' : '🥇 Gold — Queen of the Beach'}
+        title={isKob ? 'Gold — King of the Beach' : 'Gold — Queen of the Beach'}
         tier="gold"
         accentClass={isKob ? 'text-blue-700' : 'text-pink-700'}
         borderClass={isKob ? 'border-blue-200' : 'border-pink-200'}
-        finalists={goldFinalists}
+        finalists={overallStandings}
         existingGames={goldGames}
         defaultCourt={isKob ? 1 : 2}
-        finalsSize={goldSize}
         isAdmin={isAdmin}
         onGenerate={generateGold}
         onClear={() => setGames(prev => prev.filter(g => g.pool !== goldPoolNum))}
       />
 
-      {/* Silver bracket — always visible if enough players */}
-      {(silverFinalists.length > 0 || silverGames.length > 0) && (
-        <BracketPanel
-          title={isKob ? '🥈 Silver — Consolation KOB' : '🥈 Silver — Consolation QOB'}
-          tier="silver"
-          accentClass="text-slate-600"
-          borderClass="border-slate-300"
-          finalists={silverFinalists}
-          existingGames={silverGames}
-          defaultCourt={isKob ? 3 : 4}
-          finalsSize={silverSize}
-          isAdmin={isAdmin}
-          onGenerate={generateSilver}
-          onClear={() => setGames(prev => prev.filter(g => g.pool !== silverPoolNum))}
-        />
-      )}
+      {/* Silver bracket */}
+      <BracketPanel
+        title={isKob ? 'Silver — Consolation KOB' : 'Silver — Consolation QOB'}
+        tier="silver"
+        accentClass="text-slate-600"
+        borderClass="border-slate-300"
+        finalists={overallStandings}
+        existingGames={silverGames}
+        defaultCourt={isKob ? 3 : 4}
+        isAdmin={isAdmin}
+        onGenerate={generateSilver}
+        onClear={() => setGames(prev => prev.filter(g => g.pool !== silverPoolNum))}
+      />
     </div>
   );
 }
@@ -366,7 +384,7 @@ export function KobFinalsGenerator({
       <div className="mb-3">
         <h3 className="text-[16px] font-semibold text-sky-800">Finals Generator (KOB / QOB)</h3>
         <p className="text-[11px] text-slate-400 mt-0.5">
-          Choose bracket sizes below. Top players from standings fill Gold, next players fill Silver.
+          Set players, games per player, and courts for each bracket. Players are seeded by pool play standings.
         </p>
       </div>
 

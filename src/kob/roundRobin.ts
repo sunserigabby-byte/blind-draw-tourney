@@ -46,7 +46,6 @@ export function generateRoundRobinSchedule(
   const covered = new Set<string>();
   const gamesPlayed = new Array(numPlayers).fill(0);
   const timesSat = new Array(numPlayers).fill(0);
-  const consecutivePlayed = new Array(numPlayers).fill(0);
 
   const rounds: Round[] = [];
   const maxRounds = targetRounds === 'all' ? 200 : targetRounds;
@@ -55,14 +54,12 @@ export function generateRoundRobinSchedule(
   for (let r = 0; r < maxRounds; r++) {
     if (targetRounds === 'all' && covered.size >= totalCount) break;
 
-    // Pick who sits: prioritize players with longest consecutive streaks,
-    // then those who've sat least, then fewest games. This gives rest to
-    // those who need it most while keeping games balanced.
+    // Pick who sits: prioritize equal games for everyone.
+    // Players who've played the most sit first, then those who've sat least.
     const playerOrder = Array.from({ length: numPlayers }, (_, i) => i).sort(
       (a, b) =>
-        consecutivePlayed[b] - consecutivePlayed[a] ||  // longest streak sits first
-        timesSat[a] - timesSat[b] ||                     // sat least sits first
-        gamesPlayed[b] - gamesPlayed[a],                 // played most sits first
+        gamesPlayed[b] - gamesPlayed[a] ||   // played most sits first (keeps games equal)
+        timesSat[a] - timesSat[b],            // sat least sits first (balance rest)
     );
     const sitters = playerOrder.slice(0, sitSlots).sort((a, b) => a - b);
     const sitterSet = new Set(sitters);
@@ -83,9 +80,7 @@ export function generateRoundRobinSchedule(
       roundGames.push({ t1: [a, b], t2: [c2, d], courtOffset: c });
     }
 
-    // Update rest tracking after the round
-    for (const s of sitters) { timesSat[s]++; consecutivePlayed[s] = 0; }
-    for (const a of active) consecutivePlayed[a]++;
+    for (const s of sitters) timesSat[s]++;
 
     rounds.push({ games: roundGames, sitters });
   }
