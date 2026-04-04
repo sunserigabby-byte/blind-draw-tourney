@@ -48,6 +48,8 @@ export function generateRoundRobinSchedule(
   const timesSat = new Array(numPlayers).fill(0);
   // Track how many times each player has been on each court
   const courtCount: number[][] = Array.from({ length: numPlayers }, () => new Array(courts).fill(0));
+  // Track how many times each pair has been opponents
+  const opponentCount: number[][] = Array.from({ length: numPlayers }, () => new Array(numPlayers).fill(0));
 
   const rounds: Round[] = [];
   const maxRounds = targetRounds === 'all' ? 200 : targetRounds;
@@ -68,7 +70,7 @@ export function generateRoundRobinSchedule(
     const active = playerOrder.slice(sitSlots).sort((a, b) => a - b);
 
     // Find best pairing of active players into games
-    const bestGames = findBestPairing(active, courts, covered, seeded ? 'seeded' : 'none');
+    const bestGames = findBestPairing(active, courts, covered, seeded ? 'seeded' : 'none', opponentCount);
 
     // Assign courts to games by minimising total court imbalance for all players.
     // Try all permutations of court assignments (courts is small, max ~4).
@@ -110,6 +112,8 @@ export function generateRoundRobinSchedule(
       courtCount[b][assignedCourt]++;
       courtCount[c2][assignedCourt]++;
       courtCount[d][assignedCourt]++;
+      // Track opponents
+      for (const p of [a, b]) for (const o of [c2, d]) { opponentCount[p][o]++; opponentCount[o][p]++; }
       roundGames.push({ t1: [a, b], t2: [c2, d], courtOffset: assignedCourt });
     }
 
@@ -122,22 +126,27 @@ export function generateRoundRobinSchedule(
 }
 
 /**
- * Seeding quality score (lower = better).
+ * Cost function for game configurations (lower = better).
  *
- * The only rule: teams playing each other should be balanced (similar total
- * strength). This allows a natural mix of matchup types:
- *   - 1+3 vs 2+4 (strong vs strong) ✓ balanced
- *   - 2+8 vs 3+7 (strong+weak mix)  ✓ balanced
- *   - 5+6 vs 4+7 (mid-tier)         ✓ balanced
- * The partnership-maximizing algorithm creates variety in WHO plays together;
- * the seeding just ensures no blowout matchups like 1+2 vs 14+15.
+ * 1. Opponent variety (HIGH weight): avoid repeat opponents — every game
+ *    should ideally feature opponents who haven't faced each other yet.
+ * 2. Team balance (seeded only): teams should be balanced in total strength.
  */
-function seedingCost(games: number[][]): number {
+function configCost(games: number[][], oppCount: number[][], seeded: boolean): number {
   let cost = 0;
   for (const g of games) {
-    const t1Sum = g[0] + g[1];
-    const t2Sum = g[2] + g[3];
-    cost += Math.abs(t1Sum - t2Sum);
+    // Opponent variety: heavily penalise repeat opponents
+    for (const p of [g[0], g[1]]) {
+      for (const o of [g[2], g[3]]) {
+        cost += oppCount[p][o] * 5;
+      }
+    }
+    // Team balance (only when seeded)
+    if (seeded) {
+      const t1Sum = g[0] + g[1];
+      const t2Sum = g[2] + g[3];
+      cost += Math.abs(t1Sum - t2Sum);
+    }
   }
   return cost;
 }
@@ -145,20 +154,21 @@ function seedingCost(games: number[][]): number {
 /**
  * Greedy search: partition `active` players into `numCourts` games of 4,
  * maximising the number of NEW partnerships (teammate pairs).
- * costMode: 'seeded' = prefer balanced teams (strong+weak together),
- *           'none' = no seeding preference.
+ * Uses opponent history to avoid repeat matchups.
  */
 function findBestPairing(
   active: number[],
   numCourts: number,
   covered: Set<string>,
   costMode: 'seeded' | 'variety' | 'none',
+  oppCount: number[][],
 ): number[][] {
   const best = { games: [] as number[][], score: -1, cost: Infinity };
+  const useSeeding = costMode === 'seeded';
 
   function search(remaining: number[], games: number[][], score: number) {
     if (games.length === numCourts) {
-      const cost = costMode === 'seeded' ? seedingCost(games) : 0;
+      const cost = configCost(games, oppCount, useSeeding);
       if (score > best.score || (score === best.score && cost < best.cost)) {
         best.games = games.map(g => [...g]);
         best.score = score;
