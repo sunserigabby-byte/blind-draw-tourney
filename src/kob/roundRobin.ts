@@ -48,8 +48,9 @@ export function generateRoundRobinSchedule(
   const timesSat = new Array(numPlayers).fill(0);
   // Track how many times each player has been on each court
   const courtCount: number[][] = Array.from({ length: numPlayers }, () => new Array(courts).fill(0));
-  // Track how many times each pair has been opponents
+  // Track how many times each pair has been opponents or partners
   const opponentCount: number[][] = Array.from({ length: numPlayers }, () => new Array(numPlayers).fill(0));
+  const partnerCount: number[][] = Array.from({ length: numPlayers }, () => new Array(numPlayers).fill(0));
 
   const rounds: Round[] = [];
   const maxRounds = targetRounds === 'all' ? 200 : targetRounds;
@@ -70,7 +71,7 @@ export function generateRoundRobinSchedule(
     const active = playerOrder.slice(sitSlots).sort((a, b) => a - b);
 
     // Find best pairing of active players into games
-    const bestGames = findBestPairing(active, courts, covered, seeded ? 'seeded' : 'none', opponentCount);
+    const bestGames = findBestPairing(active, courts, covered, seeded ? 'seeded' : 'none', opponentCount, partnerCount);
 
     // Assign courts to games by minimising total court imbalance for all players.
     // Try all permutations of court assignments (courts is small, max ~4).
@@ -112,8 +113,10 @@ export function generateRoundRobinSchedule(
       courtCount[b][assignedCourt]++;
       courtCount[c2][assignedCourt]++;
       courtCount[d][assignedCourt]++;
-      // Track opponents
+      // Track opponents and partners
       for (const p of [a, b]) for (const o of [c2, d]) { opponentCount[p][o]++; opponentCount[o][p]++; }
+      partnerCount[a][b]++; partnerCount[b][a]++;
+      partnerCount[c2][d]++; partnerCount[d][c2]++;
       roundGames.push({ t1: [a, b], t2: [c2, d], courtOffset: assignedCourt });
     }
 
@@ -128,20 +131,31 @@ export function generateRoundRobinSchedule(
 /**
  * Cost function for game configurations (lower = better).
  *
- * 1. Opponent variety (HIGH weight): avoid repeat opponents — every game
- *    should ideally feature opponents who haven't faced each other yet.
- * 2. Team balance (seeded only): teams should be balanced in total strength.
+ * Priority 1 (HIGHEST): Opponent variety — never face the same person repeatedly.
+ * Priority 2: Partner variety — don't partner with the same person repeatedly.
+ * Priority 3 (lowest): Team balance (seeded only) — mild preference for balanced teams.
+ *
+ * Weights ensure variety ALWAYS wins over balance. One repeat opponent costs
+ * more than the maximum possible team balance benefit.
  */
-function configCost(games: number[][], oppCount: number[][], seeded: boolean): number {
+function configCost(
+  games: number[][],
+  oppCount: number[][],
+  partCount: number[][],
+  seeded: boolean,
+): number {
   let cost = 0;
   for (const g of games) {
-    // Opponent variety: heavily penalise repeat opponents
+    // Opponent variety (weight 50 per repeat): highest priority
     for (const p of [g[0], g[1]]) {
       for (const o of [g[2], g[3]]) {
-        cost += oppCount[p][o] * 5;
+        cost += oppCount[p][o] * 50;
       }
     }
-    // Team balance (only when seeded)
+    // Partner variety (weight 50 per repeat): also high priority
+    cost += partCount[g[0]][g[1]] * 50;
+    cost += partCount[g[2]][g[3]] * 50;
+    // Team balance (weight 1, seeded only): light tiebreaker
     if (seeded) {
       const t1Sum = g[0] + g[1];
       const t2Sum = g[2] + g[3];
@@ -154,7 +168,7 @@ function configCost(games: number[][], oppCount: number[][], seeded: boolean): n
 /**
  * Greedy search: partition `active` players into `numCourts` games of 4,
  * maximising the number of NEW partnerships (teammate pairs).
- * Uses opponent history to avoid repeat matchups.
+ * Uses opponent AND partner history to avoid repeat matchups.
  */
 function findBestPairing(
   active: number[],
@@ -162,13 +176,14 @@ function findBestPairing(
   covered: Set<string>,
   costMode: 'seeded' | 'variety' | 'none',
   oppCount: number[][],
+  partCount: number[][],
 ): number[][] {
   const best = { games: [] as number[][], score: -1, cost: Infinity };
   const useSeeding = costMode === 'seeded';
 
   function search(remaining: number[], games: number[][], score: number) {
     if (games.length === numCourts) {
-      const cost = configCost(games, oppCount, useSeeding);
+      const cost = configCost(games, oppCount, partCount, useSeeding);
       if (score > best.score || (score === best.score && cost < best.cost)) {
         best.games = games.map(g => [...g]);
         best.score = score;
