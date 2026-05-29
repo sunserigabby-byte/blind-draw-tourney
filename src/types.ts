@@ -68,6 +68,24 @@ export type TriplesMatchRow = {
 
 export type PlayerStats = { name: string; W: number; L: number; PF: number; PA: number; GP: number };
 
+// Mickey & Minnie — fixed teams of 4 built from pairs + free agents.
+// Each matchup is two sets: Mickey (coed quads) + Minnie (revco quads).
+export type MickeyTeam = {
+  id: string;
+  name: string;
+  players: string[];
+  pool: number;
+};
+
+export type MickeyMatchRow = {
+  id: string;
+  pool: number;
+  teamAId: string;
+  teamBId: string;
+  mickeyScore?: string; // coed set, e.g. "21-18"
+  minnieScore?: string; // revco set
+};
+
 // Configurable score rules — changeable per format anytime during the tournament
 export type ScoreSettings = { playTo: number; cap: number | null };
 

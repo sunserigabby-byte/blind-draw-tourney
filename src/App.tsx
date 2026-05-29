@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import type { MatchRow, QuadsMatchRow, TriplesMatchRow, BracketMatch, KobGameRow, ScoreSettings } from './types';
+import type { MatchRow, QuadsMatchRow, TriplesMatchRow, BracketMatch, KobGameRow, ScoreSettings, MickeyTeam, MickeyMatchRow } from './types';
 import { apiGetState, apiSaveState } from './api';
 import { SunnyLogo } from './components/SunnyLogo';
 import { LineNumberTextarea } from './components/LinedTextarea';
@@ -20,14 +20,23 @@ import { KobPoolGenerator } from './kob/PoolGenerator';
 import { KobFinalsGenerator } from './kob/FinalsGenerator';
 import { KobMatchesView } from './kob/MatchesView';
 import { KobLeaderboard } from './kob/Leaderboard';
+import { MickeyTeamBuilder } from './mickey/TeamBuilder';
+import { MickeyMatchesView } from './mickey/MatchesView';
+import { MickeyLeaderboard } from './mickey/Leaderboard';
 import { ScoreSettingsPanel } from './components/ScoreSettingsPanel';
 
-type TabKey = "DOUBLES" | "QUADS" | "TRIPLES" | "KOB";
+type TabKey = "DOUBLES" | "QUADS" | "TRIPLES" | "KOB" | "MICKEY";
 type DivisionKey = "UPPER" | "LOWER";
 type DivisionState<TMatch> = { guysText: string; girlsText: string; matches: TMatch[]; brackets: BracketMatch[] };
 
 function emptyDivisionState<TMatch>(): DivisionState<TMatch> {
   return { guysText: "", girlsText: "", matches: [], brackets: [] };
+}
+
+// Mickey & Minnie has its own state shape: fixed teams built from pairs + free agents.
+type MickeyDivisionState = { pairsText: string; freeAgentsText: string; teams: MickeyTeam[]; matches: MickeyMatchRow[] };
+function emptyMickeyState(): MickeyDivisionState {
+  return { pairsText: "", freeAgentsText: "", teams: [], matches: [] };
 }
 
 export default function BlindDrawTourneyApp() {
@@ -55,6 +64,9 @@ export default function BlindDrawTourneyApp() {
   const [tLower, setTLower] = useState<DivisionState<TriplesMatchRow>>(emptyDivisionState<TriplesMatchRow>());
   const [kobUpper, setKobUpper] = useState<DivisionState<KobGameRow>>(emptyDivisionState<KobGameRow>());
   const [kobLower, setKobLower] = useState<DivisionState<KobGameRow>>(emptyDivisionState<KobGameRow>());
+  const [mUpper, setMUpper] = useState<MickeyDivisionState>(emptyMickeyState());
+  const [mLower, setMLower] = useState<MickeyDivisionState>(emptyMickeyState());
+  const [mScoreSettings, setMScoreSettings] = useState<ScoreSettings>({ playTo: 21, cap: null });
 
   async function handleResetApp() {
     const ok = window.confirm(
@@ -70,6 +82,8 @@ export default function BlindDrawTourneyApp() {
     const emptyTLower = emptyDivisionState<TriplesMatchRow>();
     const emptyKobUpper = emptyDivisionState<KobGameRow>();
     const emptyKobLower = emptyDivisionState<KobGameRow>();
+    const emptyMUpper = emptyMickeyState();
+    const emptyMLower = emptyMickeyState();
 
     setDUpper(emptyDUpper);
     setDLower(emptyDLower);
@@ -79,6 +93,8 @@ export default function BlindDrawTourneyApp() {
     setTLower(emptyTLower);
     setKobUpper(emptyKobUpper);
     setKobLower(emptyKobLower);
+    setMUpper(emptyMUpper);
+    setMLower(emptyMLower);
     setActiveTab("DOUBLES");
     setActiveDivision("UPPER");
 
@@ -93,6 +109,7 @@ export default function BlindDrawTourneyApp() {
         doubles: { UPPER: emptyDUpper, LOWER: emptyDLower },
         quads: { UPPER: emptyQUpper, LOWER: emptyQLower },
         triples: { UPPER: emptyTUpper, LOWER: emptyTLower },
+        mickey: { UPPER: emptyMUpper, LOWER: emptyMLower },
         guysText: "",
         girlsText: "",
         matches: [],
@@ -123,11 +140,12 @@ export default function BlindDrawTourneyApp() {
     quads: { UPPER: qUpper, LOWER: qLower },
     triples: { UPPER: tUpper, LOWER: tLower },
     kob: { UPPER: kobUpper, LOWER: kobLower },
-    dScoreSettings, qScoreSettings, tScoreSettings, kobScoreSettings,
+    mickey: { UPPER: mUpper, LOWER: mLower },
+    dScoreSettings, qScoreSettings, tScoreSettings, kobScoreSettings, mScoreSettings,
     guysText: dUpper.guysText, girlsText: dUpper.girlsText, matches: dUpper.matches, brackets: dUpper.brackets,
     qGuysText: qUpper.guysText, qGirlsText: qUpper.girlsText, qMatches: qUpper.matches, qBrackets: qUpper.brackets,
     tGuysText: tUpper.guysText, tGirlsText: tUpper.girlsText, tMatches: tUpper.matches, tBrackets: tUpper.brackets,
-  } as any), [activeTab, activeDivision, dUpper, dLower, qUpper, qLower, tUpper, tLower, kobUpper, kobLower, dScoreSettings, qScoreSettings, tScoreSettings, kobScoreSettings]);
+  } as any), [activeTab, activeDivision, dUpper, dLower, qUpper, qLower, tUpper, tLower, kobUpper, kobLower, mUpper, mLower, dScoreSettings, qScoreSettings, tScoreSettings, kobScoreSettings, mScoreSettings]);
 
   useEffect(() => {
     (async () => {
@@ -143,12 +161,15 @@ export default function BlindDrawTourneyApp() {
           if (data.triples?.LOWER) setTLower(data.triples.LOWER);
           if (data.kob?.UPPER) setKobUpper(data.kob.UPPER);
           if (data.kob?.LOWER) setKobLower(data.kob.LOWER);
+          if (data.mickey?.UPPER) setMUpper(data.mickey.UPPER);
+          if (data.mickey?.LOWER) setMLower(data.mickey.LOWER);
           if (data.dScoreSettings) setDScoreSettings(data.dScoreSettings);
           if (data.qScoreSettings) setQScoreSettings(data.qScoreSettings);
           else if (data.qScoreCap === 21 || data.qScoreCap === 25) setQScoreSettings({ playTo: 21, cap: data.qScoreCap });
           if (data.tScoreSettings) setTScoreSettings(data.tScoreSettings);
           if (data.kobScoreSettings) setKobScoreSettings(data.kobScoreSettings);
-          if (data.activeTab === "DOUBLES" || data.activeTab === "QUADS" || data.activeTab === "TRIPLES" || data.activeTab === "KOB") setActiveTab(data.activeTab);
+          if (data.mScoreSettings) setMScoreSettings(data.mScoreSettings);
+          if (data.activeTab === "DOUBLES" || data.activeTab === "QUADS" || data.activeTab === "TRIPLES" || data.activeTab === "KOB" || data.activeTab === "MICKEY") setActiveTab(data.activeTab);
           if (data.activeDivision === "UPPER" || data.activeDivision === "LOWER") setActiveDivision(data.activeDivision);
         }
         setLoadingRemote(false);
@@ -251,6 +272,8 @@ export default function BlindDrawTourneyApp() {
   const setCurrentT = activeDivision === "UPPER" ? setTUpper : setTLower;
   const currentKob = activeDivision === "UPPER" ? kobUpper : kobLower;
   const setCurrentKob = activeDivision === "UPPER" ? setKobUpper : setKobLower;
+  const currentM = activeDivision === "UPPER" ? mUpper : mLower;
+  const setCurrentM = activeDivision === "UPPER" ? setMUpper : setMLower;
 
   return (
     <main className="min-h-screen bg-gradient-to-b from-sky-100 via-sky-50 to-white text-slate-800 antialiased">
@@ -265,6 +288,7 @@ export default function BlindDrawTourneyApp() {
             <button className={"px-3 py-1 rounded-t-md border-b-2 " + (activeTab === "QUADS" ? "bg-white text-sky-900 border-sky-400" : "bg-transparent text-sky-100/80 border-transparent hover:bg-sky-800/60")} onClick={() => setActiveTab("QUADS")}>Revco Quads</button>
             <button className={"px-3 py-1 rounded-t-md border-b-2 " + (activeTab === "TRIPLES" ? "bg-white text-sky-900 border-sky-400" : "bg-transparent text-sky-100/80 border-transparent hover:bg-sky-800/60")} onClick={() => setActiveTab("TRIPLES")}>Revco Triples</button>
             <button className={"px-3 py-1 rounded-t-md border-b-2 " + (activeTab === "KOB" ? "bg-white text-sky-900 border-sky-400" : "bg-transparent text-sky-100/80 border-transparent hover:bg-sky-800/60")} onClick={() => setActiveTab("KOB")}>KOB / QOB</button>
+            <button className={"px-3 py-1 rounded-t-md border-b-2 " + (activeTab === "MICKEY" ? "bg-white text-sky-900 border-sky-400" : "bg-transparent text-sky-100/80 border-transparent hover:bg-sky-800/60")} onClick={() => setActiveTab("MICKEY")}>Mickey &amp; Minnie</button>
           </div>
         </div>
       </header>
@@ -379,7 +403,7 @@ export default function BlindDrawTourneyApp() {
               {currentT.brackets.length > 0 && <BracketView brackets={currentT.brackets} setBrackets={(v: any) => setCurrentT(p => ({ ...p, brackets: typeof v === 'function' ? v(p.brackets) : v }))} />}
             </fieldset>
           </>
-        ) : (
+        ) : activeTab === "KOB" ? (
           /* ── KOB / QOB ── */
           <>
             <KobLeaderboard
@@ -449,6 +473,55 @@ export default function BlindDrawTourneyApp() {
               guys={currentKob.guysText.split(/\r?\n/).map(s => s.trim()).filter(Boolean)}
               girls={currentKob.girlsText.split(/\r?\n/).map(s => s.trim()).filter(Boolean)}
               scoreSettings={kobScoreSettings}
+            />
+          </>
+        ) : (
+          /* ── Mickey & Minnie ── */
+          <>
+            <MickeyLeaderboard matches={currentM.matches} teams={currentM.teams} pairsText={currentM.pairsText} freeAgentsText={currentM.freeAgentsText} scoreSettings={mScoreSettings} />
+            <fieldset disabled={!isAdmin} className={!isAdmin ? "opacity-95" : ""}>
+              <section className="bg-white/95 backdrop-blur rounded-xl shadow ring-1 ring-slate-200 p-4">
+                <div className="flex items-center justify-between flex-wrap gap-3 mb-2">
+                  <h2 className="text-[16px] font-semibold text-sky-800">
+                    Sign-ups (Mickey &amp; Minnie – {activeDivision})
+                  </h2>
+                  <ScoreSettingsPanel settings={mScoreSettings} onChange={setMScoreSettings} />
+                </div>
+                <p className="text-[11px] text-slate-500 mb-3">
+                  Enter pairs (two names per line, e.g. <span className="font-mono">Alex &amp; Sam</span>) and free
+                  agents. Then build teams of 4 below. Each pool matchup is two sets: Mickey (coed) + Minnie (revco).
+                </p>
+                <div className="grid md:grid-cols-2 gap-4">
+                  <LineNumberTextarea
+                    id={`m-pairs-${activeDivision}`}
+                    label="Pairs"
+                    value={currentM.pairsText}
+                    onChange={(e) => setCurrentM(p => ({ ...p, pairsText: e.target.value }))}
+                  />
+                  <LineNumberTextarea
+                    id={`m-free-${activeDivision}`}
+                    label="Free Agents"
+                    value={currentM.freeAgentsText}
+                    onChange={(e) => setCurrentM(p => ({ ...p, freeAgentsText: e.target.value }))}
+                  />
+                </div>
+              </section>
+              <MickeyTeamBuilder
+                pairsText={currentM.pairsText}
+                freeAgentsText={currentM.freeAgentsText}
+                teams={currentM.teams}
+                setTeams={(v: any) => setCurrentM(p => ({ ...p, teams: typeof v === 'function' ? v(p.teams) : v }))}
+                matches={currentM.matches}
+                setMatches={(v: any) => setCurrentM(p => ({ ...p, matches: typeof v === 'function' ? v(p.matches) : v }))}
+              />
+            </fieldset>
+            <MickeyMatchesView
+              matches={currentM.matches}
+              setMatches={(v: any) => setCurrentM(p => ({ ...p, matches: typeof v === 'function' ? v(p.matches) : v }))}
+              teams={currentM.teams}
+              pairsText={currentM.pairsText}
+              isAdmin={isAdmin}
+              scoreSettings={mScoreSettings}
             />
           </>
         )}

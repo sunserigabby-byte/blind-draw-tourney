@@ -15,6 +15,47 @@ export const shuffle = <T,>(arr: T[], seed?: number) => {
   return a;
 };
 
+// First token of a full name, e.g. "Alex Smith" -> "Alex"
+export const firstName = (full: string) => (full || '').trim().split(/\s+/)[0] || '';
+
+// Parse the Pairs textarea into groups of names (split by & , / or +).
+function parseMickeyPairs(text: string): string[][] {
+  return (text || '')
+    .split(/\r?\n/)
+    .map(l => l.trim())
+    .filter(Boolean)
+    .map(l => l.split(/[&/+,]/).map(s => s.trim()).filter(Boolean))
+    .filter(g => g.length >= 2);
+}
+
+// Member list for a Mickey & Minnie team, grouping any pairs that are both on the
+// team with a slash. e.g. "Amanda/Chance, Millen, Angie"
+export function mickeyMemberList(players: string[], pairsText = ''): string {
+  const pairs = parseMickeyPairs(pairsText);
+  const teamSlugs = new Set(players.map(slug));
+  const used = new Set<string>();
+  const parts: string[] = [];
+  for (const p of players) {
+    const ps = slug(p);
+    if (used.has(ps)) continue;
+    const pair = pairs.find(pr => pr.some(m => slug(m) === ps) && pr.every(m => teamSlugs.has(slug(m))));
+    if (pair) {
+      parts.push(pair.map(firstName).join('/'));
+      pair.forEach(m => used.add(slug(m)));
+    } else {
+      parts.push(firstName(p));
+      used.add(ps);
+    }
+  }
+  return parts.join(', ');
+}
+
+// Team display: "Fun Name (Amanda/Chance, Millen, Angie)"
+export function mickeyTeamLabel(team: { name: string; players: string[] }, pairsText = ''): string {
+  const inner = mickeyMemberList(team.players, pairsText);
+  return inner ? `${team.name} (${inner})` : team.name;
+}
+
 export const UPPER_COURTS = [1, 2, 3, 4, 5];
 export const LOWER_COURTS = [6, 7, 8, 9, 10];
 
