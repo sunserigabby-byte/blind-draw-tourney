@@ -26,24 +26,71 @@ import { MickeyLeaderboard } from './mickey/Leaderboard';
 import { MickeyPlayoffBuilder } from './mickey/PlayoffBuilder';
 import { MickeyBracketView } from './mickey/BracketView';
 import { ScoreSettingsPanel } from './components/ScoreSettingsPanel';
+import { Sidebar, SIDEBAR_DIVISIONS, SIDEBAR_SECTIONS, type SidebarSection, type SidebarTabKey } from './components/Sidebar';
 
-type TabKey = "DOUBLES" | "QUADS" | "TRIPLES" | "KOB" | "MICKEY";
+type TabKey = SidebarTabKey;
 type DivisionKey = "UPPER" | "LOWER";
+type SectionKey = SidebarSection;
+
 type DivisionState<TMatch> = { guysText: string; girlsText: string; matches: TMatch[]; brackets: BracketMatch[] };
 
 function emptyDivisionState<TMatch>(): DivisionState<TMatch> {
   return { guysText: "", girlsText: "", matches: [], brackets: [] };
 }
 
-// Mickey & Minnie has its own state shape: fixed teams built from pairs + free agents.
 type MickeyDivisionState = { pairsText: string; freeAgentsText: string; teams: MickeyTeam[]; matches: MickeyMatchRow[]; brackets: BracketMatch[] };
 function emptyMickeyState(): MickeyDivisionState {
   return { pairsText: "", freeAgentsText: "", teams: [], matches: [], brackets: [] };
 }
 
+// Tiny tile used on each format's HOME page to jump to a sub-section.
+function JumpCard({
+  title, subtitle, badge, onClick,
+}: {
+  title: string;
+  subtitle: string;
+  badge?: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className="bg-white rounded-xl shadow-sm ring-1 ring-slate-200 hover:ring-sky-300 hover:bg-sky-50/40 transition p-4 text-left flex items-center justify-between gap-3"
+    >
+      <div className="min-w-0">
+        <div className="text-[15px] font-semibold text-slate-800">{title}</div>
+        <div className="text-[11px] text-slate-500 mt-0.5">{subtitle}</div>
+      </div>
+      <div className="flex items-center gap-2 shrink-0">
+        {badge !== undefined && (
+          <span className="text-[11px] tabular-nums px-2 py-0.5 rounded-full bg-sky-100 text-sky-800 font-medium">
+            {badge}
+          </span>
+        )}
+        <span className="text-slate-400 text-xl leading-none">›</span>
+      </div>
+    </button>
+  );
+}
+
+// Reusable section header that hosts the score settings panel.
+function SectionHeader({ title, subtitle, right }: { title: string; subtitle?: string; right?: React.ReactNode }) {
+  return (
+    <div className="flex items-center justify-between flex-wrap gap-3 mb-3">
+      <div>
+        <h2 className="text-[16px] font-semibold text-sky-800">{title}</h2>
+        {subtitle && <p className="text-[11px] text-slate-500 mt-0.5">{subtitle}</p>}
+      </div>
+      {right}
+    </div>
+  );
+}
+
 export default function BlindDrawTourneyApp() {
   const [activeTab, setActiveTab] = useState<TabKey>("DOUBLES");
   const [activeDivision, setActiveDivision] = useState<DivisionKey>("UPPER");
+  const [activeSection, setActiveSection] = useState<SectionKey>("HOME");
+  const [sidebarOpen, setSidebarOpen] = useState(false);
 
   const [adminKey, setAdminKey] = useState<string>(() => { try { return sessionStorage.getItem("ADMIN_KEY") || ""; } catch { return ""; } });
   const isAdmin = !!adminKey;
@@ -99,6 +146,7 @@ export default function BlindDrawTourneyApp() {
     setMLower(emptyMLower);
     setActiveTab("DOUBLES");
     setActiveDivision("UPPER");
+    setActiveSection("HOME");
 
     try {
       localStorage.removeItem("sunnysports.autosave");
@@ -112,18 +160,9 @@ export default function BlindDrawTourneyApp() {
         quads: { UPPER: emptyQUpper, LOWER: emptyQLower },
         triples: { UPPER: emptyTUpper, LOWER: emptyTLower },
         mickey: { UPPER: emptyMUpper, LOWER: emptyMLower },
-        guysText: "",
-        girlsText: "",
-        matches: [],
-        brackets: [],
-        qGuysText: "",
-        qGirlsText: "",
-        qMatches: [],
-        qBrackets: [],
-        tGuysText: "",
-        tGirlsText: "",
-        tMatches: [],
-        tBrackets: [],
+        guysText: "", girlsText: "", matches: [], brackets: [],
+        qGuysText: "", qGirlsText: "", qMatches: [], qBrackets: [],
+        tGuysText: "", tGirlsText: "", tMatches: [], tBrackets: [],
       };
 
       try {
@@ -190,7 +229,6 @@ export default function BlindDrawTourneyApp() {
     return () => { if (saveTimer.current) window.clearTimeout(saveTimer.current); };
   }, [snapshotState, isAdmin, adminKey]);
 
-  // Heartbeat: ping every 15s when admin, check if another admin is active
   useEffect(() => {
     if (!isAdmin) { setOtherAdminActive(false); return; }
     const ping = async () => {
@@ -209,11 +247,26 @@ export default function BlindDrawTourneyApp() {
     return () => window.clearInterval(iv);
   }, [isAdmin, sessionId]);
 
-  const AdminBanner = () => (
-    <section className="bg-white/90 rounded-lg p-3 text-[12px] text-slate-700 flex items-center justify-between gap-3 flex-wrap">
-      <div className="flex items-center gap-2">
+  // ── Current per-format slices ───────────────────────────────────────────
+  const currentD = activeDivision === "UPPER" ? dUpper : dLower;
+  const setCurrentD = activeDivision === "UPPER" ? setDUpper : setDLower;
+  const currentQ = activeDivision === "UPPER" ? qUpper : qLower;
+  const setCurrentQ = activeDivision === "UPPER" ? setQUpper : setQLower;
+  const currentT = activeDivision === "UPPER" ? tUpper : tLower;
+  const setCurrentT = activeDivision === "UPPER" ? setTUpper : setTLower;
+  const currentKob = activeDivision === "UPPER" ? kobUpper : kobLower;
+  const setCurrentKob = activeDivision === "UPPER" ? setKobUpper : setKobLower;
+  const currentM = activeDivision === "UPPER" ? mUpper : mLower;
+  const setCurrentM = activeDivision === "UPPER" ? setMUpper : setMLower;
+
+  const divisionLabel = SIDEBAR_DIVISIONS.find(d => d.key === activeTab)?.label ?? activeTab;
+
+  // ── Reusable bits ───────────────────────────────────────────────────────
+  const AdminBanner = (
+    <section className="bg-white rounded-lg ring-1 ring-slate-200 p-3 text-[12px] text-slate-700 flex items-center justify-between gap-3 flex-wrap">
+      <div className="flex items-center gap-2 flex-wrap">
         <span className={`inline-block w-2.5 h-2.5 rounded-full ${isAdmin ? "bg-emerald-500" : "bg-slate-400"}`} />
-        <span className="font-semibold">{isAdmin ? "Admin Mode (editing enabled)" : "Viewer Mode (read-only)"}</span>
+        <span className="font-semibold">{isAdmin ? "Admin Mode" : "Viewer Mode (read-only)"}</span>
         {loadingRemote && <span className="text-slate-500">Loading shared data…</span>}
         {!!remoteError && <span className="text-red-600">{remoteError}</span>}
         {otherAdminActive && (
@@ -230,7 +283,6 @@ export default function BlindDrawTourneyApp() {
                 const k = prompt("Enter Admin Key to enable editing:");
                 if (!k) return;
                 try {
-                  // Fetch current state, then POST it back unchanged to validate the key
                   const getRes = await fetch("/api/state", { cache: "no-store" });
                   const json = await getRes.json();
                   const currentState = json?.data ?? null;
@@ -244,7 +296,7 @@ export default function BlindDrawTourneyApp() {
                     return;
                   }
                 } catch {
-                  // Network error — allow offline use, accept the key
+                  // Offline use — accept the key
                 }
                 try { sessionStorage.setItem("ADMIN_KEY", k); } catch {}
                 setAdminKeyError("");
@@ -258,73 +310,140 @@ export default function BlindDrawTourneyApp() {
     </section>
   );
 
-  const DivisionTabs = () => (
-    <div className="bg-white/85 rounded-xl p-2 shadow ring-1 ring-slate-200 inline-flex gap-2">
-      {(["UPPER", "LOWER"] as DivisionKey[]).map(div => (
-        <button key={div} className={"px-3 py-1.5 rounded-lg text-[12px] font-medium " + (activeDivision === div ? "bg-sky-700 text-white" : "bg-slate-100 text-slate-700 hover:bg-slate-200")} onClick={() => setActiveDivision(div)}>{div} Division</button>
-      ))}
-    </div>
-  );
+  // ── Helper: count scored matches for the current section's badge ────────
+  function scoredCount(arr: { scoreText?: string }[]): number {
+    return arr.filter(m => {
+      const t = (m.scoreText || '').trim();
+      if (!t) return false;
+      const p = t.match(/^(\d+)\s*[-–]\s*(\d+)$/);
+      if (!p) return false;
+      return parseInt(p[1], 10) !== parseInt(p[2], 10);
+    }).length;
+  }
+  function scoredMickeyCount(arr: MickeyMatchRow[]): number {
+    let n = 0;
+    for (const m of arr) {
+      const check = (s?: string) => {
+        const t = (s || '').trim(); if (!t) return false;
+        const p = t.match(/^(\d+)\s*[-–]\s*(\d+)$/);
+        return !!p && parseInt(p[1], 10) !== parseInt(p[2], 10);
+      };
+      if (check(m.mickeyScore)) n++;
+      if (check(m.minnieScore)) n++;
+    }
+    return n;
+  }
+  function scoredKobCount(arr: KobGameRow[]): number {
+    return arr.filter(g => {
+      const t = (g.scoreText || '').trim();
+      if (!t) return false;
+      const p = t.match(/^(\d+)\s*[-–]\s*(\d+)$/);
+      return !!p && parseInt(p[1], 10) !== parseInt(p[2], 10);
+    }).length;
+  }
 
-  const currentD = activeDivision === "UPPER" ? dUpper : dLower;
-  const setCurrentD = activeDivision === "UPPER" ? setDUpper : setDLower;
-  const currentQ = activeDivision === "UPPER" ? qUpper : qLower;
-  const setCurrentQ = activeDivision === "UPPER" ? setQUpper : setQLower;
-  const currentT = activeDivision === "UPPER" ? tUpper : tLower;
-  const setCurrentT = activeDivision === "UPPER" ? setTUpper : setTLower;
-  const currentKob = activeDivision === "UPPER" ? kobUpper : kobLower;
-  const setCurrentKob = activeDivision === "UPPER" ? setKobUpper : setKobLower;
-  const currentM = activeDivision === "UPPER" ? mUpper : mLower;
-  const setCurrentM = activeDivision === "UPPER" ? setMUpper : setMLower;
+  // ── HOME content per format ─────────────────────────────────────────────
+  function renderHome() {
+    let teamsBadge = '';
+    let poolsBadge = '';
+    let playoffsBadge = '';
+    let teamsSubtitle = '';
+    let poolsSubtitle = '';
+    let playoffsSubtitle = '';
 
-  return (
-    <main className="min-h-screen bg-gradient-to-b from-sky-100 via-sky-50 to-white text-slate-800 antialiased">
-      <header className="sticky top-0 z-10 bg-sky-900/90 backdrop-blur border-b border-sky-700 shadow-sm">
-        <div className="max-w-6xl mx-auto px-4 py-6 flex flex-col md:flex-row md:items-center md:justify-between gap-2">
-          <div className="flex items-center justify-between gap-3"><SunnyLogo /></div>
-          <div className="text-[11px] text-sky-100/80 md:text-right"><div className="font-medium">Tournament Control Panel</div><div>Live blind draw · pool play · playoffs · redemption rally</div></div>
-        </div>
-        <div className="border-t border-sky-700 bg-sky-900/80">
-          <div className="max-w-6xl mx-auto px-4 py-6 flex gap-2 text-[13px]">
-            <button className={"px-3 py-1 rounded-t-md border-b-2 " + (activeTab === "DOUBLES" ? "bg-white text-sky-900 border-sky-400" : "bg-transparent text-sky-100/80 border-transparent hover:bg-sky-800/60")} onClick={() => setActiveTab("DOUBLES")}>Revco Doubles</button>
-            <button className={"px-3 py-1 rounded-t-md border-b-2 " + (activeTab === "QUADS" ? "bg-white text-sky-900 border-sky-400" : "bg-transparent text-sky-100/80 border-transparent hover:bg-sky-800/60")} onClick={() => setActiveTab("QUADS")}>Revco Quads</button>
-            <button className={"px-3 py-1 rounded-t-md border-b-2 " + (activeTab === "TRIPLES" ? "bg-white text-sky-900 border-sky-400" : "bg-transparent text-sky-100/80 border-transparent hover:bg-sky-800/60")} onClick={() => setActiveTab("TRIPLES")}>Revco Triples</button>
-            <button className={"px-3 py-1 rounded-t-md border-b-2 " + (activeTab === "KOB" ? "bg-white text-sky-900 border-sky-400" : "bg-transparent text-sky-100/80 border-transparent hover:bg-sky-800/60")} onClick={() => setActiveTab("KOB")}>KOB / QOB</button>
-            <button className={"px-3 py-1 rounded-t-md border-b-2 " + (activeTab === "MICKEY" ? "bg-white text-sky-900 border-sky-400" : "bg-transparent text-sky-100/80 border-transparent hover:bg-sky-800/60")} onClick={() => setActiveTab("MICKEY")}>Mickey &amp; Minnie</button>
-          </div>
-        </div>
-      </header>
+    if (activeTab === 'DOUBLES') {
+      const guys = currentD.guysText.split(/\r?\n/).filter(s => s.trim()).length;
+      const girls = currentD.girlsText.split(/\r?\n/).filter(s => s.trim()).length;
+      teamsBadge = `${guys + girls}`;
+      teamsSubtitle = 'Roster and round generator';
+      poolsBadge = `${scoredCount(currentD.matches)}/${currentD.matches.length}`;
+      poolsSubtitle = 'Matches and standings';
+      playoffsBadge = currentD.brackets.length > 0 ? 'Built' : 'Not built';
+      playoffsSubtitle = 'Bracket and Redemption Rally';
+    } else if (activeTab === 'QUADS') {
+      const guys = currentQ.guysText.split(/\r?\n/).filter(s => s.trim()).length;
+      const girls = currentQ.girlsText.split(/\r?\n/).filter(s => s.trim()).length;
+      teamsBadge = `${guys + girls}`;
+      teamsSubtitle = 'Roster and round generator';
+      poolsBadge = `${scoredCount(currentQ.matches)}/${currentQ.matches.length}`;
+      poolsSubtitle = 'Matches and standings';
+      playoffsBadge = currentQ.brackets.length > 0 ? 'Built' : 'Not built';
+      playoffsSubtitle = 'Bracket and Redemption Rally';
+    } else if (activeTab === 'TRIPLES') {
+      const guys = currentT.guysText.split(/\r?\n/).filter(s => s.trim()).length;
+      const girls = currentT.girlsText.split(/\r?\n/).filter(s => s.trim()).length;
+      teamsBadge = `${guys + girls}`;
+      teamsSubtitle = 'Roster and round generator';
+      poolsBadge = `${scoredCount(currentT.matches)}/${currentT.matches.length}`;
+      poolsSubtitle = 'Matches and standings';
+      playoffsBadge = currentT.brackets.length > 0 ? 'Built' : 'Not built';
+      playoffsSubtitle = 'Bracket and Redemption Rally';
+    } else if (activeTab === 'KOB') {
+      const guys = currentKob.guysText.split(/\r?\n/).filter(s => s.trim()).length;
+      const girls = currentKob.girlsText.split(/\r?\n/).filter(s => s.trim()).length;
+      teamsBadge = `${guys + girls}`;
+      teamsSubtitle = 'Roster and pool generators';
+      const games = currentKob.matches as KobGameRow[];
+      const main = games.filter(g => !g.isFinals);
+      const finals = games.filter(g => g.isFinals);
+      poolsBadge = `${scoredKobCount(main)}/${main.length}`;
+      poolsSubtitle = 'Pool games and standings';
+      playoffsBadge = finals.length > 0 ? `${scoredKobCount(finals)}/${finals.length}` : 'Not built';
+      playoffsSubtitle = 'Gold and Silver finals';
+    } else { // MICKEY
+      const teamCount = currentM.teams.length;
+      teamsBadge = `${teamCount}`;
+      teamsSubtitle = 'Pairs, free agents, teams of 4';
+      const totalSets = currentM.matches.length * 2;
+      poolsBadge = `${scoredMickeyCount(currentM.matches)}/${totalSets}`;
+      poolsSubtitle = 'Pool matchups and standings';
+      playoffsBadge = currentM.brackets.length > 0 ? 'Built' : 'Not built';
+      playoffsSubtitle = 'Bracket and Redemption Rally';
+    }
 
-      <div className="max-w-6xl mx-auto px-4 py-6 space-y-6">
-        <AdminBanner />
-        <DivisionTabs />
+    return (
+      <div className="grid md:grid-cols-3 gap-3">
+        <JumpCard
+          title="Teams"
+          subtitle={teamsSubtitle}
+          badge={teamsBadge}
+          onClick={() => setActiveSection('TEAMS')}
+        />
+        <JumpCard
+          title="Pools"
+          subtitle={poolsSubtitle}
+          badge={poolsBadge}
+          onClick={() => setActiveSection('POOLS')}
+        />
+        <JumpCard
+          title="Playoffs"
+          subtitle={playoffsSubtitle}
+          badge={playoffsBadge}
+          onClick={() => setActiveSection('PLAYOFFS')}
+        />
+      </div>
+    );
+  }
 
-        {activeTab === "DOUBLES" ? (
+  // ── Section content ─────────────────────────────────────────────────────
+  function renderSection() {
+    if (activeSection === 'HOME') return renderHome();
+
+    if (activeTab === 'DOUBLES') {
+      if (activeSection === 'TEAMS') {
+        return (
           <>
             <fieldset disabled={!isAdmin} className={!isAdmin ? "opacity-95" : ""}>
-              <section className="bg-white/95 backdrop-blur rounded-xl shadow ring-1 ring-slate-200 p-4">
-                <div className="flex items-center justify-between flex-wrap gap-3 mb-2">
-                  <h2 className="text-[16px] font-semibold text-sky-800">
-                    Players (Doubles – {activeDivision})
-                  </h2>
-                  <ScoreSettingsPanel settings={dScoreSettings} onChange={setDScoreSettings} />
-                </div>
+              <section className="bg-white rounded-xl shadow-sm ring-1 ring-slate-200 p-4">
+                <SectionHeader
+                  title={`Players (Doubles – ${activeDivision})`}
+                  right={<ScoreSettingsPanel settings={dScoreSettings} onChange={setDScoreSettings} />}
+                />
                 <div className="grid md:grid-cols-2 gap-4">
-                  <LineNumberTextarea
-                    id={`d-guys-${activeDivision}`}
-                    label="Guys"
-                    value={currentD.guysText}
-                    onChange={(e) => setCurrentD(p => ({ ...p, guysText: e.target.value }))}
-                  />
-                  <LineNumberTextarea
-                    id={`d-girls-${activeDivision}`}
-                    label="Girls"
-                    value={currentD.girlsText}
-                    onChange={(e) => setCurrentD(p => ({ ...p, girlsText: e.target.value }))}
-                  />
+                  <LineNumberTextarea id={`d-guys-${activeDivision}`} label="Guys" value={currentD.guysText} onChange={(e) => setCurrentD(p => ({ ...p, guysText: e.target.value }))} />
+                  <LineNumberTextarea id={`d-girls-${activeDivision}`} label="Girls" value={currentD.girlsText} onChange={(e) => setCurrentD(p => ({ ...p, girlsText: e.target.value }))} />
                 </div>
               </section>
-
               <RoundGenerator
                 guysText={currentD.guysText}
                 girlsText={currentD.girlsText}
@@ -332,21 +451,30 @@ export default function BlindDrawTourneyApp() {
                 setMatches={(v: any) => setCurrentD(p => ({ ...p, matches: typeof v === 'function' ? v(p.matches) : v }))}
               />
             </fieldset>
-
+          </>
+        );
+      }
+      if (activeSection === 'POOLS') {
+        return (
+          <>
             <MatchesView
               matches={currentD.matches}
               setMatches={(v: any) => setCurrentD(p => ({ ...p, matches: typeof v === 'function' ? v(p.matches) : v }))}
               isAdmin={isAdmin}
               scoreSettings={dScoreSettings}
             />
-
             <Leaderboard
               matches={currentD.matches}
               guysText={currentD.guysText}
               girlsText={currentD.girlsText}
               scoreSettings={dScoreSettings}
             />
-
+          </>
+        );
+      }
+      if (activeSection === 'PLAYOFFS') {
+        return (
+          <>
             <fieldset disabled={!isAdmin} className={!isAdmin ? "opacity-95" : ""}>
               <PlayoffBuilder
                 matches={currentD.matches}
@@ -359,115 +487,130 @@ export default function BlindDrawTourneyApp() {
                 baseDivision={activeDivision}
               />
             </fieldset>
-
             <BracketView
               brackets={currentD.brackets}
               setBrackets={(v: any) => setCurrentD(p => ({ ...p, brackets: typeof v === 'function' ? v(p.brackets) : v }))}
             />
           </>
-        ) : activeTab === "QUADS" ? (
-          <>
-            <QuadsLeaderboard matches={currentQ.matches} guysText={currentQ.guysText} girlsText={currentQ.girlsText} scoreSettings={qScoreSettings} />
-            <fieldset disabled={!isAdmin} className={!isAdmin ? "opacity-95" : ""}>
-              <section className="bg-white/95 backdrop-blur rounded-xl shadow ring-1 ring-slate-200 p-4">
-                <div className="flex items-center justify-between flex-wrap gap-3 mb-2">
-                  <h2 className="text-[16px] font-semibold text-sky-800">Players (Quads – {activeDivision})</h2>
-                  <ScoreSettingsPanel settings={qScoreSettings} onChange={setQScoreSettings} />
-                </div>
-                <div className="grid md:grid-cols-2 gap-4">
-                  <LineNumberTextarea id={`q-guys-${activeDivision}`} label="Guys (Quads)" value={currentQ.guysText} onChange={(e) => setCurrentQ(p => ({ ...p, guysText: e.target.value }))} />
-                  <LineNumberTextarea id={`q-girls-${activeDivision}`} label="Girls (Quads)" value={currentQ.girlsText} onChange={(e) => setCurrentQ(p => ({ ...p, girlsText: e.target.value }))} />
-                </div>
-              </section>
-              <QuadsRoundGenerator guysText={currentQ.guysText} girlsText={currentQ.girlsText} matches={currentQ.matches} setMatches={(v: any) => setCurrentQ(p => ({ ...p, matches: typeof v === 'function' ? v(p.matches) : v }))} />
-              <QuadsMatchesView matches={currentQ.matches} setMatches={(v: any) => setCurrentQ(p => ({ ...p, matches: typeof v === 'function' ? v(p.matches) : v }))} isAdmin={isAdmin} scoreSettings={qScoreSettings} />
-              <QuadsPlayoffBuilder matches={currentQ.matches} guysText={currentQ.guysText} girlsText={currentQ.girlsText} setBrackets={(v: any) => setCurrentQ(p => ({ ...p, brackets: typeof v === 'function' ? v(p.brackets) : v }))} baseDivision={activeDivision} scoreSettings={qScoreSettings} />
-              {currentQ.brackets.length > 0 && <BracketView brackets={currentQ.brackets} setBrackets={(v: any) => setCurrentQ(p => ({ ...p, brackets: typeof v === 'function' ? v(p.brackets) : v }))} />}
-            </fieldset>
-          </>
-        ) : activeTab === "TRIPLES" ? (
-          <>
-            <TriplesLeaderboard matches={currentT.matches} guysText={currentT.guysText} girlsText={currentT.girlsText} scoreSettings={tScoreSettings} />
-            <fieldset disabled={!isAdmin} className={!isAdmin ? "opacity-95" : ""}>
-              <section className="bg-white/95 backdrop-blur rounded-xl shadow ring-1 ring-slate-200 p-4">
-                <div className="flex items-center justify-between flex-wrap gap-3 mb-2">
-                  <h2 className="text-[16px] font-semibold text-sky-800">Players (Triples – {activeDivision})</h2>
-                  <ScoreSettingsPanel settings={tScoreSettings} onChange={setTScoreSettings} />
-                </div>
-                <div className="grid md:grid-cols-2 gap-4">
-                  <LineNumberTextarea id={`t-guys-${activeDivision}`} label="Guys (Triples)" value={currentT.guysText} onChange={(e) => setCurrentT(p => ({ ...p, guysText: e.target.value }))} />
-                  <LineNumberTextarea id={`t-girls-${activeDivision}`} label="Girls (Triples)" value={currentT.girlsText} onChange={(e) => setCurrentT(p => ({ ...p, girlsText: e.target.value }))} />
-                </div>
-              </section>
-              <TriplesRoundGenerator guysText={currentT.guysText} girlsText={currentT.girlsText} matches={currentT.matches} setMatches={(v: any) => setCurrentT(p => ({ ...p, matches: typeof v === 'function' ? v(p.matches) : v }))} />
-              <TriplesMatchesView matches={currentT.matches} setMatches={(v: any) => setCurrentT(p => ({ ...p, matches: typeof v === 'function' ? v(p.matches) : v }))} isAdmin={isAdmin} scoreSettings={tScoreSettings} />
-              <TriplesPlayoffBuilder matches={currentT.matches} guysText={currentT.guysText} girlsText={currentT.girlsText} setBrackets={(v: any) => setCurrentT(p => ({ ...p, brackets: typeof v === 'function' ? v(p.brackets) : v }))} />
-              {currentT.brackets.length > 0 && <BracketView brackets={currentT.brackets} setBrackets={(v: any) => setCurrentT(p => ({ ...p, brackets: typeof v === 'function' ? v(p.brackets) : v }))} />}
-            </fieldset>
-          </>
-        ) : activeTab === "KOB" ? (
-          /* ── KOB / QOB ── */
-          <>
-            <KobLeaderboard
-              games={currentKob.matches as KobGameRow[]}
-              guysText={currentKob.guysText}
-              girlsText={currentKob.girlsText}
-              scoreSettings={kobScoreSettings}
-            />
-            <fieldset disabled={!isAdmin} className={!isAdmin ? "opacity-95" : ""}>
-              <section className="bg-white/95 backdrop-blur rounded-xl shadow ring-1 ring-slate-200 p-4">
-                <div className="flex items-center justify-between flex-wrap gap-3 mb-2">
-                  <h2 className="text-[16px] font-semibold text-sky-800">
-                    Players (KOB / QOB – {activeDivision})
-                  </h2>
-                  <ScoreSettingsPanel settings={kobScoreSettings} onChange={setKobScoreSettings} />
-                </div>
-                <p className="text-[11px] text-slate-500 mb-3">
-                  King &amp; Queen of the Beach — individual tournament with rotating partners.
-                  Pools or Round Robin mode. Uneven rosters automatically split into mixed pool sizes.
-                </p>
-                <div className="grid md:grid-cols-2 gap-4">
-                  <LineNumberTextarea
-                    id={`kob-guys-${activeDivision}`}
-                    label="Men (KOB)"
-                    value={currentKob.guysText}
-                    onChange={(e) => setCurrentKob(p => ({ ...p, guysText: e.target.value }))}
-                  />
-                  <LineNumberTextarea
-                    id={`kob-girls-${activeDivision}`}
-                    label="Women (QOB)"
-                    value={currentKob.girlsText}
-                    onChange={(e) => setCurrentKob(p => ({ ...p, girlsText: e.target.value }))}
-                  />
-                </div>
-              </section>
-              {/* Side-by-side KOB / QOB pool generators */}
+        );
+      }
+    }
+
+    if (activeTab === 'QUADS') {
+      if (activeSection === 'TEAMS') {
+        return (
+          <fieldset disabled={!isAdmin} className={!isAdmin ? "opacity-95" : ""}>
+            <section className="bg-white rounded-xl shadow-sm ring-1 ring-slate-200 p-4">
+              <SectionHeader
+                title={`Players (Quads – ${activeDivision})`}
+                right={<ScoreSettingsPanel settings={qScoreSettings} onChange={setQScoreSettings} />}
+              />
               <div className="grid md:grid-cols-2 gap-4">
-                <KobPoolGenerator
-                  label="Men (KOB)"
-                  playersText={currentKob.guysText}
-                  gender="kob"
-                  games={currentKob.matches as KobGameRow[]}
-                  setGames={(v: any) => setCurrentKob(p => ({ ...p, matches: typeof v === 'function' ? v(p.matches) : v }))}
-                  poolBase={0}
-                />
-                <KobPoolGenerator
-                  label="Women (QOB)"
-                  playersText={currentKob.girlsText}
-                  gender="qob"
-                  games={currentKob.matches as KobGameRow[]}
-                  setGames={(v: any) => setCurrentKob(p => ({ ...p, matches: typeof v === 'function' ? v(p.matches) : v }))}
-                  poolBase={500}
-                />
+                <LineNumberTextarea id={`q-guys-${activeDivision}`} label="Guys (Quads)" value={currentQ.guysText} onChange={(e) => setCurrentQ(p => ({ ...p, guysText: e.target.value }))} />
+                <LineNumberTextarea id={`q-girls-${activeDivision}`} label="Girls (Quads)" value={currentQ.girlsText} onChange={(e) => setCurrentQ(p => ({ ...p, girlsText: e.target.value }))} />
               </div>
-              <KobFinalsGenerator
+            </section>
+            <QuadsRoundGenerator guysText={currentQ.guysText} girlsText={currentQ.girlsText} matches={currentQ.matches} setMatches={(v: any) => setCurrentQ(p => ({ ...p, matches: typeof v === 'function' ? v(p.matches) : v }))} />
+          </fieldset>
+        );
+      }
+      if (activeSection === 'POOLS') {
+        return (
+          <>
+            <QuadsMatchesView matches={currentQ.matches} setMatches={(v: any) => setCurrentQ(p => ({ ...p, matches: typeof v === 'function' ? v(p.matches) : v }))} isAdmin={isAdmin} scoreSettings={qScoreSettings} />
+            <QuadsLeaderboard matches={currentQ.matches} guysText={currentQ.guysText} girlsText={currentQ.girlsText} scoreSettings={qScoreSettings} />
+          </>
+        );
+      }
+      if (activeSection === 'PLAYOFFS') {
+        return (
+          <>
+            <fieldset disabled={!isAdmin} className={!isAdmin ? "opacity-95" : ""}>
+              <QuadsPlayoffBuilder matches={currentQ.matches} guysText={currentQ.guysText} girlsText={currentQ.girlsText} setBrackets={(v: any) => setCurrentQ(p => ({ ...p, brackets: typeof v === 'function' ? v(p.brackets) : v }))} baseDivision={activeDivision} scoreSettings={qScoreSettings} />
+            </fieldset>
+            {currentQ.brackets.length > 0 && <BracketView brackets={currentQ.brackets} setBrackets={(v: any) => setCurrentQ(p => ({ ...p, brackets: typeof v === 'function' ? v(p.brackets) : v }))} />}
+          </>
+        );
+      }
+    }
+
+    if (activeTab === 'TRIPLES') {
+      if (activeSection === 'TEAMS') {
+        return (
+          <fieldset disabled={!isAdmin} className={!isAdmin ? "opacity-95" : ""}>
+            <section className="bg-white rounded-xl shadow-sm ring-1 ring-slate-200 p-4">
+              <SectionHeader
+                title={`Players (Triples – ${activeDivision})`}
+                right={<ScoreSettingsPanel settings={tScoreSettings} onChange={setTScoreSettings} />}
+              />
+              <div className="grid md:grid-cols-2 gap-4">
+                <LineNumberTextarea id={`t-guys-${activeDivision}`} label="Guys (Triples)" value={currentT.guysText} onChange={(e) => setCurrentT(p => ({ ...p, guysText: e.target.value }))} />
+                <LineNumberTextarea id={`t-girls-${activeDivision}`} label="Girls (Triples)" value={currentT.girlsText} onChange={(e) => setCurrentT(p => ({ ...p, girlsText: e.target.value }))} />
+              </div>
+            </section>
+            <TriplesRoundGenerator guysText={currentT.guysText} girlsText={currentT.girlsText} matches={currentT.matches} setMatches={(v: any) => setCurrentT(p => ({ ...p, matches: typeof v === 'function' ? v(p.matches) : v }))} />
+          </fieldset>
+        );
+      }
+      if (activeSection === 'POOLS') {
+        return (
+          <>
+            <TriplesMatchesView matches={currentT.matches} setMatches={(v: any) => setCurrentT(p => ({ ...p, matches: typeof v === 'function' ? v(p.matches) : v }))} isAdmin={isAdmin} scoreSettings={tScoreSettings} />
+            <TriplesLeaderboard matches={currentT.matches} guysText={currentT.guysText} girlsText={currentT.girlsText} scoreSettings={tScoreSettings} />
+          </>
+        );
+      }
+      if (activeSection === 'PLAYOFFS') {
+        return (
+          <>
+            <fieldset disabled={!isAdmin} className={!isAdmin ? "opacity-95" : ""}>
+              <TriplesPlayoffBuilder matches={currentT.matches} guysText={currentT.guysText} girlsText={currentT.girlsText} setBrackets={(v: any) => setCurrentT(p => ({ ...p, brackets: typeof v === 'function' ? v(p.brackets) : v }))} />
+            </fieldset>
+            {currentT.brackets.length > 0 && <BracketView brackets={currentT.brackets} setBrackets={(v: any) => setCurrentT(p => ({ ...p, brackets: typeof v === 'function' ? v(p.brackets) : v }))} />}
+          </>
+        );
+      }
+    }
+
+    if (activeTab === 'KOB') {
+      if (activeSection === 'TEAMS') {
+        return (
+          <fieldset disabled={!isAdmin} className={!isAdmin ? "opacity-95" : ""}>
+            <section className="bg-white rounded-xl shadow-sm ring-1 ring-slate-200 p-4">
+              <SectionHeader
+                title={`Players (KOB / QOB – ${activeDivision})`}
+                subtitle="Individual tournament with rotating partners. Uneven rosters split into mixed pool sizes automatically."
+                right={<ScoreSettingsPanel settings={kobScoreSettings} onChange={setKobScoreSettings} />}
+              />
+              <div className="grid md:grid-cols-2 gap-4">
+                <LineNumberTextarea id={`kob-guys-${activeDivision}`} label="Men (KOB)" value={currentKob.guysText} onChange={(e) => setCurrentKob(p => ({ ...p, guysText: e.target.value }))} />
+                <LineNumberTextarea id={`kob-girls-${activeDivision}`} label="Women (QOB)" value={currentKob.girlsText} onChange={(e) => setCurrentKob(p => ({ ...p, girlsText: e.target.value }))} />
+              </div>
+            </section>
+            <div className="grid md:grid-cols-2 gap-4">
+              <KobPoolGenerator
+                label="Men (KOB)"
+                playersText={currentKob.guysText}
+                gender="kob"
                 games={currentKob.matches as KobGameRow[]}
                 setGames={(v: any) => setCurrentKob(p => ({ ...p, matches: typeof v === 'function' ? v(p.matches) : v }))}
-                guysText={currentKob.guysText}
-                girlsText={currentKob.girlsText}
-                isAdmin={isAdmin}
+                poolBase={0}
               />
-            </fieldset>
+              <KobPoolGenerator
+                label="Women (QOB)"
+                playersText={currentKob.girlsText}
+                gender="qob"
+                games={currentKob.matches as KobGameRow[]}
+                setGames={(v: any) => setCurrentKob(p => ({ ...p, matches: typeof v === 'function' ? v(p.matches) : v }))}
+                poolBase={500}
+              />
+            </div>
+          </fieldset>
+        );
+      }
+      if (activeSection === 'POOLS') {
+        return (
+          <>
             <KobMatchesView
               games={currentKob.matches as KobGameRow[]}
               setGames={(v: any) => setCurrentKob(p => ({ ...p, matches: typeof v === 'function' ? v(p.matches) : v }))}
@@ -476,47 +619,69 @@ export default function BlindDrawTourneyApp() {
               girls={currentKob.girlsText.split(/\r?\n/).map(s => s.trim()).filter(Boolean)}
               scoreSettings={kobScoreSettings}
             />
+            <KobLeaderboard
+              games={currentKob.matches as KobGameRow[]}
+              guysText={currentKob.guysText}
+              girlsText={currentKob.girlsText}
+              scoreSettings={kobScoreSettings}
+            />
           </>
-        ) : (
-          /* ── Mickey & Minnie ── */
-          <>
-            <MickeyLeaderboard matches={currentM.matches} teams={currentM.teams} pairsText={currentM.pairsText} freeAgentsText={currentM.freeAgentsText} scoreSettings={mScoreSettings} />
-            <fieldset disabled={!isAdmin} className={!isAdmin ? "opacity-95" : ""}>
-              <section className="bg-white/95 backdrop-blur rounded-xl shadow ring-1 ring-slate-200 p-4">
-                <div className="flex items-center justify-between flex-wrap gap-3 mb-2">
-                  <h2 className="text-[16px] font-semibold text-sky-800">
-                    Sign-ups (Mickey &amp; Minnie – {activeDivision})
-                  </h2>
-                  <ScoreSettingsPanel settings={mScoreSettings} onChange={setMScoreSettings} />
-                </div>
-                <p className="text-[11px] text-slate-500 mb-3">
-                  Enter pairs (two names per line, e.g. <span className="font-mono">Alex &amp; Sam</span>) and free
-                  agents. Then build teams of 4 below. Each pool matchup is two sets: Mickey (coed) + Minnie (revco).
-                </p>
-                <div className="grid md:grid-cols-2 gap-4">
-                  <LineNumberTextarea
-                    id={`m-pairs-${activeDivision}`}
-                    label="Pairs"
-                    value={currentM.pairsText}
-                    onChange={(e) => setCurrentM(p => ({ ...p, pairsText: e.target.value }))}
-                  />
-                  <LineNumberTextarea
-                    id={`m-free-${activeDivision}`}
-                    label="Free Agents"
-                    value={currentM.freeAgentsText}
-                    onChange={(e) => setCurrentM(p => ({ ...p, freeAgentsText: e.target.value }))}
-                  />
-                </div>
-              </section>
-              <MickeyTeamBuilder
-                pairsText={currentM.pairsText}
-                freeAgentsText={currentM.freeAgentsText}
-                teams={currentM.teams}
-                setTeams={(v: any) => setCurrentM(p => ({ ...p, teams: typeof v === 'function' ? v(p.teams) : v }))}
-                matches={currentM.matches}
-                setMatches={(v: any) => setCurrentM(p => ({ ...p, matches: typeof v === 'function' ? v(p.matches) : v }))}
+        );
+      }
+      if (activeSection === 'PLAYOFFS') {
+        return (
+          <fieldset disabled={!isAdmin} className={!isAdmin ? "opacity-95" : ""}>
+            <KobFinalsGenerator
+              games={currentKob.matches as KobGameRow[]}
+              setGames={(v: any) => setCurrentKob(p => ({ ...p, matches: typeof v === 'function' ? v(p.matches) : v }))}
+              guysText={currentKob.guysText}
+              girlsText={currentKob.girlsText}
+              isAdmin={isAdmin}
+            />
+          </fieldset>
+        );
+      }
+    }
+
+    if (activeTab === 'MICKEY') {
+      if (activeSection === 'TEAMS') {
+        return (
+          <fieldset disabled={!isAdmin} className={!isAdmin ? "opacity-95" : ""}>
+            <section className="bg-white rounded-xl shadow-sm ring-1 ring-slate-200 p-4">
+              <SectionHeader
+                title={`Sign-ups (Mickey & Minnie – ${activeDivision})`}
+                subtitle={"Each name can take a (M)/(F) marker and an optional 1–5 skill, e.g. Amanda(F4) and Chance(M3)."}
+                right={<ScoreSettingsPanel settings={mScoreSettings} onChange={setMScoreSettings} />}
               />
-            </fieldset>
+              <div className="grid md:grid-cols-2 gap-4">
+                <LineNumberTextarea
+                  id={`m-pairs-${activeDivision}`}
+                  label="Pairs"
+                  value={currentM.pairsText}
+                  onChange={(e) => setCurrentM(p => ({ ...p, pairsText: e.target.value }))}
+                />
+                <LineNumberTextarea
+                  id={`m-free-${activeDivision}`}
+                  label="Free Agents"
+                  value={currentM.freeAgentsText}
+                  onChange={(e) => setCurrentM(p => ({ ...p, freeAgentsText: e.target.value }))}
+                />
+              </div>
+            </section>
+            <MickeyTeamBuilder
+              pairsText={currentM.pairsText}
+              freeAgentsText={currentM.freeAgentsText}
+              teams={currentM.teams}
+              setTeams={(v: any) => setCurrentM(p => ({ ...p, teams: typeof v === 'function' ? v(p.teams) : v }))}
+              matches={currentM.matches}
+              setMatches={(v: any) => setCurrentM(p => ({ ...p, matches: typeof v === 'function' ? v(p.matches) : v }))}
+            />
+          </fieldset>
+        );
+      }
+      if (activeSection === 'POOLS') {
+        return (
+          <>
             <MickeyMatchesView
               matches={currentM.matches}
               setMatches={(v: any) => setCurrentM(p => ({ ...p, matches: typeof v === 'function' ? v(p.matches) : v }))}
@@ -525,6 +690,19 @@ export default function BlindDrawTourneyApp() {
               isAdmin={isAdmin}
               scoreSettings={mScoreSettings}
             />
+            <MickeyLeaderboard
+              matches={currentM.matches}
+              teams={currentM.teams}
+              pairsText={currentM.pairsText}
+              freeAgentsText={currentM.freeAgentsText}
+              scoreSettings={mScoreSettings}
+            />
+          </>
+        );
+      }
+      if (activeSection === 'PLAYOFFS') {
+        return (
+          <>
             <fieldset disabled={!isAdmin} className={!isAdmin ? "opacity-95" : ""}>
               <MickeyPlayoffBuilder
                 teams={currentM.teams}
@@ -542,19 +720,104 @@ export default function BlindDrawTourneyApp() {
               isAdmin={isAdmin}
             />
           </>
-        )}
+        );
+      }
+    }
 
-        <section className="bg-white/80 rounded-lg p-3 text-[11px] text-slate-600">
-          <div className="flex items-center gap-2 flex-wrap">
-            <button
-              className="px-2 py-1 border rounded text-[11px]"
-              onClick={handleResetApp}
-            >
-              {isAdmin ? "Reset App" : "Reset Local App"}
-            </button>
-            <span>Each format now has separate UPPER and LOWER division data.</span>
+    return null;
+  }
+
+  return (
+    <main className="min-h-screen bg-slate-50 text-slate-800 antialiased">
+      <header className="sticky top-0 z-30 bg-white border-b border-slate-200 shadow-sm">
+        <div className="px-4 py-3 flex items-center gap-3">
+          <button
+            className="md:hidden text-slate-700 p-1 rounded hover:bg-slate-100"
+            onClick={() => setSidebarOpen(true)}
+            aria-label="Open menu"
+          >
+            <span className="text-xl leading-none">☰</span>
+          </button>
+          <SunnyLogo />
+          <div className="ml-auto text-[11px] text-slate-500 hidden sm:block">
+            Tournament Control · Live pool play &amp; playoffs
           </div>
-        </section>
+        </div>
+      </header>
+
+      <div className="flex">
+        <Sidebar
+          activeTab={activeTab}
+          setActiveTab={setActiveTab}
+          activeSection={activeSection}
+          setActiveSection={setActiveSection}
+          open={sidebarOpen}
+          onClose={() => setSidebarOpen(false)}
+        />
+
+        <div className="flex-1 min-w-0">
+          <div className="max-w-5xl mx-auto px-4 py-5 space-y-4">
+            {AdminBanner}
+
+            {/* Format header with sub-tab bar */}
+            <div className="bg-white rounded-xl shadow-sm ring-1 ring-slate-200 px-4 pt-4 pb-0">
+              <div className="flex items-baseline justify-between gap-3 flex-wrap">
+                <div>
+                  <h1 className="text-[20px] font-bold text-sky-900">{divisionLabel}</h1>
+                  <div className="text-[11px] text-slate-500 mt-0.5">
+                    {activeDivision} Division · pool play and playoffs
+                  </div>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  {(["UPPER", "LOWER"] as DivisionKey[]).map(div => (
+                    <button
+                      key={div}
+                      className={
+                        'px-2.5 py-1 rounded-md text-[11px] font-medium ' +
+                        (activeDivision === div ? 'bg-sky-700 text-white' : 'bg-slate-100 text-slate-700 hover:bg-slate-200')
+                      }
+                      onClick={() => setActiveDivision(div)}
+                    >
+                      {div}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="flex gap-1 mt-3 border-b border-slate-200 -mx-4 px-4 overflow-x-auto">
+                {SIDEBAR_SECTIONS.map(s => (
+                  <button
+                    key={s.key}
+                    className={
+                      'px-3 py-2 text-[13px] font-medium border-b-2 transition-colors whitespace-nowrap ' +
+                      (activeSection === s.key
+                        ? 'border-sky-500 text-sky-800'
+                        : 'border-transparent text-slate-500 hover:text-slate-700')
+                    }
+                    onClick={() => setActiveSection(s.key)}
+                  >
+                    {s.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Section content */}
+            <div className="space-y-4">
+              {renderSection()}
+            </div>
+
+            {/* Reset (kept at bottom, low-key) */}
+            <section className="bg-white/60 rounded-lg p-3 text-[11px] text-slate-500 mt-6">
+              <button
+                className="px-2 py-1 border rounded text-[11px] hover:bg-slate-100"
+                onClick={handleResetApp}
+              >
+                {isAdmin ? "Reset App" : "Reset Local App"}
+              </button>
+              <span className="ml-2">Each format keeps separate UPPER and LOWER division data.</span>
+            </section>
+          </div>
+        </div>
       </div>
     </main>
   );
