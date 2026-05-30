@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react';
-import type { KobGameRow, ScoreSettings } from '../types';
+import type { KobGameRow, ScoreSettings, PlayerStats } from '../types';
 import { slug, uniq, parseScore, isValidScore, isScoredGame, computeStandings } from '../utils';
 
 function isFullyScored(games: KobGameRow[]) {

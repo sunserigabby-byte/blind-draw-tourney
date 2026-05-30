@@ -22,7 +22,7 @@ function findFlexibleSplit(n: number, preferred: number): Record<number, number>
           if (rem >= 0 && rem % 4 === 0) {
             const a = rem / 4;
             const counts = [a, b, c, d, e];
-            const score = counts[VALID.indexOf(preferred)] ?? 0;
+            const score = counts[(VALID as readonly number[]).indexOf(preferred)] ?? 0;
             if (score > bestScore) { best = counts; bestScore = score; }
           }
         }

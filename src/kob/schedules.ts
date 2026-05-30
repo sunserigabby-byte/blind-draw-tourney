@@ -151,7 +151,8 @@ export function reorderForRest(
 
   search(new Array(n).fill(false), []);
   if (!bestOrder) return schedule;
-  return bestOrder.map(i => schedule[i]);
+  const found: number[] = bestOrder;
+  return found.map(i => schedule[i]);
 }
 
 /**
