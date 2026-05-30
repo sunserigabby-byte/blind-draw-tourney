@@ -1,6 +1,6 @@
 import React, { useMemo } from 'react';
 import type { MickeyTeam, MickeyMatchRow, ScoreSettings } from '../types';
-import { slug, mickeyTeamLabel, computeMickeyTeamStats } from '../utils';
+import { slug, mickeyTeamLabel, computeMickeyTeamStats, parseMickeyPairsGendered, parseMickeyFreeGendered } from '../utils';
 
 type TeamRow = { id: string; name: string; label: string; pool: number; W: number; L: number; PD: number; sets: number };
 type UnitRow = {
@@ -17,16 +17,14 @@ type UnitRow = {
 };
 
 // Each pairs line = one pair (names split by & , / or +). Free agents = one name per line.
+// Gender markers like (M)/(F) are stripped so units match the clean names on teams.
 function parsePairs(text: string): string[][] {
-  return (text || '')
-    .split(/\r?\n/)
-    .map(l => l.trim())
-    .filter(Boolean)
-    .map(l => l.split(/[&/+,]/).map(s => s.trim()).filter(Boolean))
+  return parseMickeyPairsGendered(text)
+    .map(u => u.map(m => m.name).filter(Boolean))
     .filter(g => g.length > 0);
 }
 function parseFree(text: string): string[] {
-  return (text || '').split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+  return parseMickeyFreeGendered(text).map(m => m.name).filter(Boolean);
 }
 
 export function MickeyLeaderboard({

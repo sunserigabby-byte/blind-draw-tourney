@@ -34,13 +34,52 @@ export function pickFunTeamNames(count: number): string[] {
   return Array.from({ length: count }, (_, i) => shuffled[i] ?? `Team ${i + 1}`);
 }
 
-// Parse the Pairs textarea into groups of names (split by & , / or +).
-function parseMickeyPairs(text: string): string[][] {
+// Gender + optional skill rating markers: Alex(M), Sam(F4), Jordan(m 3), Pat( F 5 ).
+// Skill is 1-5 (5 = strongest); defaults to 3 (average) if missing.
+const GENDER_MARKER_RE = /\s*\(\s*([MmFf])\s*([1-5])?\s*\)\s*$/;
+export const DEFAULT_SKILL = 3;
+
+export type Gender = 'M' | 'F';
+export type GenderedName = { name: string; gender: Gender | null; skill: number };
+
+export function stripGenderMarker(raw: string): string {
+  return (raw || '').replace(GENDER_MARKER_RE, '').trim();
+}
+
+export function parseGenderedName(raw: string): GenderedName {
+  const t = (raw || '').trim();
+  const m = t.match(GENDER_MARKER_RE);
+  if (!m) return { name: t, gender: null, skill: DEFAULT_SKILL };
+  return {
+    name: t.replace(GENDER_MARKER_RE, '').trim(),
+    gender: m[1].toUpperCase() as Gender,
+    skill: m[2] ? parseInt(m[2], 10) : DEFAULT_SKILL,
+  };
+}
+
+// Pairs textarea -> list of pair units, each member with gender (or null if no marker).
+export function parseMickeyPairsGendered(text: string): GenderedName[][] {
   return (text || '')
     .split(/\r?\n/)
     .map(l => l.trim())
     .filter(Boolean)
-    .map(l => l.split(/[&/+,]/).map(s => s.trim()).filter(Boolean))
+    .map(l => l.split(/\band\b|[&/+,]/i).map(s => s.trim()).filter(Boolean).map(parseGenderedName))
+    .filter(g => g.length >= 1);
+}
+
+// Free agents textarea -> one gendered name per line.
+export function parseMickeyFreeGendered(text: string): GenderedName[] {
+  return (text || '')
+    .split(/\r?\n/)
+    .map(s => s.trim())
+    .filter(Boolean)
+    .map(parseGenderedName);
+}
+
+// Parse the Pairs textarea into groups of clean names (markers stripped).
+function parseMickeyPairs(text: string): string[][] {
+  return parseMickeyPairsGendered(text)
+    .map(u => u.map(m => m.name).filter(Boolean))
     .filter(g => g.length >= 2);
 }
 

@@ -2,25 +2,38 @@ import React, { useMemo, useState } from 'react';
 import type { MickeyTeam, MickeyMatchRow, BracketMatch, Team, PlayDiv } from '../types';
 import {
   slug, uniq, shuffle, computeMickeyTeamStats, mickeyGamesWinner, mickeyTeamLabel,
-  pickFunTeamNames,
+  pickFunTeamNames, parseMickeyPairsGendered, parseMickeyFreeGendered,
 } from '../utils';
 import { buildBracket } from '../components/BracketView';
 
-// ── Parse helpers (same rules as the team builder / leaderboard) ─────────────
-function parsePairs(text: string): string[][] {
-  return (text || '').split(/\r?\n/).map(l => l.trim()).filter(Boolean)
-    .map(l => l.split(/[&/+,]/).map(s => s.trim()).filter(Boolean))
+// ── Parse helpers (clean names, markers stripped) ────────────────────────────
+function parsePairsClean(text: string): string[][] {
+  return parseMickeyPairsGendered(text)
+    .map(u => u.map(m => m.name).filter(Boolean))
     .filter(g => g.length >= 2);
 }
-function parseFree(text: string): string[] {
-  return (text || '').split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+function parseFreeClean(text: string): string[] {
+  return parseMickeyFreeGendered(text).map(m => m.name).filter(Boolean);
 }
 
 type PreparedTeam = { id: string; name: string; players: string[] };
 type TeamSource = 'KEEP' | 'REDRAW';
 
-// Balanced re-draw: rank each pair/free agent by pool-play record, then spread the
-// strong and weak units across teams (pairs kept intact) so no team is stacked.
+type Bucket = 'pairsMF' | 'pairsMM' | 'pairsFF' | 'pairsOther' | 'freeM' | 'freeF' | 'freeUnknown';
+type Composition = Bucket[];
+
+const COMPOSITIONS: Composition[] = [
+  ['pairsMF', 'pairsMF'],
+  ['pairsMM', 'pairsFF'],
+  ['pairsMF', 'freeM', 'freeF'],
+  ['pairsMM', 'freeF', 'freeF'],
+  ['pairsFF', 'freeM', 'freeM'],
+  ['freeM', 'freeM', 'freeF', 'freeF'],
+];
+
+// Composition-aware playoff re-draw: forms fresh teams of 4 using random 2M+2F
+// templates, balanced for (a) gender, (b) skill (from (M3)/(F4) markers), and
+// (c) pool-play record. Pairs always stay together.
 function redrawBalanced(
   teams: MickeyTeam[],
   matches: MickeyMatchRow[],
@@ -29,7 +42,7 @@ function redrawBalanced(
 ): PreparedTeam[] {
   const stats = computeMickeyTeamStats(matches, teams);
   const teamSlugSets = teams.map(t => ({ t, set: new Set(t.players.map(slug)) }));
-  const strengthOf = (members: string[]) => {
+  const recordOf = (members: string[]) => {
     const team =
       teamSlugSets.find(x => members.every(m => x.set.has(slug(m))))?.t ??
       teamSlugSets.find(x => x.set.has(slug(members[0])))?.t;
@@ -37,39 +50,139 @@ function redrawBalanced(
     return { W: s?.W ?? 0, PD: s?.PD ?? 0 };
   };
 
-  type Unit = { members: string[]; size: number; W: number; PD: number };
-  const units: Unit[] = [
-    ...parsePairs(pairsText).map(m => ({ members: m, size: m.length, ...strengthOf(m) })),
-    ...parseFree(freeAgentsText).map(n => ({ members: [n], size: 1, ...strengthOf([n]) })),
-  ];
-  if (units.length === 0) return [];
+  type Unit = {
+    members: string[]; size: number;
+    M: number; F: number; totalSkill: number;
+    W: number; PD: number;
+  };
+  const pairs = parseMickeyPairsGendered(pairsText).filter(u => u.length >= 1);
+  const frees = parseMickeyFreeGendered(freeAgentsText);
+  const pairUnits: Unit[] = pairs.map(u => ({
+    members: u.map(m => m.name),
+    size: u.length,
+    M: u.filter(m => m.gender === 'M').length,
+    F: u.filter(m => m.gender === 'F').length,
+    totalSkill: u.reduce((n, m) => n + m.skill, 0),
+    ...recordOf(u.map(m => m.name)),
+  }));
+  const freeUnits: Unit[] = frees.map(m => ({
+    members: [m.name],
+    size: 1,
+    M: m.gender === 'M' ? 1 : 0,
+    F: m.gender === 'F' ? 1 : 0,
+    totalSkill: m.skill,
+    ...recordOf([m.name]),
+  }));
+  if (pairUnits.length + freeUnits.length === 0) return [];
 
-  const total = units.reduce((n, u) => n + u.size, 0);
-  const T = Math.max(1, Math.ceil(total / 4));
-  const bins = Array.from({ length: T }, () => ({ players: [] as string[], slots: 0, W: 0, PD: 0 }));
+  const totalPlayers = pairUnits.reduce((n, u) => n + u.size, 0) + freeUnits.length;
+  const totalSkill =
+    pairUnits.reduce((n, u) => n + u.totalSkill, 0) +
+    freeUnits.reduce((n, u) => n + u.totalSkill, 0);
+  const totalW =
+    pairUnits.reduce((n, u) => n + u.W, 0) +
+    freeUnits.reduce((n, u) => n + u.W, 0);
+  const T = Math.max(1, Math.ceil(totalPlayers / 4));
+  const targetSkillPerPlayer = totalPlayers > 0 ? totalSkill / totalPlayers : 3;
+  const targetWPerTeam = T > 0 ? totalW / T : 0;
 
-  // Pairs first (so they always find a 2-slot home), each tier shuffled for variety,
-  // then sorted by strength so the strongest get placed onto the weakest teams.
-  const byStrength = (a: Unit, b: Unit) => b.W - a.W || b.PD - a.PD;
-  const order = [
-    ...shuffle(units.filter(u => u.size >= 2)).sort(byStrength),
-    ...shuffle(units.filter(u => u.size < 2)).sort(byStrength),
-  ];
+  type Bin = {
+    players: string[]; size: number;
+    M: number; F: number; totalSkill: number;
+    W: number; PD: number;
+  };
+  const buckets: Record<Bucket, Unit[]> = {
+    pairsMF: shuffle(pairUnits.filter(u => u.M === 1 && u.F === 1)),
+    pairsMM: shuffle(pairUnits.filter(u => u.M === 2 && u.F === 0)),
+    pairsFF: shuffle(pairUnits.filter(u => u.F === 2 && u.M === 0)),
+    pairsOther: shuffle(pairUnits.filter(u => u.M + u.F < 2)),
+    freeM: shuffle(freeUnits.filter(u => u.M === 1)),
+    freeF: shuffle(freeUnits.filter(u => u.F === 1)),
+    freeUnknown: shuffle(freeUnits.filter(u => u.M === 0 && u.F === 0)),
+  };
 
-  for (const u of order) {
-    let cands = bins.filter(b => b.slots + u.size <= 4);
-    if (cands.length === 0) {
-      const nb = { players: [] as string[], slots: 0, W: 0, PD: 0 };
-      bins.push(nb);
-      cands = [nb];
+  const compositionFits = (comp: Composition): boolean => {
+    const need: Partial<Record<Bucket, number>> = {};
+    for (const b of comp) need[b] = (need[b] ?? 0) + 1;
+    return (Object.entries(need) as [Bucket, number][])
+      .every(([b, n]) => buckets[b].length >= n);
+  };
+
+  // Pick (and remove) the unit whose skill + record best balance the team so
+  // far. Top-3 random tiebreak so each re-shuffle has some variety.
+  const takeBalanced = (list: Unit[], team: Bin): Unit => {
+    const scored = list.map((u, idx) => {
+      const newSize = team.size + u.size;
+      const idealSkill = newSize * targetSkillPerPlayer;
+      const idealW = (newSize / 4) * targetWPerTeam;
+      const skillDist = Math.abs(team.totalSkill + u.totalSkill - idealSkill);
+      const wDist = Math.abs(team.W + u.W - idealW);
+      return { idx, u, dist: skillDist * 2 + wDist };
+    }).sort((a, b) => a.dist - b.dist);
+    const K = Math.min(3, scored.length);
+    const pick = scored[Math.floor(Math.random() * K)];
+    list.splice(pick.idx, 1);
+    return pick.u;
+  };
+
+  const addUnit = (team: Bin, u: Unit) => {
+    team.players.push(...u.members);
+    team.size += u.size;
+    team.M += u.M;
+    team.F += u.F;
+    team.totalSkill += u.totalSkill;
+    team.W += u.W;
+    team.PD += u.PD;
+  };
+
+  const bins: Bin[] = [];
+
+  while (true) {
+    const valid = COMPOSITIONS.filter(compositionFits);
+    if (valid.length === 0) break;
+    const comp = valid[Math.floor(Math.random() * valid.length)];
+    const team: Bin = { players: [], size: 0, M: 0, F: 0, totalSkill: 0, W: 0, PD: 0 };
+    for (const slot of comp) {
+      const u = takeBalanced(buckets[slot], team);
+      addUnit(team, u);
     }
-    cands.sort((a, b) => a.W - b.W || a.PD - b.PD || a.slots - b.slots);
-    const pick = cands[0];
-    pick.players.push(...u.members);
-    pick.slots += u.size;
-    pick.W += u.W;
-    pick.PD += u.PD;
+    bins.push(team);
   }
+
+  // Fallback: anything left (uneven gender stocks, unmarked names) gets packed
+  // greedily, scored by gender + skill + record distance.
+  const leftoverPairs = shuffle([
+    ...buckets.pairsMF, ...buckets.pairsMM, ...buckets.pairsFF, ...buckets.pairsOther,
+  ]);
+  const leftoverFrees = shuffle([
+    ...buckets.freeM, ...buckets.freeF, ...buckets.freeUnknown,
+  ]);
+
+  const placeLeftover = (u: Unit) => {
+    let best: Bin | null = null;
+    let bestScore = Infinity;
+    for (const t of bins) {
+      if (t.size + u.size > 4) continue;
+      const newSize = t.size + u.size;
+      const newSkill = t.totalSkill + u.totalSkill;
+      const newW = t.W + u.W;
+      const newM = t.M + u.M;
+      const newF = t.F + u.F;
+      const genderDist = Math.abs(newM - 2) + Math.abs(newF - 2);
+      const skillDist = Math.abs(newSkill - newSize * targetSkillPerPlayer);
+      const wDist = Math.abs(newW - (newSize / 4) * targetWPerTeam);
+      const score = genderDist * 1000 + skillDist * 10 + wDist * 5 + newSize;
+      if (score < bestScore) { bestScore = score; best = t; }
+    }
+    if (!best) {
+      best = { players: [], size: 0, M: 0, F: 0, totalSkill: 0, W: 0, PD: 0 };
+      bins.push(best);
+    }
+    addUnit(best, u);
+  };
+
+  for (const u of leftoverPairs) placeLeftover(u);
+  for (const u of leftoverFrees) placeLeftover(u);
 
   const filled = bins.filter(b => b.players.length).sort((a, b) => b.W - a.W || b.PD - a.PD);
   const names = pickFunTeamNames(filled.length);
@@ -100,8 +213,8 @@ export function MickeyPlayoffBuilder({
   const allPlayerNames = useMemo(
     () => uniq([
       ...teams.flatMap(t => t.players),
-      ...parsePairs(pairsText).flat(),
-      ...parseFree(freeAgentsText),
+      ...parsePairsClean(pairsText).flat(),
+      ...parseFreeClean(freeAgentsText),
     ].map(s => s.trim()).filter(Boolean)),
     [teams, pairsText, freeAgentsText],
   );

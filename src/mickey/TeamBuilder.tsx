@@ -1,54 +1,148 @@
 import React, { useMemo, useState } from 'react';
 import type { MickeyTeam, MickeyMatchRow } from '../types';
-import { shuffle, mickeyMemberList, FUN_TEAM_NAMES, pickFunTeamNames } from '../utils';
+import {
+  shuffle, mickeyMemberList, FUN_TEAM_NAMES, pickFunTeamNames,
+  parseMickeyPairsGendered, parseMickeyFreeGendered, stripGenderMarker,
+  type GenderedName,
+} from '../utils';
 
 const rid = () => Math.random().toString(36).slice(2, 10);
 
-// Each pairs line becomes a "locked group" that stays together on the same team.
-// Names may be separated by & , / or +  (e.g. "Alex & Sam").
-function parseGroups(text: string): string[][] {
-  return (text || '')
-    .split(/\r?\n/)
-    .map(l => l.trim())
-    .filter(Boolean)
-    .map(l => l.split(/[&/+,]/).map(s => s.trim()).filter(Boolean))
-    .filter(g => g.length > 0);
+type Unit = { members: GenderedName[]; size: number; M: number; F: number; totalSkill: number };
+
+function toUnit(members: GenderedName[]): Unit {
+  return {
+    members,
+    size: members.length,
+    M: members.filter(m => m.gender === 'M').length,
+    F: members.filter(m => m.gender === 'F').length,
+    totalSkill: members.reduce((n, m) => n + m.skill, 0),
+  };
 }
 
-function parseSingles(text: string): string[] {
-  return (text || '')
-    .split(/\r?\n/)
-    .map(s => s.trim())
-    .filter(Boolean);
-}
+type Bucket = 'pairsMF' | 'pairsMM' | 'pairsFF' | 'pairsOther' | 'freeM' | 'freeF' | 'freeUnknown';
+type Composition = Bucket[];
 
-// First-fit-decreasing packing into teams of 4. Locked groups never split.
-function drawTeams(groups: string[][], singles: string[]): MickeyTeam[] {
-  const blocks = [
-    ...shuffle(groups),
-    ...shuffle(singles).map(s => [s]),
-  ].sort((a, b) => b.length - a.length);
+// 4-player team compositions that yield 2 guys + 2 girls when possible.
+const COMPOSITIONS: Composition[] = [
+  ['pairsMF', 'pairsMF'],              // two mixed pairs hang out together
+  ['pairsMM', 'pairsFF'],              // all-guy pair + all-girl pair
+  ['pairsMF', 'freeM', 'freeF'],       // a pair + one guy + one girl free agent
+  ['pairsMM', 'freeF', 'freeF'],       // all-guy pair + two girl free agents
+  ['pairsFF', 'freeM', 'freeM'],       // all-girl pair + two guy free agents
+  ['freeM', 'freeM', 'freeF', 'freeF'], // four free agents, 2M + 2F
+];
 
-  const slots: string[][] = [];
-  for (const block of blocks) {
-    let placed = false;
-    for (const slot of slots) {
-      if (slot.length + block.length <= 4) {
-        slot.push(...block);
-        placed = true;
-        break;
-      }
+// Composition-based, skill-aware draw. For each team we pick a random valid
+// 4-player template (e.g. "two pairs", "pair + 1M + 1F"); within each template
+// we pick the specific units whose skill ratings keep the team close to the
+// average. Pairs always stay together. When gender stocks are uneven, the
+// remainder falls through to a greedy fill.
+function drawTeams(pairUnits: Unit[], freeUnits: Unit[]): MickeyTeam[] {
+  type Bin = { players: string[]; size: number; M: number; F: number; totalSkill: number };
+  const teams: Bin[] = [];
+
+  const buckets: Record<Bucket, Unit[]> = {
+    pairsMF: shuffle(pairUnits.filter(u => u.M === 1 && u.F === 1)),
+    pairsMM: shuffle(pairUnits.filter(u => u.M === 2 && u.F === 0)),
+    pairsFF: shuffle(pairUnits.filter(u => u.F === 2 && u.M === 0)),
+    pairsOther: shuffle(pairUnits.filter(u => u.M + u.F < 2)),
+    freeM: shuffle(freeUnits.filter(u => u.M === 1)),
+    freeF: shuffle(freeUnits.filter(u => u.F === 1)),
+    freeUnknown: shuffle(freeUnits.filter(u => u.M === 0 && u.F === 0)),
+  };
+
+  const totalSkill =
+    pairUnits.reduce((n, u) => n + u.totalSkill, 0) +
+    freeUnits.reduce((n, u) => n + u.totalSkill, 0);
+  const totalPlayers =
+    pairUnits.reduce((n, u) => n + u.size, 0) + freeUnits.length;
+  const targetPerPlayer = totalPlayers > 0 ? totalSkill / totalPlayers : 3;
+
+  const compositionFits = (comp: Composition): boolean => {
+    const need: Partial<Record<Bucket, number>> = {};
+    for (const b of comp) need[b] = (need[b] ?? 0) + 1;
+    return (Object.entries(need) as [Bucket, number][])
+      .every(([b, n]) => buckets[b].length >= n);
+  };
+
+  // Among candidates in `list`, pick (and remove) one whose skill brings the
+  // team's running total closest to the ideal per-player average. Top-3 random
+  // tiebreak so re-draw keeps some variety.
+  const takeBalanced = (list: Unit[], teamSkillSoFar: number, teamSizeSoFar: number): Unit => {
+    const scored = list.map((u, idx) => {
+      const newSize = teamSizeSoFar + u.size;
+      const ideal = newSize * targetPerPlayer;
+      return { idx, u, dist: Math.abs(teamSkillSoFar + u.totalSkill - ideal) };
+    }).sort((a, b) => a.dist - b.dist);
+    const K = Math.min(3, scored.length);
+    const pick = scored[Math.floor(Math.random() * K)];
+    list.splice(pick.idx, 1);
+    return pick.u;
+  };
+
+  const addUnit = (team: Bin, u: Unit) => {
+    team.players.push(...u.members.map(m => m.name));
+    team.size += u.size;
+    team.M += u.M;
+    team.F += u.F;
+    team.totalSkill += u.totalSkill;
+  };
+
+  // Main loop: build teams from valid compositions until we can't.
+  while (true) {
+    const valid = COMPOSITIONS.filter(compositionFits);
+    if (valid.length === 0) break;
+    const comp = valid[Math.floor(Math.random() * valid.length)];
+    const team: Bin = { players: [], size: 0, M: 0, F: 0, totalSkill: 0 };
+    for (const slot of comp) {
+      const u = takeBalanced(buckets[slot], team.totalSkill, team.size);
+      addUnit(team, u);
     }
-    if (!placed) slots.push([...block]);
+    teams.push(team);
   }
 
-  const n = slots.length;
+  // Fallback: anything left over (uneven gender stocks, unmarked names) gets
+  // packed greedily — pairs first, then free agents — into existing or new
+  // teams, scored by gender + skill distance.
+  const leftoverPairs = shuffle([
+    ...buckets.pairsMF, ...buckets.pairsMM, ...buckets.pairsFF, ...buckets.pairsOther,
+  ]);
+  const leftoverFrees = shuffle([
+    ...buckets.freeM, ...buckets.freeF, ...buckets.freeUnknown,
+  ]);
+
+  const placeLeftover = (u: Unit) => {
+    let best: Bin | null = null;
+    let bestScore = Infinity;
+    for (const t of teams) {
+      if (t.size + u.size > 4) continue;
+      const newSize = t.size + u.size;
+      const newSkill = t.totalSkill + u.totalSkill;
+      const newM = t.M + u.M;
+      const newF = t.F + u.F;
+      const genderDist = Math.abs(newM - 2) + Math.abs(newF - 2);
+      const skillDist = Math.abs(newSkill - newSize * targetPerPlayer);
+      const score = genderDist * 100 + skillDist * 5 + newSize;
+      if (score < bestScore) { bestScore = score; best = t; }
+    }
+    if (!best) {
+      best = { players: [], size: 0, M: 0, F: 0, totalSkill: 0 };
+      teams.push(best);
+    }
+    addUnit(best, u);
+  };
+
+  for (const u of leftoverPairs) placeLeftover(u);
+  for (const u of leftoverFrees) placeLeftover(u);
+
+  const n = teams.length;
   const poolCount = Math.max(1, Math.round(n / 4.5));
   const names = pickFunTeamNames(n);
-  return slots.map((players, i) => ({
+  return teams.map((b, i) => ({
     id: rid(),
     name: names[i],
-    players,
+    players: b.players,
     pool: (i % poolCount) + 1,
   }));
 }
@@ -88,16 +182,36 @@ export function MickeyTeamBuilder({
   const [confirmRedraw, setConfirmRedraw] = useState(false);
   const [confirmGen, setConfirmGen] = useState(false);
 
-  const groups = useMemo(() => parseGroups(pairsText), [pairsText]);
-  const singles = useMemo(() => parseSingles(freeAgentsText), [freeAgentsText]);
-  const totalPlayers = useMemo(
-    () => groups.reduce((n, g) => n + g.length, 0) + singles.length,
-    [groups, singles],
+  const pairUnits = useMemo(
+    () => parseMickeyPairsGendered(pairsText).map(toUnit),
+    [pairsText],
   );
+  const freeUnits = useMemo(
+    () => parseMickeyFreeGendered(freeAgentsText).map(m => toUnit([m])),
+    [freeAgentsText],
+  );
+  const totalPlayers = useMemo(
+    () => pairUnits.reduce((n, u) => n + u.size, 0) + freeUnits.length,
+    [pairUnits, freeUnits],
+  );
+  const totalM = useMemo(
+    () => pairUnits.reduce((n, u) => n + u.M, 0) + freeUnits.reduce((n, u) => n + u.M, 0),
+    [pairUnits, freeUnits],
+  );
+  const totalF = useMemo(
+    () => pairUnits.reduce((n, u) => n + u.F, 0) + freeUnits.reduce((n, u) => n + u.F, 0),
+    [pairUnits, freeUnits],
+  );
+  const unknownCount = totalPlayers - totalM - totalF;
+  const totalSkill = useMemo(
+    () => pairUnits.reduce((n, u) => n + u.totalSkill, 0) + freeUnits.reduce((n, u) => n + u.totalSkill, 0),
+    [pairUnits, freeUnits],
+  );
+  const avgSkill = totalPlayers > 0 ? totalSkill / totalPlayers : 0;
   const remainder = totalPlayers % 4;
 
   const doDraw = () => {
-    setTeams(drawTeams(groups, singles));
+    setTeams(drawTeams(pairUnits, freeUnits));
     setConfirmRedraw(false);
   };
 
@@ -129,19 +243,31 @@ export function MickeyTeamBuilder({
       <div>
         <h2 className="text-[16px] font-semibold text-sky-800">Build Teams of 4</h2>
         <p className="text-[11px] text-slate-500 mt-1">
-          Pairs stay together; free agents fill out each team of 4. After drawing you can rename
-          teams, fix the players, or change a team's pool — then generate the pool matchups.
+          After each name add <span className="font-mono">(M)</span>/<span className="font-mono">(F)</span> and optionally a
+          1–5 skill rating, e.g. <span className="font-mono">Amanda(F4) &amp; Chance(M3)</span> or <span className="font-mono">Jordan(M)</span>.
+          The draw picks a random team composition (two pairs, or a pair + free agents, or four free agents)
+          and balances gender (2M+2F) and skill across teams. Pairs always stay together.
         </p>
       </div>
 
       <div className="flex items-center gap-3 flex-wrap text-[12px]">
         <span className="text-slate-600">
-          {groups.length} pair{groups.length === 1 ? '' : 's'} · {singles.length} free agent
-          {singles.length === 1 ? '' : 's'} · <span className="font-semibold">{totalPlayers} players</span>
+          {pairUnits.length} pair{pairUnits.length === 1 ? '' : 's'} · {freeUnits.length} free agent
+          {freeUnits.length === 1 ? '' : 's'} · <span className="font-semibold">{totalPlayers} players</span>
+          {totalPlayers > 0 && (
+            <span className="ml-1 text-slate-500">
+              ({totalM}M, {totalF}F{unknownCount > 0 ? `, ${unknownCount} unmarked` : ''} · avg skill {avgSkill.toFixed(1)})
+            </span>
+          )}
         </span>
         {totalPlayers > 0 && remainder !== 0 && (
           <span className="px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">
-            Not a multiple of 4 — one team will have {remainder} player{remainder === 1 ? '' : 's'} (use subs or hand-edit)
+            Not a multiple of 4 — one team will be short by {4 - remainder} (use subs or hand-edit)
+          </span>
+        )}
+        {unknownCount > 0 && (
+          <span className="px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">
+            {unknownCount} name{unknownCount === 1 ? '' : 's'} missing (M)/(F) — they'll fill any slot
           </span>
         )}
       </div>
@@ -214,7 +340,7 @@ export function MickeyTeamBuilder({
                         value={t.players.join(', ')}
                         onChange={e =>
                           updateTeam(t.id, {
-                            players: e.target.value.split(',').map(s => s.trim()).filter(Boolean),
+                            players: e.target.value.split(',').map(s => stripGenderMarker(s.trim())).filter(Boolean),
                           })
                         }
                       />
