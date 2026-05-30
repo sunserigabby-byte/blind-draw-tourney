@@ -3,7 +3,7 @@ import React from 'react';
 export function SunnyLogo() {
   return (
     <div className="flex items-center gap-3 select-none">
-      <svg width="36" height="36" viewBox="0 0 64 64" aria-hidden className="drop-shadow-sm">
+      <svg width="40" height="40" viewBox="0 0 64 64" aria-hidden className="drop-shadow-sm shrink-0">
         <defs>
           <radialGradient id="sky" cx="50%" cy="40%" r="60%">
             <stop offset="0%" stopColor="#ffffff" />
@@ -32,8 +32,12 @@ export function SunnyLogo() {
         <circle cx="32" cy="32" r="13.5" fill="none" stroke="#fde68a" strokeOpacity=".6" strokeWidth="1" />
       </svg>
       <div className="leading-tight">
-        <div className="font-extrabold tracking-tight text-sky-50 text-[16px]">Blueprint Athletics</div>
-        <div className="text-[11px] text-sky-100/90">Blind Draw Tourney</div>
+        <div className="font-extrabold tracking-tight text-sky-900 text-[18px]">
+          Blueprint Athletics
+        </div>
+        <div className="text-[11px] text-slate-500 font-medium">
+          Blind Draw Tourney
+        </div>
       </div>
     </div>
   );

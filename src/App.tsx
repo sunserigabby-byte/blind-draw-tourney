@@ -27,6 +27,7 @@ import { MickeyPlayoffBuilder } from './mickey/PlayoffBuilder';
 import { MickeyBracketView } from './mickey/BracketView';
 import { ScoreSettingsPanel } from './components/ScoreSettingsPanel';
 import { Sidebar, SIDEBAR_DIVISIONS, SIDEBAR_SECTIONS, type SidebarSection, type SidebarTabKey } from './components/Sidebar';
+import { ThemeToggle, readStoredTheme, applyTheme, persistTheme, type Theme } from './components/ThemeToggle';
 
 type TabKey = SidebarTabKey;
 type DivisionKey = "UPPER" | "LOWER";
@@ -91,6 +92,13 @@ export default function BlindDrawTourneyApp() {
   const [activeDivision, setActiveDivision] = useState<DivisionKey>("UPPER");
   const [activeSection, setActiveSection] = useState<SectionKey>("HOME");
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [theme, setThemeState] = useState<Theme>(() => readStoredTheme());
+
+  useEffect(() => {
+    applyTheme(theme);
+    persistTheme(theme);
+  }, [theme]);
+  const setTheme = (t: Theme) => setThemeState(t);
 
   const [adminKey, setAdminKey] = useState<string>(() => { try { return sessionStorage.getItem("ADMIN_KEY") || ""; } catch { return ""; } });
   const isAdmin = !!adminKey;
@@ -739,8 +747,11 @@ export default function BlindDrawTourneyApp() {
             <span className="text-xl leading-none">☰</span>
           </button>
           <SunnyLogo />
-          <div className="ml-auto text-[11px] text-slate-500 hidden sm:block">
-            Tournament Control · Live pool play &amp; playoffs
+          <div className="ml-auto flex items-center gap-3">
+            <span className="text-[11px] text-slate-500 hidden sm:block">
+              Tournament Control · Live pool play &amp; playoffs
+            </span>
+            <ThemeToggle theme={theme} setTheme={setTheme} />
           </div>
         </div>
       </header>
