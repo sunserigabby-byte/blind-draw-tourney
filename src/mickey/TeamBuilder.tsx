@@ -38,7 +38,7 @@ const COMPOSITIONS: Composition[] = [
 // we pick the specific units whose skill ratings keep the team close to the
 // average. Pairs always stay together. When gender stocks are uneven, the
 // remainder falls through to a greedy fill.
-function drawTeams(pairUnits: Unit[], freeUnits: Unit[]): MickeyTeam[] {
+function drawTeams(pairUnits: Unit[], freeUnits: Unit[], targetPoolSize: number): MickeyTeam[] {
   type Bin = { players: string[]; size: number; M: number; F: number; totalSkill: number };
   const teams: Bin[] = [];
 
@@ -137,7 +137,7 @@ function drawTeams(pairUnits: Unit[], freeUnits: Unit[]): MickeyTeam[] {
   for (const u of leftoverFrees) placeLeftover(u);
 
   const n = teams.length;
-  const poolCount = Math.max(1, Math.round(n / 4.5));
+  const poolCount = Math.max(1, Math.round(n / Math.max(2, targetPoolSize)));
   const names = pickFunTeamNames(n);
   return teams.map((b, i) => ({
     id: rid(),
@@ -181,6 +181,7 @@ export function MickeyTeamBuilder({
 }) {
   const [confirmRedraw, setConfirmRedraw] = useState(false);
   const [confirmGen, setConfirmGen] = useState(false);
+  const [targetPoolSize, setTargetPoolSize] = useState(5);
 
   const pairUnits = useMemo(
     () => parseMickeyPairsGendered(pairsText).map(toUnit),
@@ -211,7 +212,7 @@ export function MickeyTeamBuilder({
   const remainder = totalPlayers % 4;
 
   const doDraw = () => {
-    setTeams(drawTeams(pairUnits, freeUnits));
+    setTeams(drawTeams(pairUnits, freeUnits, targetPoolSize));
     setConfirmRedraw(false);
   };
 
@@ -280,6 +281,18 @@ export function MickeyTeamBuilder({
         >
           {teams.length ? 'Re-draw Teams' : 'Draw Teams of 4'}
         </button>
+        <label className="flex items-center gap-1.5 text-[12px] text-slate-600">
+          Target pool size:
+          <input
+            type="number"
+            min={2}
+            max={20}
+            value={targetPoolSize}
+            onChange={e => setTargetPoolSize(Math.max(2, parseInt(e.target.value) || 5))}
+            className="w-14 border border-slate-300 rounded px-2 py-1 text-[12px] text-center"
+          />
+          <span className="text-slate-400">teams/pool</span>
+        </label>
         <button
           className="px-3 py-1.5 rounded border text-[13px]"
           onClick={addEmptyTeam}
