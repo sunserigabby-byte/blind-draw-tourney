@@ -18,6 +18,22 @@ export const shuffle = <T,>(arr: T[], seed?: number) => {
 // First token of a full name, e.g. "Alex Smith" -> "Alex"
 export const firstName = (full: string) => (full || '').trim().split(/\s+/)[0] || '';
 
+// Fun default team names for Mickey & Minnie (pool play + playoff re-draw).
+export const FUN_TEAM_NAMES = [
+  'Sand Sharks', 'Beach Bums', 'Net Ninjas', 'Spike Squad', 'Dig Dynasty',
+  'Block Party', 'Sets on the Beach', 'Bump Set Spikers', 'Sandstorm', 'Wave Riders',
+  'Diggity Dogs', 'Aces Wild', 'Pancake Pals', 'Kong Kings', 'Shankapotamus',
+  'Tip Top', 'Setter Uppers', 'Beach Please', 'Salty Spikers', 'Volley Llamas',
+  'The Sandbaggers', 'Hot Shots', "Sun's Out", 'Notorious DIG', 'Free Ballers',
+  'Dinks & Drinks', 'Sandy Cheeks', 'Net Gains', 'Spike Force', 'Bumpin Uglies',
+  'The Pokey Sets', 'Served Cold',
+];
+
+export function pickFunTeamNames(count: number): string[] {
+  const shuffled = shuffle(FUN_TEAM_NAMES);
+  return Array.from({ length: count }, (_, i) => shuffled[i] ?? `Team ${i + 1}`);
+}
+
 // Parse the Pairs textarea into groups of names (split by & , / or +).
 function parseMickeyPairs(text: string): string[][] {
   return (text || '')
@@ -149,4 +165,52 @@ export function nextPow2(n: number) {
   let p = 1;
   while (p < n) p <<= 1;
   return p;
+}
+
+// ── Mickey & Minnie standings + bracket helpers ──────────────────────────────
+
+import type { MickeyMatchRow, MickeyTeam } from './types';
+
+export type MickeyTeamStat = { W: number; L: number; PD: number; sets: number };
+
+// Per-team record across both sets (Mickey + Minnie) of every pool matchup.
+// Wins counted per set; PD is the running point differential.
+export function computeMickeyTeamStats(
+  matches: MickeyMatchRow[],
+  teams: MickeyTeam[],
+): Map<string, MickeyTeamStat> {
+  const stats = new Map<string, MickeyTeamStat>();
+  for (const t of teams) stats.set(t.id, { W: 0, L: 0, PD: 0, sets: 0 });
+
+  const applySet = (scoreText: string | undefined, aId: string, bId: string) => {
+    const s = parseScore(scoreText);
+    if (!s || s[0] === s[1]) return;
+    const [x, y] = s;
+    const diff = Math.abs(x - y);
+    const aWon = x > y;
+    const a = stats.get(aId);
+    const b = stats.get(bId);
+    if (a) { a.sets++; if (aWon) { a.W++; a.PD += diff; } else { a.L++; a.PD -= diff; } }
+    if (b) { b.sets++; if (aWon) { b.L++; b.PD -= diff; } else { b.W++; b.PD += diff; } }
+  };
+
+  for (const m of matches) {
+    applySet(m.mickeyScore, m.teamAId, m.teamBId);
+    applySet(m.minnieScore, m.teamAId, m.teamBId);
+  }
+  return stats;
+}
+
+// Winner of a playoff match by games won (majority of the games actually played).
+// Handles a single game (round 1/2) or best-of-3 match play (semis/final).
+export function mickeyGamesWinner(games?: string[], score?: string): 'team1' | 'team2' | null {
+  const list = games && games.length ? games : score ? [score] : [];
+  let a = 0, b = 0;
+  for (const g of list) {
+    const p = parseScore(g);
+    if (!p || p[0] === p[1]) continue;
+    if (p[0] > p[1]) a++; else b++;
+  }
+  if (a === b) return null;
+  return a > b ? 'team1' : 'team2';
 }

@@ -23,6 +23,8 @@ import { KobLeaderboard } from './kob/Leaderboard';
 import { MickeyTeamBuilder } from './mickey/TeamBuilder';
 import { MickeyMatchesView } from './mickey/MatchesView';
 import { MickeyLeaderboard } from './mickey/Leaderboard';
+import { MickeyPlayoffBuilder } from './mickey/PlayoffBuilder';
+import { MickeyBracketView } from './mickey/BracketView';
 import { ScoreSettingsPanel } from './components/ScoreSettingsPanel';
 
 type TabKey = "DOUBLES" | "QUADS" | "TRIPLES" | "KOB" | "MICKEY";
@@ -34,9 +36,9 @@ function emptyDivisionState<TMatch>(): DivisionState<TMatch> {
 }
 
 // Mickey & Minnie has its own state shape: fixed teams built from pairs + free agents.
-type MickeyDivisionState = { pairsText: string; freeAgentsText: string; teams: MickeyTeam[]; matches: MickeyMatchRow[] };
+type MickeyDivisionState = { pairsText: string; freeAgentsText: string; teams: MickeyTeam[]; matches: MickeyMatchRow[]; brackets: BracketMatch[] };
 function emptyMickeyState(): MickeyDivisionState {
-  return { pairsText: "", freeAgentsText: "", teams: [], matches: [] };
+  return { pairsText: "", freeAgentsText: "", teams: [], matches: [], brackets: [] };
 }
 
 export default function BlindDrawTourneyApp() {
@@ -522,6 +524,22 @@ export default function BlindDrawTourneyApp() {
               pairsText={currentM.pairsText}
               isAdmin={isAdmin}
               scoreSettings={mScoreSettings}
+            />
+            <fieldset disabled={!isAdmin} className={!isAdmin ? "opacity-95" : ""}>
+              <MickeyPlayoffBuilder
+                teams={currentM.teams}
+                matches={currentM.matches}
+                pairsText={currentM.pairsText}
+                freeAgentsText={currentM.freeAgentsText}
+                brackets={currentM.brackets}
+                setBrackets={(v: any) => setCurrentM(p => ({ ...p, brackets: typeof v === 'function' ? v(p.brackets) : v }))}
+                division={activeDivision}
+              />
+            </fieldset>
+            <MickeyBracketView
+              brackets={currentM.brackets}
+              setBrackets={(v: any) => setCurrentM(p => ({ ...p, brackets: typeof v === 'function' ? v(p.brackets) : v }))}
+              isAdmin={isAdmin}
             />
           </>
         )}

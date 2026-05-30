@@ -1,23 +1,8 @@
 import React, { useMemo, useState } from 'react';
 import type { MickeyTeam, MickeyMatchRow } from '../types';
-import { shuffle, mickeyMemberList } from '../utils';
+import { shuffle, mickeyMemberList, FUN_TEAM_NAMES, pickFunTeamNames } from '../utils';
 
 const rid = () => Math.random().toString(36).slice(2, 10);
-
-const FUN_TEAM_NAMES = [
-  'Sand Sharks', 'Beach Bums', 'Net Ninjas', 'Spike Squad', 'Dig Dynasty',
-  'Block Party', 'Sets on the Beach', 'Bump Set Spikers', 'Sandstorm', 'Wave Riders',
-  'Diggity Dogs', 'Aces Wild', 'Pancake Pals', 'Kong Kings', 'Shankapotamus',
-  'Tip Top', 'Setter Uppers', 'Beach Please', 'Salty Spikers', 'Volley Llamas',
-  'The Sandbaggers', 'Hot Shots', "Sun's Out", 'Notorious DIG', 'Free Ballers',
-  'Dinks & Drinks', 'Sandy Cheeks', 'Net Gains', 'Spike Force', 'Bumpin Uglies',
-  'The Pokey Sets', 'Served Cold',
-];
-
-function pickFunNames(count: number): string[] {
-  const shuffled = shuffle(FUN_TEAM_NAMES);
-  return Array.from({ length: count }, (_, i) => shuffled[i] ?? `Team ${i + 1}`);
-}
 
 // Each pairs line becomes a "locked group" that stays together on the same team.
 // Names may be separated by & , / or +  (e.g. "Alex & Sam").
@@ -59,7 +44,7 @@ function drawTeams(groups: string[][], singles: string[]): MickeyTeam[] {
 
   const n = slots.length;
   const poolCount = Math.max(1, Math.round(n / 4.5));
-  const names = pickFunNames(n);
+  const names = pickFunTeamNames(n);
   return slots.map((players, i) => ({
     id: rid(),
     name: names[i],

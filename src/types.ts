@@ -37,6 +37,10 @@ export interface BracketMatch {
   loserNextId?: string;
   loserNextSide?: 'team1' | 'team2';
   redemption?: boolean;
+  // Mickey & Minnie playoffs: per-game scores (match play to 21/21/15) and the
+  // higher seed's chosen format for the match.
+  games?: string[];
+  format?: 'MICKEY' | 'MINNIE';
 }
 
 export type QuadsMatchRow = {

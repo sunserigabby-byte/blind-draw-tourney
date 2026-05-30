@@ -1,6 +1,6 @@
 import React, { useMemo } from 'react';
 import type { MickeyTeam, MickeyMatchRow, ScoreSettings } from '../types';
-import { parseScore, slug, mickeyTeamLabel } from '../utils';
+import { slug, mickeyTeamLabel, computeMickeyTeamStats } from '../utils';
 
 type TeamRow = { id: string; name: string; label: string; pool: number; W: number; L: number; PD: number; sets: number };
 type UnitRow = {
@@ -43,27 +43,12 @@ export function MickeyLeaderboard({
   scoreSettings?: ScoreSettings;
 }) {
   const { poolsWithRows, unitRows } = useMemo(() => {
-    // 1) Team records (per set)
+    // 1) Team records (per set) — shared with the playoff seeding logic
+    const stats = computeMickeyTeamStats(matches, teams);
     const teamStats = new Map<string, TeamRow>();
     for (const t of teams) {
-      teamStats.set(t.id, { id: t.id, name: t.name, label: mickeyTeamLabel(t, pairsText), pool: t.pool, W: 0, L: 0, PD: 0, sets: 0 });
-    }
-
-    const applySet = (scoreText: string | undefined, aId: string, bId: string) => {
-      const s = parseScore(scoreText);
-      if (!s || s[0] === s[1]) return;
-      const [x, y] = s;
-      const diff = Math.abs(x - y);
-      const aWon = x > y;
-      const a = teamStats.get(aId);
-      const b = teamStats.get(bId);
-      if (a) { a.sets++; if (aWon) { a.W++; a.PD += diff; } else { a.L++; a.PD -= diff; } }
-      if (b) { b.sets++; if (aWon) { b.L++; b.PD -= diff; } else { b.W++; b.PD += diff; } }
-    };
-
-    for (const m of matches) {
-      applySet(m.mickeyScore, m.teamAId, m.teamBId);
-      applySet(m.minnieScore, m.teamAId, m.teamBId);
+      const s = stats.get(t.id) ?? { W: 0, L: 0, PD: 0, sets: 0 };
+      teamStats.set(t.id, { id: t.id, name: t.name, label: mickeyTeamLabel(t, pairsText), pool: t.pool, W: s.W, L: s.L, PD: s.PD, sets: s.sets });
     }
 
     // 2) Group teams by pool, ranked
