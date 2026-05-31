@@ -3,12 +3,14 @@ import React from 'react';
 export type SidebarTabKey = 'DOUBLES' | 'QUADS' | 'TRIPLES' | 'KOB' | 'MICKEY';
 export type SidebarSection = 'HOME' | 'TEAMS' | 'POOLS' | 'PLAYOFFS';
 
-export const SIDEBAR_DIVISIONS: { key: SidebarTabKey; label: string }[] = [
-  { key: 'DOUBLES', label: 'Revco Doubles' },
-  { key: 'QUADS', label: 'Revco Quads' },
-  { key: 'TRIPLES', label: 'Revco Triples' },
-  { key: 'KOB', label: 'KOB / QOB' },
-  { key: 'MICKEY', label: 'Mickey & Minnie' },
+export const SIDEBAR_DIVISIONS: { key: SidebarTabKey; label: string; blindDraw: boolean }[] = [
+  { key: 'DOUBLES', label: 'Revco Doubles', blindDraw: true },
+  { key: 'QUADS', label: 'Revco Quads', blindDraw: true },
+  { key: 'TRIPLES', label: 'Revco Triples', blindDraw: true },
+  { key: 'KOB', label: 'KOB / QOB', blindDraw: true },
+  // Mickey & Minnie isn't a pure blind draw — teams are pre-formed from
+  // sign-up pairs + free agents and stay together through the event.
+  { key: 'MICKEY', label: 'Mickey & Minnie', blindDraw: false },
 ];
 
 export const SIDEBAR_SECTIONS: { key: SidebarSection; label: string }[] = [
@@ -68,7 +70,7 @@ export function Sidebar({
                 <div key={d.key}>
                   <button
                     className={
-                      'w-full flex items-center justify-between px-2 py-2 rounded-md text-[13px] font-medium transition-colors ' +
+                      'w-full flex items-center justify-between gap-2 px-2 py-2 rounded-md text-[13px] font-medium transition-colors ' +
                       (isActive ? 'bg-sky-50 text-sky-900' : 'hover:bg-slate-50 text-slate-700')
                     }
                     onClick={() => {
@@ -79,8 +81,15 @@ export function Sidebar({
                       if (wasActive) onClose();
                     }}
                   >
-                    <span>{d.label}</span>
-                    <span className={'text-[10px] ' + (isActive ? 'text-sky-700' : 'text-slate-400')}>
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      <span className="truncate">{d.label}</span>
+                      {d.blindDraw && (
+                        <span className="text-[8.5px] uppercase tracking-wide px-1 py-0.5 rounded bg-amber-100 text-amber-700 font-semibold shrink-0">
+                          Blind Draw
+                        </span>
+                      )}
+                    </div>
+                    <span className={'text-[10px] shrink-0 ' + (isActive ? 'text-sky-700' : 'text-slate-400')}>
                       {isActive ? '▾' : '▸'}
                     </span>
                   </button>

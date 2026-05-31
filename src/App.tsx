@@ -44,6 +44,60 @@ function emptyMickeyState(): MickeyDivisionState {
   return { pairsText: "", freeAgentsText: "", teams: [], matches: [], brackets: [] };
 }
 
+// Short description for each format, shown at the top of its Home page.
+const FORMAT_DESCRIPTIONS: Record<SidebarTabKey, { tagline: string; details: React.ReactNode }> = {
+  DOUBLES: {
+    tagline: '2-person blind-draw teams (typically 1 guy + 1 girl) · rally scoring to 21, win by 2.',
+    details: (
+      <>
+        Players sign up individually and the app randomly pairs everyone into 2-person teams each round,
+        mixing across guys and girls. Rosters refresh every round so you meet new partners and opponents.
+        Pool play feeds into a seeded playoff bracket.
+      </>
+    ),
+  },
+  QUADS: {
+    tagline: '4-person blind-draw teams (typically 2 guys + 2 girls) · rally scoring to 21, cap at 25.',
+    details: (
+      <>
+        Same idea as Doubles but with 4-person teams. The app draws balanced 4-person rosters every round
+        and standings roll up across all rounds. Playoffs seed from combined pool-play wins and point
+        differential.
+      </>
+    ),
+  },
+  TRIPLES: {
+    tagline: '3-person blind-draw teams · rally scoring to 21, win by 2.',
+    details: (
+      <>
+        3v3 format with players randomly drawn into trios each round. Mixed-gender team composition;
+        teams shuffle every round. Standings carry across all rounds into the playoff bracket.
+      </>
+    ),
+  },
+  KOB: {
+    tagline: 'King & Queen of the Beach — individual blind draw with rotating partners.',
+    details: (
+      <>
+        Every player partners with every other player exactly once. Pools of 4 to 8; a pool of 8 runs on
+        two simultaneous courts with zero sit-out time. Top finishers advance to Gold Finals, runners-up
+        to optional Silver Finals. Men (KOB) and Women (QOB) play separate pools with their own standings.
+      </>
+    ),
+  },
+  MICKEY: {
+    tagline: 'Fixed teams of 4 built from sign-up pairs + free agents — two sets per matchup.',
+    details: (
+      <>
+        Teams stay together through pool play <em>and</em> playoffs. Each pool matchup is two sets:{' '}
+        <strong>Mickey</strong> (coed quads) and <strong>Minnie</strong> (revco quads), both to 21. Wins
+        count per set with point differential as the tiebreaker. Playoffs add a seeded bracket plus a
+        Redemption Rally consolation bracket for round 1 / round 2 losers.
+      </>
+    ),
+  },
+};
+
 // Tiny tile used on each format's HOME page to jump to a sub-section.
 function JumpCard({
   title, subtitle, badge, onClick,
@@ -267,7 +321,9 @@ export default function BlindDrawTourneyApp() {
   const currentM = activeDivision === "UPPER" ? mUpper : mLower;
   const setCurrentM = activeDivision === "UPPER" ? setMUpper : setMLower;
 
-  const divisionLabel = SIDEBAR_DIVISIONS.find(d => d.key === activeTab)?.label ?? activeTab;
+  const currentDivisionMeta = SIDEBAR_DIVISIONS.find(d => d.key === activeTab);
+  const divisionLabel = currentDivisionMeta?.label ?? activeTab;
+  const isBlindDraw = !!currentDivisionMeta?.blindDraw;
 
   // ── Reusable bits ───────────────────────────────────────────────────────
   const AdminBanner = (
@@ -409,27 +465,45 @@ export default function BlindDrawTourneyApp() {
       playoffsSubtitle = 'Bracket and Redemption Rally';
     }
 
+    const desc = FORMAT_DESCRIPTIONS[activeTab];
+
     return (
-      <div className="grid md:grid-cols-3 gap-3">
-        <JumpCard
-          title="Teams"
-          subtitle={teamsSubtitle}
-          badge={teamsBadge}
-          onClick={() => setActiveSection('TEAMS')}
-        />
-        <JumpCard
-          title="Pools"
-          subtitle={poolsSubtitle}
-          badge={poolsBadge}
-          onClick={() => setActiveSection('POOLS')}
-        />
-        <JumpCard
-          title="Playoffs"
-          subtitle={playoffsSubtitle}
-          badge={playoffsBadge}
-          onClick={() => setActiveSection('PLAYOFFS')}
-        />
-      </div>
+      <>
+        <div className="bg-white rounded-xl shadow-sm ring-1 ring-slate-200 p-4">
+          <div className="flex items-center gap-2 mb-2">
+            <span className="text-[10px] uppercase tracking-wide text-slate-500 font-semibold">
+              How {divisionLabel} works
+            </span>
+            {isBlindDraw && (
+              <span className="text-[9.5px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 font-semibold">
+                Blind Draw
+              </span>
+            )}
+          </div>
+          <p className="text-[14px] text-slate-800 font-medium leading-relaxed">{desc.tagline}</p>
+          <p className="text-[12.5px] text-slate-600 leading-relaxed mt-2">{desc.details}</p>
+        </div>
+        <div className="grid md:grid-cols-3 gap-3">
+          <JumpCard
+            title="Teams"
+            subtitle={teamsSubtitle}
+            badge={teamsBadge}
+            onClick={() => setActiveSection('TEAMS')}
+          />
+          <JumpCard
+            title="Pools"
+            subtitle={poolsSubtitle}
+            badge={poolsBadge}
+            onClick={() => setActiveSection('POOLS')}
+          />
+          <JumpCard
+            title="Playoffs"
+            subtitle={playoffsSubtitle}
+            badge={playoffsBadge}
+            onClick={() => setActiveSection('PLAYOFFS')}
+          />
+        </div>
+      </>
     );
   }
 
@@ -774,7 +848,14 @@ export default function BlindDrawTourneyApp() {
             <div className="bg-white rounded-xl shadow-sm ring-1 ring-slate-200 px-4 pt-4 pb-0">
               <div className="flex items-baseline justify-between gap-3 flex-wrap">
                 <div>
-                  <h1 className="text-[20px] font-bold text-sky-900">{divisionLabel}</h1>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <h1 className="text-[20px] font-bold text-sky-900">{divisionLabel}</h1>
+                    {isBlindDraw && (
+                      <span className="text-[9.5px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 font-semibold">
+                        Blind Draw
+                      </span>
+                    )}
+                  </div>
                   <div className="text-[11px] text-slate-500 mt-0.5">
                     {activeDivision} Division · pool play and playoffs
                   </div>
