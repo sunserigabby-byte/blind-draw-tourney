@@ -3,6 +3,7 @@ import type { BracketMatch, Team, PlayDiv } from '../types';
 import {
   slug, uniq, parseScore, mickeyGamesWinner, mickeyTeamLabel,
   parseMickeyPairsGendered, parseMickeyFreeGendered,
+  shuffle, pickFunTeamNames,
 } from '../utils';
 import { drawTeams, toUnit, type Unit } from '../mickey/TeamBuilder';
 import { buildBracket } from '../components/BracketView';
@@ -110,6 +111,41 @@ function formPlayoffTeams(units: UnitWithRecord[]): PreparedTeam[] {
   return teamRecords.map(({ t }) => ({ id: t.id, name: t.name, players: t.players }));
 }
 
+// Crossover pairing: rank all 12 units by aggregate pool-play record,
+// then pair seeds 1-3 with a random unit from seeds 7-9, and pair
+// seeds 4-6 with a random unit from seeds 10-12. Produces 6 teams of
+// mixed size (2-4 players) depending on whether each combined unit is
+// a pair or a free agent. Pairs always stay together.
+// Returns [] if there are not exactly 12 units.
+function formCrossoverTeams(units: UnitWithRecord[]): PreparedTeam[] {
+  if (units.length !== 12) return [];
+  const ranked = [...units].sort(
+    (a, b) => b.W - a.W || b.PD - a.PD || a.name.localeCompare(b.name),
+  );
+  const top = ranked.slice(0, 3);         // seeds 1-3
+  const upperMid = ranked.slice(3, 6);    // seeds 4-6
+  const lowerMid = shuffle(ranked.slice(6, 9));   // seeds 7-9 (randomized)
+  const bottom = shuffle(ranked.slice(9, 12));    // seeds 10-12 (randomized)
+  const names = pickFunTeamNames(6);
+
+  const teams: PreparedTeam[] = [];
+  for (let i = 0; i < 3; i++) {
+    teams.push({
+      id: `xover-top-${i + 1}`,
+      name: names[i],
+      players: [...top[i].members, ...lowerMid[i].members],
+    });
+  }
+  for (let i = 0; i < 3; i++) {
+    teams.push({
+      id: `xover-mid-${i + 1}`,
+      name: names[i + 3],
+      players: [...upperMid[i].members, ...bottom[i].members],
+    });
+  }
+  return teams;
+}
+
 function firstNamesOnly(label: string): string {
   const m = label.match(/^(.*)\s\(([^)]*)\)$/);
   return m ? m[2] : label;
@@ -172,6 +208,19 @@ export function MickeyBDPlayoffBuilder({
   const prepareTeams = () => {
     setEditTeams(computeSeeded().map((t, i) => ({
       id: `edit-${i}`,
+      name: t.name,
+      players: [...t.players, '', '', '', ''].slice(0, 4),
+    })));
+  };
+
+  const prepareCrossoverTeams = () => {
+    const xover = formCrossoverTeams(units);
+    if (xover.length === 0) {
+      alert(`Crossover pairing needs exactly 12 units (pairs + free agents). You currently have ${units.length}.`);
+      return;
+    }
+    setEditTeams(xover.map(t => ({
+      id: t.id,
       name: t.name,
       players: [...t.players, '', '', '', ''].slice(0, 4),
     })));
@@ -291,7 +340,24 @@ export function MickeyBDPlayoffBuilder({
           >
             Prepare Teams to Edit…
           </button>
+          {division === 'UPPER' && (
+            <button
+              className="px-3 py-1.5 rounded-lg border border-indigo-400 text-indigo-700 hover:bg-indigo-50 text-[13px] disabled:opacity-40"
+              disabled={units.length !== 12}
+              onClick={prepareCrossoverTeams}
+              title={units.length === 12
+                ? 'Pairs seeds 1-3 with random units from seeds 7-9, and seeds 4-6 with random units from seeds 10-12'
+                : `Needs exactly 12 units. You currently have ${units.length}.`}
+            >
+              Crossover Pairing (1-3 ↔ 7-9, 4-6 ↔ 10-12)
+            </button>
+          )}
         </div>
+        {division === 'UPPER' && (
+          <p className="text-[11px] text-slate-500">
+            <span className="font-semibold text-indigo-700">Crossover Pairing</span> ranks all 12 units (pairs + free agents) by their pool-play record, then pairs top seeds 1-3 with a random unit from seeds 7-9, and seeds 4-6 with a random unit from seeds 10-12 — six teams of mixed size (2-4 players). Pairs always stay together. Loads into the editor below so you can review before building.
+          </p>
+        )}
 
         {confirmBuild && (
           <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 flex items-center justify-between gap-3 text-[12px]">
