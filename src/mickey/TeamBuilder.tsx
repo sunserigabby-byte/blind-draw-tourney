@@ -2,9 +2,19 @@ import React, { useMemo, useState } from 'react';
 import type { MickeyTeam, MickeyMatchRow } from '../types';
 import {
   shuffle, mickeyMemberList, FUN_TEAM_NAMES, pickFunTeamNames,
-  parseMickeyPairsGendered, parseMickeyFreeGendered, stripGenderMarker,
+  parseMickeyPairsGendered, parseMickeyFreeGendered, uniq,
   type GenderedName,
 } from '../utils';
+
+// All player names found in the Pairs and Free Agents boxes, with markers
+// stripped. Used to populate the team-edit dropdowns.
+function rosterNames(pairsText: string, freeAgentsText: string, teams: MickeyTeam[]): string[] {
+  return uniq([
+    ...teams.flatMap(t => t.players),
+    ...parseMickeyPairsGendered(pairsText).flat().map(m => m.name),
+    ...parseMickeyFreeGendered(freeAgentsText).map(m => m.name),
+  ]).filter(Boolean);
+}
 
 const rid = () => Math.random().toString(36).slice(2, 10);
 
@@ -322,64 +332,70 @@ export function MickeyTeamBuilder({
       )}
 
       {sorted.length > 0 && (
-        <div className="space-y-2">
-          <div className="overflow-x-auto">
-            <table className="min-w-full text-[13px]">
-              <thead>
-                <tr className="text-left text-slate-600">
-                  <th className="py-1 px-2">Pool</th>
-                  <th className="py-1 px-2">Team Name</th>
-                  <th className="py-1 px-2">Players (comma-separated)</th>
-                  <th className="py-1 px-2"></th>
-                </tr>
-              </thead>
-              <tbody>
-                {sorted.map(t => (
-                  <tr key={t.id} className="border-t align-top">
-                    <td className="py-1 px-2">
-                      <input
-                        type="number"
-                        min={1}
-                        className="w-14 border border-slate-300 rounded px-2 py-1 text-[12px] text-center"
-                        value={t.pool}
-                        onChange={e => updateTeam(t.id, { pool: Math.max(1, parseInt(e.target.value) || 1) })}
-                      />
-                    </td>
-                    <td className="py-1 px-2">
-                      <input
-                        className="w-40 border border-slate-300 rounded px-2 py-1 text-[12px]"
-                        value={t.name}
-                        onChange={e => updateTeam(t.id, { name: e.target.value })}
-                      />
-                      <div className="text-[10px] text-slate-400 mt-0.5">
-                        {t.players.length
-                          ? `(${mickeyMemberList(t.players, pairsText)})`
-                          : '(no players)'}
-                      </div>
-                    </td>
-                    <td className="py-1 px-2">
-                      <input
-                        className="w-full min-w-[16rem] border border-slate-300 rounded px-2 py-1 text-[12px]"
-                        value={t.players.join(', ')}
-                        onChange={e =>
-                          updateTeam(t.id, {
-                            players: e.target.value.split(',').map(s => stripGenderMarker(s.trim())).filter(Boolean),
-                          })
-                        }
-                      />
-                    </td>
-                    <td className="py-1 px-2">
-                      <button
-                        className="text-[11px] px-2 py-1 rounded bg-red-600 text-white hover:bg-red-700"
-                        onClick={() => deleteTeam(t.id)}
+        <div className="space-y-2 border-t pt-3">
+          <div className="flex items-baseline justify-between gap-2 flex-wrap">
+            <h3 className="text-[14px] font-semibold text-sky-800">Edit Teams</h3>
+            <p className="text-[11px] text-slate-500">
+              Rename teams, drop down any slot to swap a player from another team, change the pool number, or remove a team. Changes save immediately.
+            </p>
+          </div>
+          <div className="grid md:grid-cols-2 gap-2">
+            {sorted.map(t => {
+              const roster = rosterNames(pairsText, freeAgentsText, teams);
+              const slotCount = Math.max(4, t.players.length);
+              const slots = [...t.players, '', '', '', ''].slice(0, slotCount);
+              return (
+                <div key={t.id} className="border border-slate-200 rounded-lg p-2 bg-slate-50/40 space-y-2">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <label className="text-[10px] uppercase tracking-wide text-slate-500 font-semibold">Pool</label>
+                    <input
+                      type="number"
+                      min={1}
+                      className="w-12 border border-slate-300 rounded px-1 py-1 text-[12px] text-center"
+                      value={t.pool}
+                      onChange={e => updateTeam(t.id, { pool: Math.max(1, parseInt(e.target.value) || 1) })}
+                    />
+                    <input
+                      className="flex-1 min-w-[8rem] border border-slate-300 rounded px-2 py-1 text-[12px] font-medium"
+                      value={t.name}
+                      onChange={e => updateTeam(t.id, { name: e.target.value })}
+                    />
+                    <button
+                      className="text-[11px] px-2 py-1 rounded text-red-600 hover:bg-red-50"
+                      onClick={() => deleteTeam(t.id)}
+                      title="Remove team"
+                    >
+                      Remove
+                    </button>
+                  </div>
+                  <div className="grid grid-cols-2 gap-1.5">
+                    {slots.map((player, slotIdx) => (
+                      <select
+                        key={slotIdx}
+                        className="border border-slate-300 rounded px-1.5 py-1 text-[12px] bg-white"
+                        value={player}
+                        onChange={e => {
+                          const newPlayers = slots
+                            .map((p, idx) => (idx === slotIdx ? e.target.value : p))
+                            .filter(Boolean);
+                          updateTeam(t.id, { players: newPlayers });
+                        }}
                       >
-                        Remove
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+                        <option value="">— player {slotIdx + 1} —</option>
+                        {roster.map(name => (
+                          <option key={name} value={name}>{name}</option>
+                        ))}
+                      </select>
+                    ))}
+                  </div>
+                  <div className="text-[10px] text-slate-400">
+                    {t.players.length
+                      ? `Reads as: ${mickeyMemberList(t.players, pairsText)}`
+                      : 'No players assigned.'}
+                  </div>
+                </div>
+              );
+            })}
           </div>
 
           <div className="pt-2 border-t space-y-2">
