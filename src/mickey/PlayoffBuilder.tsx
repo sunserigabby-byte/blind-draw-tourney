@@ -327,164 +327,228 @@ export function MickeyPlayoffBuilder({
   const hasMain = brackets.some(b => b.division === division);
   const hasRR = brackets.some(b => b.division === 'RR');
 
+  // Count round 1 / round 2 losers eligible for the Redemption Rally.
+  const r12FinishedLosers = brackets.filter(b => {
+    if (b.division !== division) return false;
+    if (b.round !== 1 && b.round !== 2) return false;
+    if (!b.team1 || !b.team2) return false;
+    const w = mickeyGamesWinner(b.games, b.score);
+    return !!w;
+  }).length;
+  const r12TotalGames = brackets.filter(b => {
+    return b.division === division && (b.round === 1 || b.round === 2) && b.team1 && b.team2;
+  }).length;
+
   return (
-    <section className="bg-white/95 backdrop-blur rounded-xl shadow ring-1 ring-slate-200 p-4 space-y-3">
-      <div>
-        <h2 className="text-[16px] font-semibold text-sky-800">Playoffs ({division})</h2>
-        <p className="text-[11px] text-slate-500 mt-1">
-          Rounds 1 &amp; 2 are a single game to 25; semifinal &amp; final are match play (21/21/15, best of the
-          games you play). Higher seed picks Mickey or Minnie on each game card.
-        </p>
-      </div>
-
-      {/* Team source toggle */}
-      <div className="flex items-center gap-4 flex-wrap text-[12px]">
-        <span className="font-medium text-slate-700">Playoff teams:</span>
-        <label className="flex items-center gap-1.5">
-          <input type="radio" checked={teamSource === 'KEEP'} onChange={() => setTeamSource('KEEP')} />
-          Keep pool teams (seed by record)
-        </label>
-        <label className="flex items-center gap-1.5">
-          <input type="radio" checked={teamSource === 'REDRAW'} onChange={() => setTeamSource('REDRAW')} />
-          Re-draw balanced teams
-        </label>
-      </div>
-      {teamSource === 'REDRAW' && (
-        <p className="text-[11px] text-slate-500">
-          Re-draw forms fresh teams of 4 (pairs kept together), spreading strong and weak pairs/free agents
-          evenly using their pool-play records. Click "Prepare Teams to Edit" to review or re-shuffle before locking.
-        </p>
-      )}
-
-      {/* Actions */}
-      <div className="flex items-center gap-2 flex-wrap">
-        <button
-          className="px-3 py-1.5 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 text-[13px] disabled:opacity-40"
-          disabled={teams.length < 2}
-          onClick={() => (hasMain ? setConfirmBuild(true) : quickBuild())}
-        >
-          {hasMain ? 'Rebuild Bracket' : 'Build Bracket'}
-        </button>
-        <button
-          className="px-3 py-1.5 rounded-lg border border-slate-300 text-slate-700 hover:bg-slate-50 text-[13px] disabled:opacity-40"
-          disabled={teams.length < 2}
-          onClick={prepareTeams}
-        >
-          Prepare Teams to Edit…
-        </button>
-        <button
-          className="px-3 py-1.5 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 text-[13px] disabled:opacity-40"
-          disabled={!hasMain}
-          onClick={buildRedemptionRally}
-        >
-          {hasRR ? 'Rebuild Redemption Rally' : 'Build Redemption Rally'}
-        </button>
-      </div>
-
-      {confirmBuild && (
-        <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 flex items-center justify-between gap-3 text-[12px]">
-          <span className="text-amber-800">Rebuild the bracket? This clears the current {division} bracket and any scores in it.</span>
-          <div className="flex items-center gap-2">
-            <button className="px-2 py-1 rounded bg-amber-600 text-white text-[11px]" onClick={quickBuild}>Rebuild</button>
-            <button className="px-2 py-1 rounded border text-[11px]" onClick={() => setConfirmBuild(false)}>Cancel</button>
-          </div>
-        </div>
-      )}
-
-      {teams.length < 2 && (
-        <p className="text-[11px] text-slate-400">Build teams in the section above before seeding playoffs.</p>
-      )}
-
-      {/* Edit panel */}
-      {editTeams.length > 0 && (
-        <div className="border-t pt-4 space-y-3">
-          <div className="flex items-center justify-between gap-2 flex-wrap">
-            <div className="text-[13px] font-semibold text-slate-800">
-              Adjust Teams &amp; Seeds ({editTeams.length} team{editTeams.length === 1 ? '' : 's'})
-            </div>
-            <div className="flex items-center gap-2 flex-wrap">
-              {teamSource === 'REDRAW' && (
-                <button className="px-2.5 py-1.5 rounded-lg border text-slate-600 hover:bg-slate-50 text-[12px]" onClick={prepareTeams}>
-                  Re-shuffle
-                </button>
-              )}
-              <button className="px-3 py-1.5 rounded-lg bg-sky-600 text-white hover:bg-sky-700 text-[12px]" onClick={buildFromEdit}>
-                Build Bracket from These Teams
-              </button>
-              <button className="px-2.5 py-1.5 rounded-lg border text-slate-600 hover:bg-slate-50 text-[12px]" onClick={addTeam}>
-                + Add Team
-              </button>
-              <button className="px-2.5 py-1.5 rounded-lg border text-slate-600 hover:bg-slate-50 text-[12px]" onClick={() => setEditTeams([])}>
-                Cancel
-              </button>
-            </div>
-          </div>
-
-          {dupNames.length > 0 && (
-            <div className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded px-3 py-1.5">
-              A player is on more than one team: {dupNames.join(', ')}
-            </div>
-          )}
-
-          <div className="grid md:grid-cols-2 gap-3">
-            {editTeams.map((team, tIdx) => (
-              <div key={team.id} className="border border-slate-200 rounded-xl p-3 bg-slate-50/60">
-                <div className="flex items-center gap-2 mb-2">
-                  <span className="inline-flex items-center justify-center min-w-[26px] h-6 px-1 text-[11px] font-semibold rounded-full bg-sky-100 text-sky-800">
-                    #{tIdx + 1}
-                  </span>
-                  <input
-                    className="flex-1 border border-slate-300 rounded px-2 py-1 text-[12px]"
-                    value={team.name}
-                    onChange={e => setName(tIdx, e.target.value)}
-                  />
-                  <button className="px-1.5 py-1 text-[12px] rounded border disabled:opacity-30" disabled={tIdx === 0} onClick={() => move(tIdx, -1)} title="Move up (higher seed)">▲</button>
-                  <button className="px-1.5 py-1 text-[12px] rounded border disabled:opacity-30" disabled={tIdx === editTeams.length - 1} onClick={() => move(tIdx, 1)} title="Move down (lower seed)">▼</button>
-                  <button className="px-1.5 py-1 text-[12px] rounded text-red-500 hover:text-red-700" onClick={() => removeTeam(tIdx)} title="Remove team">✕</button>
-                </div>
-                <div className="grid grid-cols-2 gap-2">
-                  {team.players.map((member, mIdx) => (
-                    <select
-                      key={mIdx}
-                      className={'border rounded px-1.5 py-1 text-[12px] bg-white ' + (member && dupNames.includes(member) ? 'border-amber-400 bg-amber-50' : 'border-slate-300')}
-                      value={member}
-                      onChange={e => setMember(tIdx, mIdx, e.target.value)}
-                    >
-                      <option value="">— player {mIdx + 1} —</option>
-                      {allPlayerNames.map(name => (
-                        <option key={name} value={name}>{name}</option>
-                      ))}
-                    </select>
-                  ))}
-                </div>
-              </div>
-            ))}
-          </div>
-
-          {/* Round-1 matchup preview */}
-          {preview.length > 0 && (
-            <div>
-              <div className="text-[12px] font-semibold text-slate-700 mb-1">Round 1 preview (who plays whom)</div>
-              <ul className="text-[12px] text-slate-600 space-y-0.5">
-                {preview.map(m => {
-                  const a = m.team1 ? `#${m.team1.seed} ${firstNamesOnly(m.team1.name)}` : '—';
-                  const b = m.team2 ? `#${m.team2.seed} ${firstNamesOnly(m.team2.name)}` : null;
-                  return (
-                    <li key={m.id}>
-                      {b ? <>{a} <span className="text-slate-400">vs</span> {b}</> : <>{a} <span className="text-emerald-600">— BYE</span></>}
-                    </li>
-                  );
-                })}
-              </ul>
-            </div>
-          )}
-
-          <p className="text-[11px] text-slate-400">
-            Drag seeds with ▲▼ to change who plays whom, or swap players between teams with the dropdowns.
-            "Build Bracket from These Teams" locks it in.
+    <section className="space-y-4">
+      {/* ───────── Header + team source ───────── */}
+      <section className="bg-white/95 backdrop-blur rounded-xl shadow ring-1 ring-slate-200 p-4 space-y-3">
+        <div>
+          <h2 className="text-[16px] font-semibold text-sky-800">Playoffs ({division})</h2>
+          <p className="text-[11px] text-slate-500 mt-1">
+            Rounds 1 &amp; 2 are a single game to 25; semifinal &amp; final are match play (21/21/15, best of the
+            games you play). Higher seed picks Mickey or Minnie on each game card.
           </p>
         </div>
-      )}
+
+        {/* Team source toggle */}
+        <div className="flex items-center gap-4 flex-wrap text-[12px]">
+          <span className="font-medium text-slate-700">Playoff teams:</span>
+          <label className="flex items-center gap-1.5">
+            <input type="radio" checked={teamSource === 'KEEP'} onChange={() => setTeamSource('KEEP')} />
+            Keep pool teams (seed by record)
+          </label>
+          <label className="flex items-center gap-1.5">
+            <input type="radio" checked={teamSource === 'REDRAW'} onChange={() => setTeamSource('REDRAW')} />
+            Re-draw balanced teams
+          </label>
+        </div>
+        {teamSource === 'REDRAW' && (
+          <p className="text-[11px] text-slate-500">
+            Re-draw forms fresh teams of 4 (pairs kept together), spreading strong and weak pairs/free agents
+            evenly using their pool-play records. Click "Prepare Teams to Edit" to review or re-shuffle before locking.
+          </p>
+        )}
+      </section>
+
+      {/* ───────── Main bracket ───────── */}
+      <section className="bg-white/95 backdrop-blur rounded-xl shadow ring-1 ring-slate-200 p-4 space-y-3">
+        <div>
+          <h3 className="text-[15px] font-semibold text-sky-800">Main Bracket</h3>
+          <p className="text-[11px] text-slate-500 mt-1">
+            Seeded single-elimination bracket. Build it directly or prepare an editable team list first.
+          </p>
+        </div>
+
+        <div className="flex items-center gap-2 flex-wrap">
+          <button
+            className="px-3 py-1.5 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 text-[13px] disabled:opacity-40"
+            disabled={teams.length < 2}
+            onClick={() => (hasMain ? setConfirmBuild(true) : quickBuild())}
+          >
+            {hasMain ? 'Rebuild Bracket' : 'Build Bracket'}
+          </button>
+          <button
+            className="px-3 py-1.5 rounded-lg border border-slate-300 text-slate-700 hover:bg-slate-50 text-[13px] disabled:opacity-40"
+            disabled={teams.length < 2}
+            onClick={prepareTeams}
+          >
+            Prepare Teams to Edit…
+          </button>
+        </div>
+
+        {confirmBuild && (
+          <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 flex items-center justify-between gap-3 text-[12px]">
+            <span className="text-amber-800">Rebuild the bracket? This clears the current {division} bracket and any scores in it.</span>
+            <div className="flex items-center gap-2">
+              <button className="px-2 py-1 rounded bg-amber-600 text-white text-[11px]" onClick={quickBuild}>Rebuild</button>
+              <button className="px-2 py-1 rounded border text-[11px]" onClick={() => setConfirmBuild(false)}>Cancel</button>
+            </div>
+          </div>
+        )}
+
+        {teams.length < 2 && (
+          <p className="text-[11px] text-slate-400">Build teams in the section above before seeding playoffs.</p>
+        )}
+
+        {/* Edit panel sits inside Main Bracket since it's the seeded-team workflow */}
+        {editTeams.length > 0 && (
+          <div className="border-t pt-4 space-y-3">
+            <div className="flex items-center justify-between gap-2 flex-wrap">
+              <div className="text-[13px] font-semibold text-slate-800">
+                Adjust Teams &amp; Seeds ({editTeams.length} team{editTeams.length === 1 ? '' : 's'})
+              </div>
+              <div className="flex items-center gap-2 flex-wrap">
+                {teamSource === 'REDRAW' && (
+                  <button className="px-2.5 py-1.5 rounded-lg border text-slate-600 hover:bg-slate-50 text-[12px]" onClick={prepareTeams}>
+                    Re-shuffle
+                  </button>
+                )}
+                <button className="px-3 py-1.5 rounded-lg bg-sky-600 text-white hover:bg-sky-700 text-[12px]" onClick={buildFromEdit}>
+                  Build Bracket from These Teams
+                </button>
+                <button className="px-2.5 py-1.5 rounded-lg border text-slate-600 hover:bg-slate-50 text-[12px]" onClick={addTeam}>
+                  + Add Team
+                </button>
+                <button className="px-2.5 py-1.5 rounded-lg border text-slate-600 hover:bg-slate-50 text-[12px]" onClick={() => setEditTeams([])}>
+                  Cancel
+                </button>
+              </div>
+            </div>
+
+            {dupNames.length > 0 && (
+              <div className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded px-3 py-1.5">
+                A player is on more than one team: {dupNames.join(', ')}
+              </div>
+            )}
+
+            <div className="grid md:grid-cols-2 gap-3">
+              {editTeams.map((team, tIdx) => (
+                <div key={team.id} className="border border-slate-200 rounded-xl p-3 bg-slate-50/60">
+                  <div className="flex items-center gap-2 mb-2">
+                    <span className="inline-flex items-center justify-center min-w-[26px] h-6 px-1 text-[11px] font-semibold rounded-full bg-sky-100 text-sky-800">
+                      #{tIdx + 1}
+                    </span>
+                    <input
+                      className="flex-1 border border-slate-300 rounded px-2 py-1 text-[12px]"
+                      value={team.name}
+                      onChange={e => setName(tIdx, e.target.value)}
+                    />
+                    <button className="px-1.5 py-1 text-[12px] rounded border disabled:opacity-30" disabled={tIdx === 0} onClick={() => move(tIdx, -1)} title="Move up (higher seed)">▲</button>
+                    <button className="px-1.5 py-1 text-[12px] rounded border disabled:opacity-30" disabled={tIdx === editTeams.length - 1} onClick={() => move(tIdx, 1)} title="Move down (lower seed)">▼</button>
+                    <button className="px-1.5 py-1 text-[12px] rounded text-red-500 hover:text-red-700" onClick={() => removeTeam(tIdx)} title="Remove team">✕</button>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    {team.players.map((member, mIdx) => (
+                      <select
+                        key={mIdx}
+                        className={'border rounded px-1.5 py-1 text-[12px] bg-white ' + (member && dupNames.includes(member) ? 'border-amber-400 bg-amber-50' : 'border-slate-300')}
+                        value={member}
+                        onChange={e => setMember(tIdx, mIdx, e.target.value)}
+                      >
+                        <option value="">— player {mIdx + 1} —</option>
+                        {allPlayerNames.map(name => (
+                          <option key={name} value={name}>{name}</option>
+                        ))}
+                      </select>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* Round-1 matchup preview */}
+            {preview.length > 0 && (
+              <div>
+                <div className="text-[12px] font-semibold text-slate-700 mb-1">Round 1 preview (who plays whom)</div>
+                <ul className="text-[12px] text-slate-600 space-y-0.5">
+                  {preview.map(m => {
+                    const a = m.team1 ? `#${m.team1.seed} ${firstNamesOnly(m.team1.name)}` : '—';
+                    const b = m.team2 ? `#${m.team2.seed} ${firstNamesOnly(m.team2.name)}` : null;
+                    return (
+                      <li key={m.id}>
+                        {b ? <>{a} <span className="text-slate-400">vs</span> {b}</> : <>{a} <span className="text-emerald-600">— BYE</span></>}
+                      </li>
+                    );
+                  })}
+                </ul>
+              </div>
+            )}
+
+            <p className="text-[11px] text-slate-400">
+              Drag seeds with ▲▼ to change who plays whom, or swap players between teams with the dropdowns.
+              "Build Bracket from These Teams" locks it in.
+            </p>
+          </div>
+        )}
+      </section>
+
+      {/* ───────── Redemption Rally ───────── */}
+      <section className="bg-white/95 backdrop-blur rounded-xl shadow ring-1 ring-indigo-200 p-4 space-y-3">
+        <div className="flex items-center gap-2 flex-wrap">
+          <h3 className="text-[15px] font-semibold text-sky-800">Redemption Rally</h3>
+          <span className="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-indigo-100 text-indigo-700 font-semibold">
+            Consolation bracket
+          </span>
+        </div>
+        <p className="text-[11px] text-slate-500">
+          A second-chance bracket built from teams that lost in round 1 or round 2 of the {division} main bracket.
+          {' '}From the FB description: $20 per team to enter, winner takes the pot (no second-place payout since
+          they already had a second shot).
+        </p>
+
+        {!hasMain ? (
+          <p className="text-[12px] text-slate-500 bg-slate-50 rounded-lg p-3">
+            Build the main {division} bracket first. Once teams start losing in round 1 / round 2, they'll be
+            eligible to enter here.
+          </p>
+        ) : (
+          <p className="text-[12px] text-slate-600 bg-slate-50 rounded-lg p-3">
+            <span className="font-semibold text-slate-800">{r12FinishedLosers}</span> finished round 1/2{' '}
+            {r12FinishedLosers === 1 ? 'game' : 'games'}
+            {' '}out of {r12TotalGames} eligible. Need at least 2 completed games to seed the bracket.
+          </p>
+        )}
+
+        <div>
+          <button
+            className="px-3 py-1.5 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 text-[13px] disabled:opacity-40"
+            disabled={!hasMain || r12FinishedLosers < 2}
+            onClick={buildRedemptionRally}
+            title={
+              !hasMain
+                ? 'Build the main bracket first'
+                : r12FinishedLosers < 2
+                ? 'Need at least 2 completed round 1/2 games'
+                : ''
+            }
+          >
+            {hasRR ? 'Rebuild Redemption Rally' : 'Build Redemption Rally'}
+          </button>
+        </div>
+      </section>
+
+
     </section>
   );
 }
