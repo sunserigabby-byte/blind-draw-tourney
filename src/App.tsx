@@ -354,6 +354,43 @@ export default function BlindDrawTourneyApp() {
     })();
   }, []);
 
+  // Viewer-only polling: non-admin clients re-fetch state every 5 seconds so
+  // the main app shows live scores without needing a manual refresh. Admins
+  // don't poll (their local state is canonical and autosaves). The focused
+  // live-score page is skipped (it has its own poll).
+  useEffect(() => {
+    if (isAdmin) return;
+    if (focusedMatchId) return;
+    const VIEWER_POLL_MS = 5000;
+    const interval = setInterval(async () => {
+      try {
+        const remote: any = await apiGetState();
+        if (!remote) return;
+        if (remote.doubles?.UPPER) setDUpper(remote.doubles.UPPER);
+        if (remote.doubles?.LOWER) setDLower(remote.doubles.LOWER);
+        if (remote.quads?.UPPER) setQUpper(remote.quads.UPPER);
+        if (remote.quads?.LOWER) setQLower(remote.quads.LOWER);
+        if (remote.triples?.UPPER) setTUpper(remote.triples.UPPER);
+        if (remote.triples?.LOWER) setTLower(remote.triples.LOWER);
+        if (remote.kob?.UPPER) setKobUpper(remote.kob.UPPER);
+        if (remote.kob?.LOWER) setKobLower(remote.kob.LOWER);
+        if (remote.mickey?.UPPER) setMUpper(remote.mickey.UPPER);
+        if (remote.mickey?.LOWER) setMLower(remote.mickey.LOWER);
+        if (remote.mickeyBD?.UPPER) setMBDUpper({ ...emptyMickeyBDState(), ...remote.mickeyBD.UPPER });
+        if (remote.mickeyBD?.LOWER) setMBDLower({ ...emptyMickeyBDState(), ...remote.mickeyBD.LOWER });
+        if (remote.dScoreSettings) setDScoreSettings(remote.dScoreSettings);
+        if (remote.qScoreSettings) setQScoreSettings(remote.qScoreSettings);
+        if (remote.tScoreSettings) setTScoreSettings(remote.tScoreSettings);
+        if (remote.kobScoreSettings) setKobScoreSettings(remote.kobScoreSettings);
+        if (remote.mScoreSettings) setMScoreSettings(remote.mScoreSettings);
+        if (remote.mbdScoreSettings) setMBDScoreSettings(remote.mbdScoreSettings);
+      } catch {
+        // Swallow polling errors so a flaky network doesn't blow up viewers.
+      }
+    }, VIEWER_POLL_MS);
+    return () => clearInterval(interval);
+  }, [isAdmin, focusedMatchId]);
+
   useEffect(() => {
     try { localStorage.setItem("sunnysports.autosave", JSON.stringify(snapshotState)); } catch {}
     if (!isAdmin) return;
@@ -929,8 +966,10 @@ export default function BlindDrawTourneyApp() {
             <MickeyBDRoundManager
               pairsText={currentMBD.pairsText}
               freeAgentsText={currentMBD.freeAgentsText}
-              rounds={currentMBD.rounds}
-              setRounds={(v: any) => setCurrentMBD(p => ({ ...p, rounds: typeof v === 'function' ? v(p.rounds) : v }))}
+              rounds={currentMBD.rounds ?? []}
+              setRounds={(v: any) => setCurrentMBD(p => ({ ...p, rounds: typeof v === 'function' ? v(p.rounds ?? []) : v }))}
+              courtCount={currentMBD.courtCount ?? 1}
+              setCourtCount={(n: number) => setCurrentMBD(p => ({ ...p, courtCount: Math.max(1, Math.floor(n) || 1) }))}
             />
           </fieldset>
         );
@@ -939,9 +978,10 @@ export default function BlindDrawTourneyApp() {
         return (
           <>
             <MickeyBDMatchesView
-              rounds={currentMBD.rounds}
-              setRounds={(v: any) => setCurrentMBD(p => ({ ...p, rounds: typeof v === 'function' ? v(p.rounds) : v }))}
+              rounds={currentMBD.rounds ?? []}
+              setRounds={(v: any) => setCurrentMBD(p => ({ ...p, rounds: typeof v === 'function' ? v(p.rounds ?? []) : v }))}
               pairsText={currentMBD.pairsText}
+              courtCount={currentMBD.courtCount ?? 1}
               isAdmin={isAdmin}
               scoreSettings={mbdScoreSettings}
             />

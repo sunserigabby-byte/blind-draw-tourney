@@ -166,12 +166,14 @@ export function MickeyBDMatchesView({
   rounds,
   setRounds,
   pairsText = '',
+  courtCount = 1,
   isAdmin,
   scoreSettings = { playTo: 21, cap: null },
 }: {
   rounds: MickeyBDRound[];
   setRounds: (f: ((prev: MickeyBDRound[]) => MickeyBDRound[]) | MickeyBDRound[]) => void;
   pairsText?: string;
+  courtCount?: number;
   isAdmin?: boolean;
   scoreSettings?: ScoreSettings;
 }) {
@@ -202,47 +204,83 @@ export function MickeyBDMatchesView({
       )}
 
       <div className="space-y-5 mt-2">
-        {rounds.map((round, roundIdx) => {
-          const time = timeForSlot(roundIdx);
-          const playingIds = new Set<string>();
-          for (const m of round.matches) {
-            playingIds.add(m.teamAId);
-            playingIds.add(m.teamBId);
-          }
-          const sitting = round.teams.filter(t => !playingIds.has(t.id));
+        {(() => {
+          // Compute a running global time-slot index across rounds so that
+          // rounds requiring multiple sub-slots (more matches than courts)
+          // push subsequent rounds later on the clock.
+          let globalSlotIdx = 0;
+          const elements: React.ReactNode[] = [];
+          for (let rIdx = 0; rIdx < rounds.length; rIdx++) {
+            const round = rounds[rIdx];
+            const playingIds = new Set<string>();
+            for (const m of round.matches) {
+              playingIds.add(m.teamAId);
+              playingIds.add(m.teamBId);
+            }
+            const sitting = round.teams.filter(t => !playingIds.has(t.id));
 
-          return (
-            <div key={round.id}>
-              <div className="flex items-baseline justify-between gap-2 flex-wrap mb-2">
-                <h3 className="text-[15px] font-semibold text-sky-800">
-                  Round {round.number}
-                  <span className="ml-2 text-[12px] font-normal text-slate-500">{time}</span>
-                </h3>
-                {sitting.length > 0 && (
-                  <div className="text-[11px] text-slate-500">
-                    Sitting: {sitting.map(t => mickeyTeamLabel(t, pairsText)).join(' · ')}
-                  </div>
-                )}
+            // Split this round's matches into sub-slots based on courtCount.
+            const cn = Math.max(1, Math.floor(courtCount) || 1);
+            const subSlots: typeof round.matches[] = [];
+            for (let i = 0; i < round.matches.length; i += cn) {
+              subSlots.push(round.matches.slice(i, i + cn));
+            }
+            if (subSlots.length === 0) subSlots.push([]);
+
+            elements.push(
+              <div key={round.id}>
+                <div className="flex items-baseline justify-between gap-2 flex-wrap mb-2">
+                  <h3 className="text-[15px] font-semibold text-sky-800">
+                    Round {round.number}
+                    {subSlots.length === 1 && (
+                      <span className="ml-2 text-[12px] font-normal text-slate-500">{timeForSlot(globalSlotIdx)}</span>
+                    )}
+                  </h3>
+                  {sitting.length > 0 && (
+                    <div className="text-[11px] text-slate-500">
+                      Sitting this round: {sitting.map(t => mickeyTeamLabel(t, pairsText)).join(' · ')}
+                    </div>
+                  )}
+                </div>
+                <div className="space-y-3">
+                  {subSlots.map((slotMatches, sIdx) => {
+                    const slotTime = timeForSlot(globalSlotIdx);
+                    globalSlotIdx += 1;
+                    return (
+                      <div key={`${round.id}-slot-${sIdx}`}>
+                        {subSlots.length > 1 && (
+                          <div className="text-[11px] uppercase tracking-wide text-slate-500 font-semibold mb-1">
+                            Slot {sIdx + 1} of {subSlots.length} · {slotTime}
+                          </div>
+                        )}
+                        <div className="grid md:grid-cols-2 gap-3">
+                          {slotMatches.map((m, idx) => {
+                            const matchNumberWithinRound = sIdx * cn + idx + 1;
+                            return (
+                              <MatchupCard
+                                key={m.id}
+                                m={m}
+                                matchNumber={matchNumberWithinRound}
+                                courtNumber={idx + 1}
+                                timeLabel={slotTime}
+                                teamAName={nameOf(m.teamAId)}
+                                teamBName={nameOf(m.teamBId)}
+                                scoreSettings={scoreSettings}
+                                isAdmin={isAdmin}
+                                update={update}
+                              />
+                            );
+                          })}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
-              <div className="grid md:grid-cols-2 gap-3">
-                {round.matches.map((m, idx) => (
-                  <MatchupCard
-                    key={m.id}
-                    m={m}
-                    matchNumber={idx + 1}
-                    courtNumber={idx + 1}
-                    timeLabel={time}
-                    teamAName={nameOf(m.teamAId)}
-                    teamBName={nameOf(m.teamBId)}
-                    scoreSettings={scoreSettings}
-                    isAdmin={isAdmin}
-                    update={update}
-                  />
-                ))}
-              </div>
-            </div>
-          );
-        })}
+            );
+          }
+          return elements;
+        })()}
       </div>
     </section>
   );

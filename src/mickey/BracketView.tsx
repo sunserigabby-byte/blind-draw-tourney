@@ -5,12 +5,16 @@ import { mickeyGamesWinner } from '../utils';
 
 const ROW_H = 88;
 
-function TeamLine({ t, active, label, sourceId, byId }: {
+function TeamLine({ t, active, label, sourceId, byId, swapOptions, onSwap }: {
   t?: Team;
   active?: boolean;
   label: 'A' | 'B';
   sourceId?: string;
   byId: Map<string, BracketMatch>;
+  // When provided, the team slot becomes a dropdown of teams in other
+  // unplayed Round-1 matches; selecting one swaps the two.
+  swapOptions?: Team[];
+  onSwap?: (newTeamId: string) => void;
 }) {
   const waiting = () => {
     if (!sourceId) return 'Waiting on previous match';
@@ -25,7 +29,22 @@ function TeamLine({ t, active, label, sourceId, byId }: {
           <span className="inline-flex items-center justify-center min-w-[22px] h-5 px-1 text-[9px] rounded-full bg-sky-100 text-sky-800 ring-1 ring-sky-200 shrink-0">
             #{t.seed}
           </span>
-          <span className="text-[12px] leading-tight whitespace-normal break-words" title={t.name}>{t.name}</span>
+          {swapOptions && onSwap ? (
+            <select
+              className="text-[12px] leading-tight w-full bg-transparent border-0 px-0 py-0 cursor-pointer hover:underline"
+              value={t.id}
+              onChange={e => onSwap(e.target.value)}
+              title="Swap this team with another unplayed R1 team"
+            >
+              {swapOptions.map(opt => (
+                <option key={opt.id} value={opt.id}>
+                  #{opt.seed} {opt.name}
+                </option>
+              ))}
+            </select>
+          ) : (
+            <span className="text-[12px] leading-tight whitespace-normal break-words" title={t.name}>{t.name}</span>
+          )}
         </>
       ) : (
         <span className="text-[11px] italic text-slate-400 leading-tight">{waiting()}</span>
@@ -41,6 +60,8 @@ function MickeyBracketCard({
   isAdmin,
   setGame,
   setFormat,
+  swapOptions,
+  swapTeams,
 }: {
   m: BracketMatch;
   byId: Map<string, BracketMatch>;
@@ -48,6 +69,8 @@ function MickeyBracketCard({
   isAdmin?: boolean;
   setGame: (id: string, idx: number, value: string) => void;
   setFormat: (id: string, fmt: '' | 'MICKEY' | 'MINNIE') => void;
+  swapOptions?: Team[]; // populated when this R1 match is swap-eligible
+  swapTeams?: (currentId: string, newId: string) => void;
 }) {
   const winnerSide = mickeyGamesWinner(m.games, m.score);
   const canScore = !!(m.team1 && m.team2) && m.score !== 'BYE';
@@ -70,8 +93,24 @@ function MickeyBracketCard({
       </div>
 
       <div className="border border-slate-300 rounded-sm bg-white overflow-hidden">
-        <TeamLine t={m.team1} active={winnerSide === 'team1'} label="A" sourceId={m.team1SourceId} byId={byId} />
-        <TeamLine t={m.team2} active={winnerSide === 'team2'} label="B" sourceId={m.team2SourceId} byId={byId} />
+        <TeamLine
+          t={m.team1}
+          active={winnerSide === 'team1'}
+          label="A"
+          sourceId={m.team1SourceId}
+          byId={byId}
+          swapOptions={isAdmin && swapOptions && swapTeams ? swapOptions : undefined}
+          onSwap={isAdmin && swapTeams && m.team1 ? (newId => swapTeams(m.team1!.id, newId)) : undefined}
+        />
+        <TeamLine
+          t={m.team2}
+          active={winnerSide === 'team2'}
+          label="B"
+          sourceId={m.team2SourceId}
+          byId={byId}
+          swapOptions={isAdmin && swapOptions && swapTeams ? swapOptions : undefined}
+          onSwap={isAdmin && swapTeams && m.team2 ? (newId => swapTeams(m.team2!.id, newId)) : undefined}
+        />
       </div>
 
       {m.score === 'BYE' ? (
@@ -162,6 +201,41 @@ export function MickeyBracketView({
   const setFormat = (id: string, fmt: '' | 'MICKEY' | 'MINNIE') =>
     updateMatch(id, m => { m.format = fmt === '' ? undefined : fmt; });
 
+  // A R1 match is swap-eligible if it hasn't started yet (no score, no
+  // game entries, no BYE). Swap teams between two such matches in place
+  // without touching downstream rounds or any scores.
+  function isSwappable(m: BracketMatch): boolean {
+    if (m.round !== 1) return false;
+    if (m.score && m.score.length > 0) return false;
+    if (m.games && m.games.some(g => g && g.trim().length > 0)) return false;
+    return true;
+  }
+
+  const swapTeams = (currentId: string, newId: string) => {
+    if (currentId === newId) return;
+    setBrackets(prev => {
+      const copy = prev.map(x => ({ ...x }));
+      let curMatch: BracketMatch | undefined;
+      let curSide: 'team1' | 'team2' | undefined;
+      let newMatch: BracketMatch | undefined;
+      let newSide: 'team1' | 'team2' | undefined;
+      for (const m of copy) {
+        if (!isSwappable(m)) continue;
+        if (m.team1?.id === currentId) { curMatch = m; curSide = 'team1'; }
+        if (m.team2?.id === currentId) { curMatch = m; curSide = 'team2'; }
+        if (m.team1?.id === newId) { newMatch = m; newSide = 'team1'; }
+        if (m.team2?.id === newId) { newMatch = m; newSide = 'team2'; }
+      }
+      if (curMatch && curSide && newMatch && newSide) {
+        const a = curMatch[curSide];
+        const b = newMatch[newSide];
+        curMatch[curSide] = b;
+        newMatch[newSide] = a;
+      }
+      return copy;
+    });
+  };
+
   const anyCols = divisions.some(d => buildVisualColumns(brackets, d).cols.length > 0);
   if (!anyCols) return null;
 
@@ -179,11 +253,25 @@ export function MickeyBracketView({
         if (!cols.length) return null;
         const rounds = cfg.rounds;
 
+        // Teams currently sitting in swap-eligible R1 slots of this division.
+        const swapPool: Team[] = [];
+        for (const m of brackets) {
+          if (m.division !== div) continue;
+          if (!isSwappable(m)) continue;
+          if (m.team1) swapPool.push(m.team1);
+          if (m.team2) swapPool.push(m.team2);
+        }
+
         return (
           <div key={div} className="mb-8">
             <h3 className="font-semibold text-slate-700 mb-2 text-[14px]">
               {div === 'RR' ? 'Redemption Rally' : div}
             </h3>
+            {isAdmin && swapPool.length >= 2 && (
+              <p className="text-[11px] text-slate-500 mb-2">
+                Tip: click a team in any unplayed Round 1 match to pick a different unplayed team — they'll swap in place.
+              </p>
+            )}
             <div className="overflow-x-auto">
               <div className="grid gap-2" style={{ gridTemplateColumns: `repeat(${cols.length}, minmax(240px, 1fr))` }}>
                 {cols.map((col, colIdx) => (
@@ -204,6 +292,7 @@ export function MickeyBracketView({
                       }
                       // Match play = semifinal + final of a non-RR bracket.
                       const matchPlay = div !== 'RR' && m.round >= rounds - 1;
+                      const canSwap = isSwappable(m) && swapPool.length >= 2;
                       return (
                         <div key={m.id} className="absolute left-0" style={{ top }}>
                           <MickeyBracketCard
@@ -213,6 +302,8 @@ export function MickeyBracketView({
                             isAdmin={isAdmin}
                             setGame={setGame}
                             setFormat={setFormat}
+                            swapOptions={canSwap ? swapPool : undefined}
+                            swapTeams={canSwap ? swapTeams : undefined}
                           />
                         </div>
                       );

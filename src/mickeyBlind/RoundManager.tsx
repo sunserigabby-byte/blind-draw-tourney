@@ -165,11 +165,15 @@ export function MickeyBDRoundManager({
   freeAgentsText,
   rounds,
   setRounds,
+  courtCount,
+  setCourtCount,
 }: {
   pairsText: string;
   freeAgentsText: string;
   rounds: MickeyBDRound[];
   setRounds: (f: ((prev: MickeyBDRound[]) => MickeyBDRound[]) | MickeyBDRound[]) => void;
+  courtCount: number;
+  setCourtCount: (n: number) => void;
 }) {
   const [targetPoolSize, setTargetPoolSize] = useState(5);
   const [confirmRemoveId, setConfirmRemoveId] = useState<string | null>(null);
@@ -333,6 +337,22 @@ export function MickeyBDRoundManager({
             className="w-14 border border-slate-300 rounded px-2 py-1 text-[12px] text-center font-semibold"
           />
           <span className="text-slate-400">teams/round</span>
+        </label>
+        <label className="flex items-center gap-1.5">
+          Courts available:
+          <input
+            type="number"
+            min={1}
+            max={50}
+            value={courtCount}
+            onChange={e => setCourtCount(Math.max(1, parseInt(e.target.value) || 1))}
+            className="w-14 border border-slate-300 rounded px-2 py-1 text-[12px] text-center font-semibold"
+          />
+          <span className="text-slate-400">
+            {courtCount === 1
+              ? 'matches in a round play sequentially.'
+              : `up to ${courtCount} matches per time slot.`}
+          </span>
         </label>
       </div>
 
