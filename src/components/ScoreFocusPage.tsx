@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import type { MickeyMatchRow, MickeyTeam, ScoreSettings } from '../types';
 import { apiGetState, apiSaveState } from '../api';
 import { parseScore, isValidScore, mickeyTeamLabel } from '../utils';
@@ -100,22 +100,26 @@ export function ScoreFocusPage({ matchId }: { matchId: string }) {
   const [state, setState] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string>('');
-  const [lastEditAt, setLastEditAt] = useState(0);
+  // Track the time of the user's most recent edit via a ref so the polling
+  // interval can read the latest value without needing to be torn down and
+  // recreated on every keystroke.
+  const lastEditRef = useRef(0);
   const [savingError, setSavingError] = useState<string>('');
   const [adminKey] = useState<string>(() => {
     try { return sessionStorage.getItem('ADMIN_KEY') || ''; } catch { return ''; }
   });
   const isAdmin = !!adminKey;
 
-  // Load on mount, then poll for updates.
+  // Load on mount, then poll for updates. The grace check reads the latest
+  // lastEditRef.current on every tick — so it correctly skips updates that
+  // would clobber an in-progress keystroke.
   useEffect(() => {
     let cancelled = false;
-    let lastEditRef = lastEditAt;
     const load = async () => {
+      if (Date.now() - lastEditRef.current < RECENT_EDIT_GRACE_MS) return;
       try {
         const remote = await apiGetState();
         if (cancelled) return;
-        if (Date.now() - lastEditRef < RECENT_EDIT_GRACE_MS) return; // skip if user typed recently
         setState(remote ?? null);
         setLoading(false);
         setError('');
@@ -129,19 +133,13 @@ export function ScoreFocusPage({ matchId }: { matchId: string }) {
     load();
     const interval = setInterval(load, POLL_INTERVAL_MS);
     return () => { cancelled = true; clearInterval(interval); };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  // Keep a ref-like reading of lastEditAt without re-running the effect
-  useEffect(() => {
-    (window as any).__lastScoreEdit = lastEditAt;
-  }, [lastEditAt]);
 
   const found = useMemo(() => state ? findMatch(state, matchId) : null, [state, matchId]);
 
   const updateScore = (patch: Partial<MickeyMatchRow>) => {
     if (!isAdmin) return;
-    setLastEditAt(Date.now());
+    lastEditRef.current = Date.now();
     setState((prev: any) => {
       const next = patchMatchInState(prev, matchId, patch);
       // Save to server in background
