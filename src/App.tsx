@@ -29,6 +29,7 @@ import { MickeyBDRoundManager } from './mickeyBlind/RoundManager';
 import { MickeyBDMatchesView } from './mickeyBlind/MatchesView';
 import { MickeyBDLeaderboard } from './mickeyBlind/Leaderboard';
 import { MickeyBDPlayoffBuilder } from './mickeyBlind/PlayoffBuilder';
+import { MickeyBDFairnessReport } from './mickeyBlind/FairnessReport';
 import { ScoreSettingsPanel } from './components/ScoreSettingsPanel';
 import { Sidebar, SIDEBAR_DIVISIONS, SIDEBAR_SECTIONS, type SidebarSection, type SidebarTabKey } from './components/Sidebar';
 import { ThemeToggle, readStoredTheme, applyTheme, persistTheme, type Theme } from './components/ThemeToggle';
@@ -990,6 +991,11 @@ export default function BlindDrawTourneyApp() {
               pairsText={currentMBD.pairsText}
               freeAgentsText={currentMBD.freeAgentsText}
               scoreSettings={mbdScoreSettings}
+            />
+            <MickeyBDFairnessReport
+              rounds={currentMBD.rounds ?? []}
+              pairsText={currentMBD.pairsText}
+              freeAgentsText={currentMBD.freeAgentsText}
             />
           </>
         );
