@@ -39,9 +39,16 @@ function emptyDivisionState<TMatch>(): DivisionState<TMatch> {
   return { guysText: "", girlsText: "", matches: [], brackets: [] };
 }
 
-type MickeyDivisionState = { pairsText: string; freeAgentsText: string; teams: MickeyTeam[]; matches: MickeyMatchRow[]; brackets: BracketMatch[] };
+type MickeyDivisionState = {
+  pairsText: string;
+  freeAgentsText: string;
+  teams: MickeyTeam[];
+  matches: MickeyMatchRow[];
+  brackets: BracketMatch[];
+  courtCount?: number;
+};
 function emptyMickeyState(): MickeyDivisionState {
-  return { pairsText: "", freeAgentsText: "", teams: [], matches: [], brackets: [] };
+  return { pairsText: "", freeAgentsText: "", teams: [], matches: [], brackets: [], courtCount: 1 };
 }
 
 // Short description for each format, shown at the top of its Home page.
@@ -769,6 +776,8 @@ export default function BlindDrawTourneyApp() {
               setMatches={(v: any) => setCurrentM(p => ({ ...p, matches: typeof v === 'function' ? v(p.matches) : v }))}
               teams={currentM.teams}
               pairsText={currentM.pairsText}
+              courtCount={currentM.courtCount ?? 1}
+              setCourtCount={(n: number) => setCurrentM(p => ({ ...p, courtCount: Math.max(1, Math.floor(n) || 1) }))}
               isAdmin={isAdmin}
               scoreSettings={mScoreSettings}
             />
