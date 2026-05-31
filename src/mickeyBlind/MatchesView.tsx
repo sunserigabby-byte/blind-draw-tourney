@@ -103,7 +103,18 @@ function MatchupCard({
             Court {courtNumber}
           </span>
         </div>
-        <div className="text-[12px] text-slate-500 tabular-nums">{timeLabel}</div>
+        <div className="flex items-center gap-2">
+          <a
+            href={`#score=${m.id}`}
+            target="_blank"
+            rel="noreferrer"
+            className="text-[11px] text-sky-700 hover:underline"
+            title="Open this match in a focused live-scoring page"
+          >
+            Live score ↗
+          </a>
+          <span className="text-[12px] text-slate-500 tabular-nums">{timeLabel}</span>
+        </div>
       </div>
       <table className="w-full text-[13px]">
         <thead>

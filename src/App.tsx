@@ -28,9 +28,11 @@ import { MickeyBracketView } from './mickey/BracketView';
 import { MickeyBDRoundManager } from './mickeyBlind/RoundManager';
 import { MickeyBDMatchesView } from './mickeyBlind/MatchesView';
 import { MickeyBDLeaderboard } from './mickeyBlind/Leaderboard';
+import { MickeyBDPlayoffBuilder } from './mickeyBlind/PlayoffBuilder';
 import { ScoreSettingsPanel } from './components/ScoreSettingsPanel';
 import { Sidebar, SIDEBAR_DIVISIONS, SIDEBAR_SECTIONS, type SidebarSection, type SidebarTabKey } from './components/Sidebar';
 import { ThemeToggle, readStoredTheme, applyTheme, persistTheme, type Theme } from './components/ThemeToggle';
+import { ScoreFocusPage } from './components/ScoreFocusPage';
 
 type TabKey = SidebarTabKey;
 type DivisionKey = "UPPER" | "LOWER";
@@ -75,10 +77,11 @@ type MickeyBDDivisionState = {
   pairsText: string;
   freeAgentsText: string;
   rounds: MickeyBDRound[];
+  brackets: BracketMatch[];
   courtCount?: number;
 };
 function emptyMickeyBDState(): MickeyBDDivisionState {
-  return { pairsText: "", freeAgentsText: "", rounds: [], courtCount: 1 };
+  return { pairsText: "", freeAgentsText: "", rounds: [], brackets: [], courtCount: 1 };
 }
 
 // Short description for each format, shown at the top of its Home page.
@@ -202,6 +205,15 @@ export default function BlindDrawTourneyApp() {
     persistTheme(theme);
   }, [theme]);
   const setTheme = (t: Theme) => setThemeState(t);
+
+  // Hash routing: #score=<matchId> opens a focused single-match scoring page.
+  const [hash, setHash] = useState<string>(() => { try { return window.location.hash; } catch { return ''; } });
+  useEffect(() => {
+    const onHash = () => setHash(window.location.hash);
+    window.addEventListener('hashchange', onHash);
+    return () => window.removeEventListener('hashchange', onHash);
+  }, []);
+  const focusedMatchId = hash.startsWith('#score=') ? decodeURIComponent(hash.slice('#score='.length)) : null;
 
   const [adminKey, setAdminKey] = useState<string>(() => { try { return sessionStorage.getItem("ADMIN_KEY") || ""; } catch { return ""; } });
   const isAdmin = !!adminKey;
@@ -534,8 +546,8 @@ export default function BlindDrawTourneyApp() {
       teamsSubtitle = `Roster and round generator (${currentMBD.rounds.length} round${currentMBD.rounds.length === 1 ? '' : 's'} so far)`;
       poolsBadge = `${scoredSets}/${totalMatches * 2}`;
       poolsSubtitle = 'Matches across all rounds + standings';
-      playoffsBadge = 'Coming next';
-      playoffsSubtitle = 'Bracket from aggregate standings (TBD)';
+      playoffsBadge = currentMBD.brackets.length > 0 ? 'Built' : 'Not built';
+      playoffsSubtitle = 'Re-drawn playoff teams + Redemption Rally';
     }
 
     const desc = FORMAT_DESCRIPTIONS[activeTab];
@@ -940,15 +952,33 @@ export default function BlindDrawTourneyApp() {
       }
       if (activeSection === 'PLAYOFFS') {
         return (
-          <section className="bg-white rounded-xl shadow-sm ring-1 ring-slate-200 p-4 text-[13px] text-slate-600">
-            Playoffs aren't built for this format yet — you can keep adding rounds in the
-            <span className="font-semibold"> Teams</span> sub-tab. A seeded bracket from the aggregate standings is on the list.
-          </section>
+          <>
+            <fieldset disabled={!isAdmin} className={!isAdmin ? "opacity-95" : ""}>
+              <MickeyBDPlayoffBuilder
+                rounds={currentMBD.rounds}
+                pairsText={currentMBD.pairsText}
+                freeAgentsText={currentMBD.freeAgentsText}
+                brackets={currentMBD.brackets}
+                setBrackets={(v: any) => setCurrentMBD(p => ({ ...p, brackets: typeof v === 'function' ? v(p.brackets) : v }))}
+                division={activeDivision}
+              />
+            </fieldset>
+            <MickeyBracketView
+              brackets={currentMBD.brackets}
+              setBrackets={(v: any) => setCurrentMBD(p => ({ ...p, brackets: typeof v === 'function' ? v(p.brackets) : v }))}
+              isAdmin={isAdmin}
+            />
+          </>
         );
       }
     }
 
     return null;
+  }
+
+  // Focused live-scoring page short-circuits the rest of the app.
+  if (focusedMatchId) {
+    return <ScoreFocusPage matchId={focusedMatchId} />;
   }
 
   return (

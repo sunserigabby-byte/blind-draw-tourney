@@ -175,6 +175,7 @@ export function MickeyBDRoundManager({
   const [confirmRemoveId, setConfirmRemoveId] = useState<string | null>(null);
   const [confirmRedrawId, setConfirmRedrawId] = useState<string | null>(null);
   const [useSmart, setUseSmart] = useState(true);
+  const [batchCount, setBatchCount] = useState(5);
 
   // Editing state: which round is being edited + a buffer of changes.
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -212,6 +213,30 @@ export function MickeyBDRoundManager({
       teams: result.teams,
       matches: result.matches,
     }]);
+  };
+
+  // Generate N rounds at once, with history accumulating after each generated
+  // round so later rounds avoid the matchups already scheduled.
+  const generateBatch = (count: number) => {
+    if (totalPlayers < 4) {
+      alert('Need at least 4 players to start.');
+      return;
+    }
+    setRounds(prev => {
+      const working = [...prev];
+      for (let i = 0; i < count; i++) {
+        const history = buildHistory(working);
+        const result = pickBestCandidate(pairUnits, freeUnits, targetPoolSize, working.length + 1, history, useSmart);
+        if (!result) break;
+        working.push({
+          id: rid(),
+          number: working.length + 1,
+          teams: result.teams,
+          matches: result.matches,
+        });
+      }
+      return working;
+    });
   };
 
   const redrawRound = (roundId: string) => {
@@ -321,7 +346,7 @@ export function MickeyBDRoundManager({
         </span>
       </div>
 
-      <div>
+      <div className="flex items-center gap-2 flex-wrap">
         <button
           className="px-3 py-1.5 rounded bg-emerald-600 text-white hover:bg-emerald-700 text-[13px] disabled:opacity-40"
           disabled={totalPlayers < 4}
@@ -329,8 +354,28 @@ export function MickeyBDRoundManager({
         >
           Generate {rounds.length === 0 ? 'First' : 'Next'} Round
         </button>
+        <span className="text-slate-300">|</span>
+        <label className="flex items-center gap-1.5 text-[12px] text-slate-600">
+          Generate
+          <input
+            type="number"
+            min={1}
+            max={50}
+            value={batchCount}
+            onChange={e => setBatchCount(Math.max(1, parseInt(e.target.value) || 1))}
+            className="w-12 border border-slate-300 rounded px-1 py-1 text-[12px] text-center font-semibold"
+          />
+          rounds at once
+        </label>
+        <button
+          className="px-3 py-1.5 rounded border border-emerald-500 text-emerald-700 hover:bg-emerald-50 text-[13px] disabled:opacity-40"
+          disabled={totalPlayers < 4}
+          onClick={() => generateBatch(batchCount)}
+        >
+          Generate {batchCount} Rounds
+        </button>
         {totalPlayers < 4 && (
-          <span className="ml-2 text-[11px] text-slate-500">Need at least 4 players to start.</span>
+          <span className="text-[11px] text-slate-500">Need at least 4 players to start.</span>
         )}
       </div>
 
