@@ -46,9 +46,10 @@ type MickeyDivisionState = {
   matches: MickeyMatchRow[];
   brackets: BracketMatch[];
   courtCount?: number;
+  firstFormat?: 'MICKEY' | 'MINNIE';
 };
 function emptyMickeyState(): MickeyDivisionState {
-  return { pairsText: "", freeAgentsText: "", teams: [], matches: [], brackets: [], courtCount: 1 };
+  return { pairsText: "", freeAgentsText: "", teams: [], matches: [], brackets: [], courtCount: 1, firstFormat: 'MICKEY' };
 }
 
 // Short description for each format, shown at the top of its Home page.
@@ -764,6 +765,8 @@ export default function BlindDrawTourneyApp() {
               setTeams={(v: any) => setCurrentM(p => ({ ...p, teams: typeof v === 'function' ? v(p.teams) : v }))}
               matches={currentM.matches}
               setMatches={(v: any) => setCurrentM(p => ({ ...p, matches: typeof v === 'function' ? v(p.matches) : v }))}
+              firstFormat={currentM.firstFormat ?? 'MICKEY'}
+              setFirstFormat={(f) => setCurrentM(p => ({ ...p, firstFormat: f }))}
             />
           </fieldset>
         );

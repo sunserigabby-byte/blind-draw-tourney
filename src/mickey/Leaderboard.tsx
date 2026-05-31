@@ -2,7 +2,11 @@ import React, { useMemo } from 'react';
 import type { MickeyTeam, MickeyMatchRow, ScoreSettings } from '../types';
 import { slug, mickeyTeamLabel, computeMickeyTeamStats, parseMickeyPairsGendered, parseMickeyFreeGendered } from '../utils';
 
-type TeamRow = { id: string; name: string; label: string; pool: number; W: number; L: number; PD: number; sets: number };
+type TeamRow = {
+  id: string; name: string; label: string; pool: number;
+  W: number; L: number; PD: number; sets: number;
+  mickeyW: number; mickeyL: number; minnieW: number; minnieL: number;
+};
 type UnitRow = {
   key: string;
   label: string;
@@ -13,6 +17,8 @@ type UnitRow = {
   L: number;
   PD: number;
   sets: number;
+  mickeyW: number; mickeyL: number;
+  minnieW: number; minnieL: number;
   placed: boolean;
 };
 
@@ -45,8 +51,12 @@ export function MickeyLeaderboard({
     const stats = computeMickeyTeamStats(matches, teams);
     const teamStats = new Map<string, TeamRow>();
     for (const t of teams) {
-      const s = stats.get(t.id) ?? { W: 0, L: 0, PD: 0, sets: 0 };
-      teamStats.set(t.id, { id: t.id, name: t.name, label: mickeyTeamLabel(t, pairsText), pool: t.pool, W: s.W, L: s.L, PD: s.PD, sets: s.sets });
+      const s = stats.get(t.id) ?? { W: 0, L: 0, PD: 0, sets: 0, mickeyW: 0, mickeyL: 0, minnieW: 0, minnieL: 0 };
+      teamStats.set(t.id, {
+        id: t.id, name: t.name, label: mickeyTeamLabel(t, pairsText), pool: t.pool,
+        W: s.W, L: s.L, PD: s.PD, sets: s.sets,
+        mickeyW: s.mickeyW, mickeyL: s.mickeyL, minnieW: s.minnieW, minnieL: s.minnieL,
+      });
     }
 
     // 2) Group teams by pool, ranked
@@ -87,6 +97,10 @@ export function MickeyLeaderboard({
         L: rec?.L ?? 0,
         PD: rec?.PD ?? 0,
         sets: rec?.sets ?? 0,
+        mickeyW: rec?.mickeyW ?? 0,
+        mickeyL: rec?.mickeyL ?? 0,
+        minnieW: rec?.minnieW ?? 0,
+        minnieL: rec?.minnieL ?? 0,
         placed: !!team,
       };
     });
@@ -158,7 +172,7 @@ export function MickeyLeaderboard({
         </h3>
         <section className="bg-white/95 backdrop-blur rounded-xl shadow ring-1 ring-slate-200 p-4">
           <p className="text-[11px] text-slate-500 mb-2">
-            Each pair and free agent carries the record of the team they were drawn onto — handy for re-seeding if you re-draw teams for playoffs.
+            Each pair and free agent carries the record of the team they were drawn onto. <span className="font-semibold">Mickey</span> and <span className="font-semibold">Minnie</span> columns show wins-losses in each format.
           </p>
           <div className="overflow-x-auto">
             <table className="min-w-full text-[13px]">
@@ -167,6 +181,8 @@ export function MickeyLeaderboard({
                   <th className="py-1 px-2">#</th>
                   <th className="py-1 px-2">Pair / Free Agent</th>
                   <th className="py-1 px-2">Pool</th>
+                  <th className="py-1 px-2 text-center">Mickey</th>
+                  <th className="py-1 px-2 text-center">Minnie</th>
                   <th className="py-1 px-2">W</th>
                   <th className="py-1 px-2">L</th>
                   <th className="py-1 px-2">PD</th>
@@ -186,6 +202,8 @@ export function MickeyLeaderboard({
                       </span>
                     </td>
                     <td className="py-1 px-2 tabular-nums">{r.pool ?? '–'}</td>
+                    <td className="py-1 px-2 tabular-nums text-center">{r.mickeyW}-{r.mickeyL}</td>
+                    <td className="py-1 px-2 tabular-nums text-center">{r.minnieW}-{r.minnieL}</td>
                     <td className="py-1 px-2 tabular-nums">{r.W}</td>
                     <td className="py-1 px-2 tabular-nums">{r.L}</td>
                     <td className="py-1 px-2 tabular-nums">{r.PD}</td>
@@ -193,7 +211,7 @@ export function MickeyLeaderboard({
                 ))}
                 {unitRows.length === 0 && (
                   <tr className="border-t">
-                    <td colSpan={6} className="py-2 px-2 text-slate-400 text-[12px]">
+                    <td colSpan={8} className="py-2 px-2 text-slate-400 text-[12px]">
                       Add pairs / free agents above to see them here.
                     </td>
                   </tr>
@@ -202,6 +220,91 @@ export function MickeyLeaderboard({
             </table>
           </div>
         </section>
+      </div>
+
+      {/* Per-format leaderboards */}
+      <div>
+        <h3 className="text-[13px] font-semibold text-slate-600 mb-2 uppercase tracking-wide">
+          Top Pairs / Free Agents by Format
+        </h3>
+        <div className="grid md:grid-cols-2 gap-4">
+          <FormatLeaderboard title="Mickey (coed)" accent="purple" format="mickey" rows={unitRows} />
+          <FormatLeaderboard title="Minnie (revco)" accent="pink" format="minnie" rows={unitRows} />
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function FormatLeaderboard({
+  title,
+  accent,
+  format,
+  rows,
+}: {
+  title: string;
+  accent: 'purple' | 'pink';
+  format: 'mickey' | 'minnie';
+  rows: UnitRow[];
+}) {
+  const sorted = rows.slice().sort((a, b) => {
+    if (a.placed !== b.placed) return a.placed ? -1 : 1;
+    const aW = format === 'mickey' ? a.mickeyW : a.minnieW;
+    const bW = format === 'mickey' ? b.mickeyW : b.minnieW;
+    const aL = format === 'mickey' ? a.mickeyL : a.minnieL;
+    const bL = format === 'mickey' ? b.mickeyL : b.minnieL;
+    if (bW !== aW) return bW - aW;
+    if (aL !== bL) return aL - bL;
+    return a.label.localeCompare(b.label);
+  });
+
+  const headerClass =
+    accent === 'purple'
+      ? 'bg-purple-100 text-purple-800'
+      : 'bg-pink-100 text-pink-800';
+
+  return (
+    <section className="bg-white/95 backdrop-blur rounded-xl shadow ring-1 ring-slate-200 p-4">
+      <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
+        <h4 className="text-[15px] font-semibold text-sky-800">{title}</h4>
+        <span className={'text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded font-semibold ' + headerClass}>
+          {format === 'mickey' ? 'Mickey wins' : 'Minnie wins'}
+        </span>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="min-w-full text-[13px]">
+          <thead>
+            <tr className="text-left text-slate-600">
+              <th className="py-1 px-2">#</th>
+              <th className="py-1 px-2">Pair / Free Agent</th>
+              <th className="py-1 px-2">Pool</th>
+              <th className="py-1 px-2 text-center">W</th>
+              <th className="py-1 px-2 text-center">L</th>
+            </tr>
+          </thead>
+          <tbody>
+            {sorted.map((r, i) => {
+              const W = format === 'mickey' ? r.mickeyW : r.minnieW;
+              const L = format === 'mickey' ? r.mickeyL : r.minnieL;
+              return (
+                <tr key={r.key} className={'border-t ' + (r.placed ? '' : 'opacity-50')}>
+                  <td className="py-1 px-2 tabular-nums font-semibold text-sky-800">{r.placed ? i + 1 : '–'}</td>
+                  <td className="py-1 px-2">{r.label}</td>
+                  <td className="py-1 px-2 tabular-nums">{r.pool ?? '–'}</td>
+                  <td className="py-1 px-2 tabular-nums text-center">{W}</td>
+                  <td className="py-1 px-2 tabular-nums text-center">{L}</td>
+                </tr>
+              );
+            })}
+            {sorted.length === 0 && (
+              <tr className="border-t">
+                <td colSpan={5} className="py-2 px-2 text-slate-400 text-[12px]">
+                  No data yet.
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
       </div>
     </section>
   );

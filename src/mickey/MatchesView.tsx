@@ -115,18 +115,45 @@ function MatchupCard({
   isAdmin?: boolean;
   update: (id: string, patch: Partial<MickeyMatchRow>) => void;
 }) {
-  const mick = parseScore(m.mickeyScore);
-  const min = parseScore(m.minnieScore);
-  const mickScored = mick && mick[0] !== mick[1];
-  const minScored = min && min[0] !== min[1];
-  const mickValid = !m.mickeyScore || (mick ? isValidScore(mick[0], mick[1], scoreSettings) : false);
-  const minValid = !m.minnieScore || (min ? isValidScore(min[0], min[1], scoreSettings) : false);
-  const mickWarn = !!mickScored && !mickValid;
-  const minWarn = !!minScored && !minValid;
-  const mickAWin = !!mickScored && mick![0] > mick![1];
-  const mickBWin = !!mickScored && mick![1] > mick![0];
-  const minAWin = !!minScored && min![0] > min![1];
-  const minBWin = !!minScored && min![1] > min![0];
+  // Single-format matches play just one set. Legacy matches without a
+  // `format` field play both sets in one card.
+  const formats: ('MICKEY' | 'MINNIE')[] = m.format ? [m.format] : ['MICKEY', 'MINNIE'];
+
+  type FormatData = {
+    fmt: 'MICKEY' | 'MINNIE';
+    label: string;
+    text: string | undefined;
+    valid: boolean;
+    warn: boolean;
+    aWin: boolean;
+    bWin: boolean;
+  };
+  const fmtData: FormatData[] = formats.map(fmt => {
+    const text = fmt === 'MICKEY' ? m.mickeyScore : m.minnieScore;
+    const parsed = parseScore(text);
+    const scored = parsed && parsed[0] !== parsed[1];
+    const valid = !text || (parsed ? isValidScore(parsed[0], parsed[1], scoreSettings) : false);
+    const warn = !!scored && !valid;
+    const aWin = !!scored && parsed![0] > parsed![1];
+    const bWin = !!scored && parsed![1] > parsed![0];
+    return { fmt, label: fmt === 'MICKEY' ? 'Mickey' : 'Minnie', text, valid, warn, aWin, bWin };
+  });
+
+  const writeScore = (fmt: 'MICKEY' | 'MINNIE', side: 'a' | 'b', val: string) => {
+    if (fmt === 'MICKEY') update(m.id, { mickeyScore: setSide(m.mickeyScore, side, val) });
+    else update(m.id, { minnieScore: setSide(m.minnieScore, side, val) });
+  };
+
+  const formatBadge = m.format ? (
+    <span
+      className={
+        'text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded font-semibold ' +
+        (m.format === 'MICKEY' ? 'bg-purple-100 text-purple-700' : 'bg-pink-100 text-pink-800')
+      }
+    >
+      {m.format === 'MICKEY' ? 'Mickey' : 'Minnie'}
+    </span>
+  ) : null;
 
   return (
     <div className="border border-slate-200 rounded-lg bg-white shadow-sm">
@@ -137,6 +164,7 @@ function MatchupCard({
             Court {courtNumber}
           </span>
           <span className="text-[10px] text-slate-500">Pool {m.pool}</span>
+          {formatBadge}
         </div>
         <div className="text-[12px] text-slate-500 tabular-nums">{timeLabel}</div>
       </div>
@@ -144,56 +172,41 @@ function MatchupCard({
         <thead>
           <tr className="text-slate-500 text-[10px] uppercase tracking-wide">
             <th className="font-normal text-left py-1.5 px-3">Team</th>
-            <th className="font-normal text-center py-1.5 px-3 w-20">Mickey</th>
-            <th className="font-normal text-center py-1.5 px-3 w-20">Minnie</th>
+            {fmtData.map(d => (
+              <th key={d.fmt} className="font-normal text-center py-1.5 px-3 w-20">{d.label}</th>
+            ))}
           </tr>
         </thead>
         <tbody>
           <tr className="border-t">
             <td className="py-2 px-3">{teamAName}</td>
-            <td className={'py-2 px-3 text-center ' + (mickAWin ? 'bg-emerald-50' : '')}>
-              <ScoreInput
-                value={getSide(m.mickeyScore, 'a')}
-                onChange={v => update(m.id, { mickeyScore: setSide(m.mickeyScore, 'a', v) })}
-                isAdmin={isAdmin}
-                winning={mickAWin}
-                invalid={!mickValid}
-                warn={mickWarn}
-              />
-            </td>
-            <td className={'py-2 px-3 text-center ' + (minAWin ? 'bg-emerald-50' : '')}>
-              <ScoreInput
-                value={getSide(m.minnieScore, 'a')}
-                onChange={v => update(m.id, { minnieScore: setSide(m.minnieScore, 'a', v) })}
-                isAdmin={isAdmin}
-                winning={minAWin}
-                invalid={!minValid}
-                warn={minWarn}
-              />
-            </td>
+            {fmtData.map(d => (
+              <td key={d.fmt} className={'py-2 px-3 text-center ' + (d.aWin ? 'bg-emerald-50' : '')}>
+                <ScoreInput
+                  value={getSide(d.text, 'a')}
+                  onChange={v => writeScore(d.fmt, 'a', v)}
+                  isAdmin={isAdmin}
+                  winning={d.aWin}
+                  invalid={!d.valid}
+                  warn={d.warn}
+                />
+              </td>
+            ))}
           </tr>
           <tr className="border-t">
             <td className="py-2 px-3">{teamBName}</td>
-            <td className={'py-2 px-3 text-center ' + (mickBWin ? 'bg-emerald-50' : '')}>
-              <ScoreInput
-                value={getSide(m.mickeyScore, 'b')}
-                onChange={v => update(m.id, { mickeyScore: setSide(m.mickeyScore, 'b', v) })}
-                isAdmin={isAdmin}
-                winning={mickBWin}
-                invalid={!mickValid}
-                warn={mickWarn}
-              />
-            </td>
-            <td className={'py-2 px-3 text-center ' + (minBWin ? 'bg-emerald-50' : '')}>
-              <ScoreInput
-                value={getSide(m.minnieScore, 'b')}
-                onChange={v => update(m.id, { minnieScore: setSide(m.minnieScore, 'b', v) })}
-                isAdmin={isAdmin}
-                winning={minBWin}
-                invalid={!minValid}
-                warn={minWarn}
-              />
-            </td>
+            {fmtData.map(d => (
+              <td key={d.fmt} className={'py-2 px-3 text-center ' + (d.bWin ? 'bg-emerald-50' : '')}>
+                <ScoreInput
+                  value={getSide(d.text, 'b')}
+                  onChange={v => writeScore(d.fmt, 'b', v)}
+                  isAdmin={isAdmin}
+                  winning={d.bWin}
+                  invalid={!d.valid}
+                  warn={d.warn}
+                />
+              </td>
+            ))}
           </tr>
         </tbody>
       </table>

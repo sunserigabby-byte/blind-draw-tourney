@@ -86,6 +86,13 @@ export type MickeyMatchRow = {
   pool: number;
   teamAId: string;
   teamBId: string;
+  // When `format` is set, the match plays a single set in that format.
+  // Round 1 of the pool's double round-robin uses one format (admin's pick)
+  // and round 2 uses the other, so a pair of teams gets one Mickey and one
+  // Minnie across their two meetings. Score lives in mickeyScore or
+  // minnieScore depending on `format`. Legacy matches without `format`
+  // still play both sets in one card.
+  format?: 'MICKEY' | 'MINNIE';
   mickeyScore?: string; // coed set, e.g. "21-18"
   minnieScore?: string; // revco set
 };

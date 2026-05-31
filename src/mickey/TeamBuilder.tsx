@@ -148,9 +148,11 @@ function drawTeams(pairUnits: Unit[], freeUnits: Unit[], targetPoolSize: number)
 }
 
 // Build matches for each pool using a double round-robin so every team
-// plays every other team in its pool twice. Round 1 then Round 2 to spread
-// the rematches out.
-function buildMatches(teams: MickeyTeam[]): MickeyMatchRow[] {
+// plays every other team in its pool twice. The first pass is one format
+// (firstFormat — admin's pick) and the rematch in the second pass is the
+// other format. Each generated match plays a single set in its format.
+function buildMatches(teams: MickeyTeam[], firstFormat: 'MICKEY' | 'MINNIE'): MickeyMatchRow[] {
+  const secondFormat: 'MICKEY' | 'MINNIE' = firstFormat === 'MICKEY' ? 'MINNIE' : 'MICKEY';
   const byPool = new Map<number, MickeyTeam[]>();
   for (const t of teams) {
     if (!byPool.has(t.pool)) byPool.set(t.pool, []);
@@ -159,9 +161,10 @@ function buildMatches(teams: MickeyTeam[]): MickeyMatchRow[] {
   const out: MickeyMatchRow[] = [];
   for (const [pool, ts] of [...byPool.entries()].sort((a, b) => a[0] - b[0])) {
     for (let pass = 0; pass < 2; pass++) {
+      const format = pass === 0 ? firstFormat : secondFormat;
       for (let i = 0; i < ts.length; i++) {
         for (let j = i + 1; j < ts.length; j++) {
-          out.push({ id: rid(), pool, teamAId: ts[i].id, teamBId: ts[j].id });
+          out.push({ id: rid(), pool, teamAId: ts[i].id, teamBId: ts[j].id, format });
         }
       }
     }
@@ -176,6 +179,8 @@ export function MickeyTeamBuilder({
   setTeams,
   matches,
   setMatches,
+  firstFormat,
+  setFirstFormat,
 }: {
   pairsText: string;
   freeAgentsText: string;
@@ -183,6 +188,8 @@ export function MickeyTeamBuilder({
   setTeams: (f: ((prev: MickeyTeam[]) => MickeyTeam[]) | MickeyTeam[]) => void;
   matches: MickeyMatchRow[];
   setMatches: (f: ((prev: MickeyMatchRow[]) => MickeyMatchRow[]) | MickeyMatchRow[]) => void;
+  firstFormat: 'MICKEY' | 'MINNIE';
+  setFirstFormat: (f: 'MICKEY' | 'MINNIE') => void;
 }) {
   const [confirmRedraw, setConfirmRedraw] = useState(false);
   const [confirmGen, setConfirmGen] = useState(false);
@@ -235,7 +242,7 @@ export function MickeyTeamBuilder({
     });
 
   const doGenerate = () => {
-    setMatches(buildMatches(teams));
+    setMatches(buildMatches(teams, firstFormat));
     setConfirmGen(false);
   };
 
@@ -377,16 +384,40 @@ export function MickeyTeamBuilder({
             </table>
           </div>
 
-          <div className="pt-2 border-t flex items-center gap-2 flex-wrap">
-            <button
-              className="px-3 py-1.5 rounded bg-emerald-600 text-white hover:bg-emerald-700 text-[13px]"
-              onClick={() => (matches.length ? setConfirmGen(true) : doGenerate())}
-            >
-              Generate Pool Matchups
-            </button>
-            <span className="text-[11px] text-slate-500">
-              Round-robin within each pool — every team plays every other team in its pool once (Mickey + Minnie set each).
-            </span>
+          <div className="pt-2 border-t space-y-2">
+            <div className="flex items-center gap-2 flex-wrap text-[12px]">
+              <span className="font-medium text-slate-700">First round plays:</span>
+              <label className="flex items-center gap-1.5">
+                <input
+                  type="radio"
+                  checked={firstFormat === 'MICKEY'}
+                  onChange={() => setFirstFormat('MICKEY')}
+                />
+                Mickey (coed)
+              </label>
+              <label className="flex items-center gap-1.5">
+                <input
+                  type="radio"
+                  checked={firstFormat === 'MINNIE'}
+                  onChange={() => setFirstFormat('MINNIE')}
+                />
+                Minnie (revco)
+              </label>
+              <span className="text-[11px] text-slate-400">
+                Rematches play the other format.
+              </span>
+            </div>
+            <div className="flex items-center gap-2 flex-wrap">
+              <button
+                className="px-3 py-1.5 rounded bg-emerald-600 text-white hover:bg-emerald-700 text-[13px]"
+                onClick={() => (matches.length ? setConfirmGen(true) : doGenerate())}
+              >
+                Generate Pool Matchups
+              </button>
+              <span className="text-[11px] text-slate-500">
+                Double round-robin — every team plays every other team twice (once each format).
+              </span>
+            </div>
           </div>
 
           {confirmGen && (
