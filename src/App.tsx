@@ -834,6 +834,8 @@ export default function BlindDrawTourneyApp() {
         <Sidebar
           activeTab={activeTab}
           setActiveTab={setActiveTab}
+          activeDivision={activeDivision}
+          setActiveDivision={setActiveDivision}
           activeSection={activeSection}
           setActiveSection={setActiveSection}
           open={sidebarOpen}
