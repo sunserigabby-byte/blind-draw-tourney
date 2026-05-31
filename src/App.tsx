@@ -25,6 +25,9 @@ import { MickeyMatchesView } from './mickey/MatchesView';
 import { MickeyLeaderboard } from './mickey/Leaderboard';
 import { MickeyPlayoffBuilder } from './mickey/PlayoffBuilder';
 import { MickeyBracketView } from './mickey/BracketView';
+import { MickeyBDRoundManager } from './mickeyBlind/RoundManager';
+import { MickeyBDMatchesView } from './mickeyBlind/MatchesView';
+import { MickeyBDLeaderboard } from './mickeyBlind/Leaderboard';
 import { ScoreSettingsPanel } from './components/ScoreSettingsPanel';
 import { Sidebar, SIDEBAR_DIVISIONS, SIDEBAR_SECTIONS, type SidebarSection, type SidebarTabKey } from './components/Sidebar';
 import { ThemeToggle, readStoredTheme, applyTheme, persistTheme, type Theme } from './components/ThemeToggle';
@@ -58,6 +61,24 @@ function emptyMickeyState(): MickeyDivisionState {
     pairsText: "", freeAgentsText: "", teams: [], matches: [], brackets: [],
     courtCount: 1, firstFormat: 'MICKEY', matchFormat: 'ALTERNATING',
   };
+}
+
+// Mickey & Minnie Blind Draw — teams re-randomize every round, but pairs
+// stay together within each round (same draw algorithm as fixed M&M).
+type MickeyBDRound = {
+  id: string;
+  number: number;
+  teams: MickeyTeam[];
+  matches: MickeyMatchRow[];
+};
+type MickeyBDDivisionState = {
+  pairsText: string;
+  freeAgentsText: string;
+  rounds: MickeyBDRound[];
+  courtCount?: number;
+};
+function emptyMickeyBDState(): MickeyBDDivisionState {
+  return { pairsText: "", freeAgentsText: "", rounds: [], courtCount: 1 };
 }
 
 // Short description for each format, shown at the top of its Home page.
@@ -109,6 +130,18 @@ const FORMAT_DESCRIPTIONS: Record<SidebarTabKey, { tagline: string; details: Rea
         <strong>Mickey</strong> (coed quads) and <strong>Minnie</strong> (revco quads), both to 21. Wins
         count per set with point differential as the tiebreaker. Playoffs add a seeded bracket plus a
         Redemption Rally consolation bracket for round 1 / round 2 losers.
+      </>
+    ),
+  },
+  MICKEYBD: {
+    tagline: 'Mickey & Minnie format with fresh teams every round — pairs stay together each draw.',
+    details: (
+      <>
+        Same Mickey + Minnie set structure, but teams <strong>re-randomize every round</strong> instead of
+        staying together for pool play. Each round plays one match per team with a Mickey set and a Minnie
+        set back-to-back, then everyone is re-shuffled into new teams of 4 for the next round. Pairs always
+        stay together inside a round. The leaderboard adds up each pair's and free agent's wins across all
+        rounds played.
       </>
     ),
   },
@@ -194,6 +227,9 @@ export default function BlindDrawTourneyApp() {
   const [mUpper, setMUpper] = useState<MickeyDivisionState>(emptyMickeyState());
   const [mLower, setMLower] = useState<MickeyDivisionState>(emptyMickeyState());
   const [mScoreSettings, setMScoreSettings] = useState<ScoreSettings>({ playTo: 21, cap: null });
+  const [mbdUpper, setMBDUpper] = useState<MickeyBDDivisionState>(emptyMickeyBDState());
+  const [mbdLower, setMBDLower] = useState<MickeyBDDivisionState>(emptyMickeyBDState());
+  const [mbdScoreSettings, setMBDScoreSettings] = useState<ScoreSettings>({ playTo: 21, cap: null });
 
   async function handleResetApp() {
     const ok = window.confirm(
@@ -211,6 +247,8 @@ export default function BlindDrawTourneyApp() {
     const emptyKobLower = emptyDivisionState<KobGameRow>();
     const emptyMUpper = emptyMickeyState();
     const emptyMLower = emptyMickeyState();
+    const emptyMBDUpper = emptyMickeyBDState();
+    const emptyMBDLower = emptyMickeyBDState();
 
     setDUpper(emptyDUpper);
     setDLower(emptyDLower);
@@ -222,6 +260,8 @@ export default function BlindDrawTourneyApp() {
     setKobLower(emptyKobLower);
     setMUpper(emptyMUpper);
     setMLower(emptyMLower);
+    setMBDUpper(emptyMBDUpper);
+    setMBDLower(emptyMBDLower);
     setActiveTab("DOUBLES");
     setActiveDivision("UPPER");
     setActiveSection("HOME");
@@ -260,11 +300,12 @@ export default function BlindDrawTourneyApp() {
     triples: { UPPER: tUpper, LOWER: tLower },
     kob: { UPPER: kobUpper, LOWER: kobLower },
     mickey: { UPPER: mUpper, LOWER: mLower },
-    dScoreSettings, qScoreSettings, tScoreSettings, kobScoreSettings, mScoreSettings,
+    mickeyBD: { UPPER: mbdUpper, LOWER: mbdLower },
+    dScoreSettings, qScoreSettings, tScoreSettings, kobScoreSettings, mScoreSettings, mbdScoreSettings,
     guysText: dUpper.guysText, girlsText: dUpper.girlsText, matches: dUpper.matches, brackets: dUpper.brackets,
     qGuysText: qUpper.guysText, qGirlsText: qUpper.girlsText, qMatches: qUpper.matches, qBrackets: qUpper.brackets,
     tGuysText: tUpper.guysText, tGirlsText: tUpper.girlsText, tMatches: tUpper.matches, tBrackets: tUpper.brackets,
-  } as any), [activeTab, activeDivision, dUpper, dLower, qUpper, qLower, tUpper, tLower, kobUpper, kobLower, mUpper, mLower, dScoreSettings, qScoreSettings, tScoreSettings, kobScoreSettings, mScoreSettings]);
+  } as any), [activeTab, activeDivision, dUpper, dLower, qUpper, qLower, tUpper, tLower, kobUpper, kobLower, mUpper, mLower, mbdUpper, mbdLower, dScoreSettings, qScoreSettings, tScoreSettings, kobScoreSettings, mScoreSettings, mbdScoreSettings]);
 
   useEffect(() => {
     (async () => {
@@ -282,13 +323,16 @@ export default function BlindDrawTourneyApp() {
           if (data.kob?.LOWER) setKobLower(data.kob.LOWER);
           if (data.mickey?.UPPER) setMUpper(data.mickey.UPPER);
           if (data.mickey?.LOWER) setMLower(data.mickey.LOWER);
+          if (data.mickeyBD?.UPPER) setMBDUpper(data.mickeyBD.UPPER);
+          if (data.mickeyBD?.LOWER) setMBDLower(data.mickeyBD.LOWER);
           if (data.dScoreSettings) setDScoreSettings(data.dScoreSettings);
           if (data.qScoreSettings) setQScoreSettings(data.qScoreSettings);
           else if (data.qScoreCap === 21 || data.qScoreCap === 25) setQScoreSettings({ playTo: 21, cap: data.qScoreCap });
           if (data.tScoreSettings) setTScoreSettings(data.tScoreSettings);
           if (data.kobScoreSettings) setKobScoreSettings(data.kobScoreSettings);
           if (data.mScoreSettings) setMScoreSettings(data.mScoreSettings);
-          if (data.activeTab === "DOUBLES" || data.activeTab === "QUADS" || data.activeTab === "TRIPLES" || data.activeTab === "KOB" || data.activeTab === "MICKEY") setActiveTab(data.activeTab);
+          if (data.mbdScoreSettings) setMBDScoreSettings(data.mbdScoreSettings);
+          if (data.activeTab === "DOUBLES" || data.activeTab === "QUADS" || data.activeTab === "TRIPLES" || data.activeTab === "KOB" || data.activeTab === "MICKEY" || data.activeTab === "MICKEYBD") setActiveTab(data.activeTab);
           if (data.activeDivision === "UPPER" || data.activeDivision === "LOWER") setActiveDivision(data.activeDivision);
         }
         setLoadingRemote(false);
@@ -336,6 +380,8 @@ export default function BlindDrawTourneyApp() {
   const setCurrentKob = activeDivision === "UPPER" ? setKobUpper : setKobLower;
   const currentM = activeDivision === "UPPER" ? mUpper : mLower;
   const setCurrentM = activeDivision === "UPPER" ? setMUpper : setMLower;
+  const currentMBD = activeDivision === "UPPER" ? mbdUpper : mbdLower;
+  const setCurrentMBD = activeDivision === "UPPER" ? setMBDUpper : setMBDLower;
 
   const currentDivisionMeta = SIDEBAR_DIVISIONS.find(d => d.key === activeTab);
   const divisionLabel = currentDivisionMeta?.label ?? activeTab;
@@ -470,7 +516,7 @@ export default function BlindDrawTourneyApp() {
       poolsSubtitle = 'Pool games and standings';
       playoffsBadge = finals.length > 0 ? `${scoredKobCount(finals)}/${finals.length}` : 'Not built';
       playoffsSubtitle = 'Gold and Silver finals';
-    } else { // MICKEY
+    } else if (activeTab === 'MICKEY') {
       const teamCount = currentM.teams.length;
       teamsBadge = `${teamCount}`;
       teamsSubtitle = 'Pairs, free agents, teams of 4';
@@ -479,6 +525,17 @@ export default function BlindDrawTourneyApp() {
       poolsSubtitle = 'Pool matchups and standings';
       playoffsBadge = currentM.brackets.length > 0 ? 'Built' : 'Not built';
       playoffsSubtitle = 'Bracket and Redemption Rally';
+    } else { // MICKEYBD
+      const totalMatches = currentMBD.rounds.reduce((n, r) => n + r.matches.length, 0);
+      const scoredSets = currentMBD.rounds.reduce(
+        (n, r) => n + scoredMickeyCount(r.matches), 0,
+      );
+      teamsBadge = `${currentMBD.rounds.length}`;
+      teamsSubtitle = `Roster and round generator (${currentMBD.rounds.length} round${currentMBD.rounds.length === 1 ? '' : 's'} so far)`;
+      poolsBadge = `${scoredSets}/${totalMatches * 2}`;
+      poolsSubtitle = 'Matches across all rounds + standings';
+      playoffsBadge = 'Coming next';
+      playoffsSubtitle = 'Bracket from aggregate standings (TBD)';
     }
 
     const desc = FORMAT_DESCRIPTIONS[activeTab];
@@ -824,6 +881,69 @@ export default function BlindDrawTourneyApp() {
               isAdmin={isAdmin}
             />
           </>
+        );
+      }
+    }
+
+    if (activeTab === 'MICKEYBD') {
+      if (activeSection === 'TEAMS') {
+        return (
+          <fieldset disabled={!isAdmin} className={!isAdmin ? "opacity-95" : ""}>
+            <section className="bg-white rounded-xl shadow-sm ring-1 ring-slate-200 p-4">
+              <SectionHeader
+                title={`Sign-ups (Mickey & Minnie Blind Draw – ${activeDivision})`}
+                subtitle={"Add (M)/(F) and optional 1–5 skill markers, e.g. Amanda(F4) and Chance(M3). Teams re-randomize every round."}
+                right={<ScoreSettingsPanel settings={mbdScoreSettings} onChange={setMBDScoreSettings} />}
+              />
+              <div className="grid md:grid-cols-2 gap-4">
+                <LineNumberTextarea
+                  id={`mbd-pairs-${activeDivision}`}
+                  label="Pairs"
+                  value={currentMBD.pairsText}
+                  onChange={(e) => setCurrentMBD(p => ({ ...p, pairsText: e.target.value }))}
+                />
+                <LineNumberTextarea
+                  id={`mbd-free-${activeDivision}`}
+                  label="Free Agents"
+                  value={currentMBD.freeAgentsText}
+                  onChange={(e) => setCurrentMBD(p => ({ ...p, freeAgentsText: e.target.value }))}
+                />
+              </div>
+            </section>
+            <MickeyBDRoundManager
+              pairsText={currentMBD.pairsText}
+              freeAgentsText={currentMBD.freeAgentsText}
+              rounds={currentMBD.rounds}
+              setRounds={(v: any) => setCurrentMBD(p => ({ ...p, rounds: typeof v === 'function' ? v(p.rounds) : v }))}
+            />
+          </fieldset>
+        );
+      }
+      if (activeSection === 'POOLS') {
+        return (
+          <>
+            <MickeyBDMatchesView
+              rounds={currentMBD.rounds}
+              setRounds={(v: any) => setCurrentMBD(p => ({ ...p, rounds: typeof v === 'function' ? v(p.rounds) : v }))}
+              pairsText={currentMBD.pairsText}
+              isAdmin={isAdmin}
+              scoreSettings={mbdScoreSettings}
+            />
+            <MickeyBDLeaderboard
+              rounds={currentMBD.rounds}
+              pairsText={currentMBD.pairsText}
+              freeAgentsText={currentMBD.freeAgentsText}
+              scoreSettings={mbdScoreSettings}
+            />
+          </>
+        );
+      }
+      if (activeSection === 'PLAYOFFS') {
+        return (
+          <section className="bg-white rounded-xl shadow-sm ring-1 ring-slate-200 p-4 text-[13px] text-slate-600">
+            Playoffs aren't built for this format yet — you can keep adding rounds in the
+            <span className="font-semibold"> Teams</span> sub-tab. A seeded bracket from the aggregate standings is on the list.
+          </section>
         );
       }
     }

@@ -8,9 +8,9 @@ import {
 
 const rid = () => Math.random().toString(36).slice(2, 10);
 
-type Unit = { members: GenderedName[]; size: number; M: number; F: number; totalSkill: number };
+export type Unit = { members: GenderedName[]; size: number; M: number; F: number; totalSkill: number };
 
-function toUnit(members: GenderedName[]): Unit {
+export function toUnit(members: GenderedName[]): Unit {
   return {
     members,
     size: members.length,
@@ -26,7 +26,7 @@ function toUnit(members: GenderedName[]): Unit {
 // 0 → 2 → 4 and never hit odd sizes — so a pair can always find a 2-slot
 // home no matter when it shows up in the order. Pairs and free-agent groups
 // genuinely interleave, no "pairs first" priority needed.
-function drawTeams(pairUnits: Unit[], freeUnits: Unit[], targetPoolSize: number): MickeyTeam[] {
+export function drawTeams(pairUnits: Unit[], freeUnits: Unit[], targetPoolSize: number): MickeyTeam[] {
   type Bin = { players: string[]; size: number; M: number; F: number; totalSkill: number };
 
   const totalPlayers =

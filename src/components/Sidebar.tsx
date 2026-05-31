@@ -1,6 +1,6 @@
 import React from 'react';
 
-export type SidebarTabKey = 'DOUBLES' | 'QUADS' | 'TRIPLES' | 'KOB' | 'MICKEY';
+export type SidebarTabKey = 'DOUBLES' | 'QUADS' | 'TRIPLES' | 'KOB' | 'MICKEY' | 'MICKEYBD';
 export type SidebarSection = 'HOME' | 'TEAMS' | 'POOLS' | 'PLAYOFFS';
 export type SidebarDivision = 'UPPER' | 'LOWER';
 
@@ -12,6 +12,9 @@ export const SIDEBAR_DIVISIONS: { key: SidebarTabKey; label: string; blindDraw: 
   // Mickey & Minnie isn't a pure blind draw — teams are pre-formed from
   // sign-up pairs + free agents and stay together through the event.
   { key: 'MICKEY', label: 'Mickey & Minnie', blindDraw: false },
+  // Mickey & Minnie Blind Draw — teams re-randomize every round; each
+  // round plays a single match with Mickey + Minnie sets back-to-back.
+  { key: 'MICKEYBD', label: 'Mickey & Minnie Blind Draw', blindDraw: true },
 ];
 
 export const SIDEBAR_SECTIONS: { key: SidebarSection; label: string }[] = [
