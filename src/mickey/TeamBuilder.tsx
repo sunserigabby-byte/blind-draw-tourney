@@ -20,66 +20,26 @@ function toUnit(members: GenderedName[]): Unit {
   };
 }
 
-type Bucket = 'pairsMF' | 'pairsMM' | 'pairsFF' | 'pairsOther' | 'freeM' | 'freeF' | 'freeUnknown';
-type Composition = Bucket[];
-
-// 4-player team compositions that yield 2 guys + 2 girls when possible.
-const COMPOSITIONS: Composition[] = [
-  ['pairsMF', 'pairsMF'],              // two mixed pairs hang out together
-  ['pairsMM', 'pairsFF'],              // all-guy pair + all-girl pair
-  ['pairsMF', 'freeM', 'freeF'],       // a pair + one guy + one girl free agent
-  ['pairsMM', 'freeF', 'freeF'],       // all-guy pair + two girl free agents
-  ['pairsFF', 'freeM', 'freeM'],       // all-girl pair + two guy free agents
-  ['freeM', 'freeM', 'freeF', 'freeF'], // four free agents, 2M + 2F
-];
-
-// Composition-based, skill-aware draw. For each team we pick a random valid
-// 4-player template (e.g. "two pairs", "pair + 1M + 1F"); within each template
-// we pick the specific units whose skill ratings keep the team close to the
-// average. Pairs always stay together. When gender stocks are uneven, the
-// remainder falls through to a greedy fill.
+// "Smallest team first" draw. We pre-allocate ceil(N/4) teams, then walk
+// pairs (shuffled) first followed by free agents (shuffled), and for each unit
+// pick the team that's currently smallest — with gender balance and skill as
+// tiebreakers. This naturally SPREADS pairs across teams, so leftover same-
+// gender free agents land WITH a pair (e.g. 2 MF pairs + 4 male free agents
+// → two teams of 3M+1F instead of one perfect 2M+2F and one all-male team).
 function drawTeams(pairUnits: Unit[], freeUnits: Unit[], targetPoolSize: number): MickeyTeam[] {
   type Bin = { players: string[]; size: number; M: number; F: number; totalSkill: number };
-  const teams: Bin[] = [];
 
-  const buckets: Record<Bucket, Unit[]> = {
-    pairsMF: shuffle(pairUnits.filter(u => u.M === 1 && u.F === 1)),
-    pairsMM: shuffle(pairUnits.filter(u => u.M === 2 && u.F === 0)),
-    pairsFF: shuffle(pairUnits.filter(u => u.F === 2 && u.M === 0)),
-    pairsOther: shuffle(pairUnits.filter(u => u.M + u.F < 2)),
-    freeM: shuffle(freeUnits.filter(u => u.M === 1)),
-    freeF: shuffle(freeUnits.filter(u => u.F === 1)),
-    freeUnknown: shuffle(freeUnits.filter(u => u.M === 0 && u.F === 0)),
-  };
-
+  const totalPlayers =
+    pairUnits.reduce((n, u) => n + u.size, 0) + freeUnits.length;
   const totalSkill =
     pairUnits.reduce((n, u) => n + u.totalSkill, 0) +
     freeUnits.reduce((n, u) => n + u.totalSkill, 0);
-  const totalPlayers =
-    pairUnits.reduce((n, u) => n + u.size, 0) + freeUnits.length;
   const targetPerPlayer = totalPlayers > 0 ? totalSkill / totalPlayers : 3;
 
-  const compositionFits = (comp: Composition): boolean => {
-    const need: Partial<Record<Bucket, number>> = {};
-    for (const b of comp) need[b] = (need[b] ?? 0) + 1;
-    return (Object.entries(need) as [Bucket, number][])
-      .every(([b, n]) => buckets[b].length >= n);
-  };
-
-  // Among candidates in `list`, pick (and remove) one whose skill brings the
-  // team's running total closest to the ideal per-player average. Top-3 random
-  // tiebreak so re-draw keeps some variety.
-  const takeBalanced = (list: Unit[], teamSkillSoFar: number, teamSizeSoFar: number): Unit => {
-    const scored = list.map((u, idx) => {
-      const newSize = teamSizeSoFar + u.size;
-      const ideal = newSize * targetPerPlayer;
-      return { idx, u, dist: Math.abs(teamSkillSoFar + u.totalSkill - ideal) };
-    }).sort((a, b) => a.dist - b.dist);
-    const K = Math.min(3, scored.length);
-    const pick = scored[Math.floor(Math.random() * K)];
-    list.splice(pick.idx, 1);
-    return pick.u;
-  };
+  const T = Math.max(1, Math.ceil(totalPlayers / 4));
+  const teams: Bin[] = Array.from({ length: T }, () => ({
+    players: [], size: 0, M: 0, F: 0, totalSkill: 0,
+  }));
 
   const addUnit = (team: Bin, u: Unit) => {
     team.players.push(...u.members.map(m => m.name));
@@ -89,57 +49,46 @@ function drawTeams(pairUnits: Unit[], freeUnits: Unit[], targetPoolSize: number)
     team.totalSkill += u.totalSkill;
   };
 
-  // Main loop: build teams from valid compositions until we can't.
-  while (true) {
-    const valid = COMPOSITIONS.filter(compositionFits);
-    if (valid.length === 0) break;
-    const comp = valid[Math.floor(Math.random() * valid.length)];
-    const team: Bin = { players: [], size: 0, M: 0, F: 0, totalSkill: 0 };
-    for (const slot of comp) {
-      const u = takeBalanced(buckets[slot], team.totalSkill, team.size);
-      addUnit(team, u);
-    }
-    teams.push(team);
-  }
+  // Pairs first so they get distributed first; free agents fill the gaps.
+  const ordered = [...shuffle(pairUnits), ...shuffle(freeUnits)];
 
-  // Fallback: anything left over (uneven gender stocks, unmarked names) gets
-  // packed greedily — pairs first, then free agents — into existing or new
-  // teams, scored by gender + skill distance.
-  const leftoverPairs = shuffle([
-    ...buckets.pairsMF, ...buckets.pairsMM, ...buckets.pairsFF, ...buckets.pairsOther,
-  ]);
-  const leftoverFrees = shuffle([
-    ...buckets.freeM, ...buckets.freeF, ...buckets.freeUnknown,
-  ]);
-
-  const placeLeftover = (u: Unit) => {
-    let best: Bin | null = null;
-    let bestScore = Infinity;
-    for (const t of teams) {
+  for (const u of ordered) {
+    let bestIdx = -1;
+    let bestKey: [number, number, number] = [Infinity, Infinity, Infinity];
+    for (let i = 0; i < teams.length; i++) {
+      const t = teams[i];
       if (t.size + u.size > 4) continue;
       const newSize = t.size + u.size;
-      const newSkill = t.totalSkill + u.totalSkill;
       const newM = t.M + u.M;
       const newF = t.F + u.F;
+      const newSkill = t.totalSkill + u.totalSkill;
       const genderDist = Math.abs(newM - 2) + Math.abs(newF - 2);
       const skillDist = Math.abs(newSkill - newSize * targetPerPlayer);
-      const score = genderDist * 100 + skillDist * 5 + newSize;
-      if (score < bestScore) { bestScore = score; best = t; }
+      // Lex order: smallest size beats anything; gender breaks size ties;
+      // skill breaks gender ties.
+      if (
+        newSize < bestKey[0] ||
+        (newSize === bestKey[0] &&
+          (genderDist < bestKey[1] ||
+            (genderDist === bestKey[1] && skillDist < bestKey[2])))
+      ) {
+        bestKey = [newSize, genderDist, skillDist];
+        bestIdx = i;
+      }
     }
-    if (!best) {
-      best = { players: [], size: 0, M: 0, F: 0, totalSkill: 0 };
-      teams.push(best);
+    if (bestIdx === -1) {
+      // No existing team had room (edge case with awkward splits) → start a
+      // new team.
+      teams.push({ players: [], size: 0, M: 0, F: 0, totalSkill: 0 });
+      bestIdx = teams.length - 1;
     }
-    addUnit(best, u);
-  };
+    addUnit(teams[bestIdx], u);
+  }
 
-  for (const u of leftoverPairs) placeLeftover(u);
-  for (const u of leftoverFrees) placeLeftover(u);
-
-  const n = teams.length;
-  const poolCount = Math.max(1, Math.round(n / Math.max(2, targetPoolSize)));
-  const names = pickFunTeamNames(n);
-  return teams.map((b, i) => ({
+  const filled = teams.filter(t => t.size > 0);
+  const poolCount = Math.max(1, Math.round(filled.length / Math.max(2, targetPoolSize)));
+  const names = pickFunTeamNames(filled.length);
+  return filled.map((b, i) => ({
     id: rid(),
     name: names[i],
     players: b.players,
@@ -147,11 +96,15 @@ function drawTeams(pairUnits: Unit[], freeUnits: Unit[], targetPoolSize: number)
   }));
 }
 
-// Build matches for each pool using a double round-robin so every team
-// plays every other team in its pool twice. The first pass is one format
-// (firstFormat — admin's pick) and the rematch in the second pass is the
-// other format. Each generated match plays a single set in its format.
-function buildMatches(teams: MickeyTeam[], firstFormat: 'MICKEY' | 'MINNIE'): MickeyMatchRow[] {
+// Build pool matchups. The matchFormat decides whether each pair of teams
+// meets in ONE match playing both Mickey + Minnie sets back-to-back
+// ('COMBINED', single round-robin), or in TWO matches each playing a single
+// set in alternating formats ('ALTERNATING', double round-robin).
+function buildMatches(
+  teams: MickeyTeam[],
+  firstFormat: 'MICKEY' | 'MINNIE',
+  matchFormat: 'COMBINED' | 'ALTERNATING',
+): MickeyMatchRow[] {
   const secondFormat: 'MICKEY' | 'MINNIE' = firstFormat === 'MICKEY' ? 'MINNIE' : 'MICKEY';
   const byPool = new Map<number, MickeyTeam[]>();
   for (const t of teams) {
@@ -160,11 +113,21 @@ function buildMatches(teams: MickeyTeam[], firstFormat: 'MICKEY' | 'MINNIE'): Mi
   }
   const out: MickeyMatchRow[] = [];
   for (const [pool, ts] of [...byPool.entries()].sort((a, b) => a[0] - b[0])) {
-    for (let pass = 0; pass < 2; pass++) {
-      const format = pass === 0 ? firstFormat : secondFormat;
+    if (matchFormat === 'COMBINED') {
+      // Single round-robin. No format field → match plays both sets.
       for (let i = 0; i < ts.length; i++) {
         for (let j = i + 1; j < ts.length; j++) {
-          out.push({ id: rid(), pool, teamAId: ts[i].id, teamBId: ts[j].id, format });
+          out.push({ id: rid(), pool, teamAId: ts[i].id, teamBId: ts[j].id });
+        }
+      }
+    } else {
+      // Double round-robin. Round 1 = firstFormat, round 2 = the other.
+      for (let pass = 0; pass < 2; pass++) {
+        const format = pass === 0 ? firstFormat : secondFormat;
+        for (let i = 0; i < ts.length; i++) {
+          for (let j = i + 1; j < ts.length; j++) {
+            out.push({ id: rid(), pool, teamAId: ts[i].id, teamBId: ts[j].id, format });
+          }
         }
       }
     }
@@ -181,6 +144,8 @@ export function MickeyTeamBuilder({
   setMatches,
   firstFormat,
   setFirstFormat,
+  matchFormat,
+  setMatchFormat,
 }: {
   pairsText: string;
   freeAgentsText: string;
@@ -190,6 +155,8 @@ export function MickeyTeamBuilder({
   setMatches: (f: ((prev: MickeyMatchRow[]) => MickeyMatchRow[]) | MickeyMatchRow[]) => void;
   firstFormat: 'MICKEY' | 'MINNIE';
   setFirstFormat: (f: 'MICKEY' | 'MINNIE') => void;
+  matchFormat: 'COMBINED' | 'ALTERNATING';
+  setMatchFormat: (f: 'COMBINED' | 'ALTERNATING') => void;
 }) {
   const [confirmRedraw, setConfirmRedraw] = useState(false);
   const [confirmGen, setConfirmGen] = useState(false);
@@ -242,7 +209,7 @@ export function MickeyTeamBuilder({
     });
 
   const doGenerate = () => {
-    setMatches(buildMatches(teams, firstFormat));
+    setMatches(buildMatches(teams, firstFormat, matchFormat));
     setConfirmGen(false);
   };
 
@@ -385,28 +352,53 @@ export function MickeyTeamBuilder({
           </div>
 
           <div className="pt-2 border-t space-y-2">
-            <div className="flex items-center gap-2 flex-wrap text-[12px]">
-              <span className="font-medium text-slate-700">First round plays:</span>
-              <label className="flex items-center gap-1.5">
-                <input
-                  type="radio"
-                  checked={firstFormat === 'MICKEY'}
-                  onChange={() => setFirstFormat('MICKEY')}
-                />
-                Mickey (coed)
-              </label>
-              <label className="flex items-center gap-1.5">
-                <input
-                  type="radio"
-                  checked={firstFormat === 'MINNIE'}
-                  onChange={() => setFirstFormat('MINNIE')}
-                />
-                Minnie (revco)
-              </label>
-              <span className="text-[11px] text-slate-400">
-                Rematches play the other format.
-              </span>
+            <div className="flex items-start gap-2 flex-wrap text-[12px]">
+              <span className="font-medium text-slate-700 mt-0.5">Match format:</span>
+              <div className="flex flex-col gap-1">
+                <label className="flex items-center gap-1.5">
+                  <input
+                    type="radio"
+                    checked={matchFormat === 'COMBINED'}
+                    onChange={() => setMatchFormat('COMBINED')}
+                  />
+                  <span>Combined &mdash; <span className="text-slate-500">one match per pair, both Mickey + Minnie sets back-to-back</span></span>
+                </label>
+                <label className="flex items-center gap-1.5">
+                  <input
+                    type="radio"
+                    checked={matchFormat === 'ALTERNATING'}
+                    onChange={() => setMatchFormat('ALTERNATING')}
+                  />
+                  <span>Alternating &mdash; <span className="text-slate-500">two matches per pair, one set each, rematch is the other format</span></span>
+                </label>
+              </div>
             </div>
+
+            {matchFormat === 'ALTERNATING' && (
+              <div className="flex items-center gap-2 flex-wrap text-[12px] pl-1">
+                <span className="font-medium text-slate-700">First round plays:</span>
+                <label className="flex items-center gap-1.5">
+                  <input
+                    type="radio"
+                    checked={firstFormat === 'MICKEY'}
+                    onChange={() => setFirstFormat('MICKEY')}
+                  />
+                  Mickey (coed)
+                </label>
+                <label className="flex items-center gap-1.5">
+                  <input
+                    type="radio"
+                    checked={firstFormat === 'MINNIE'}
+                    onChange={() => setFirstFormat('MINNIE')}
+                  />
+                  Minnie (revco)
+                </label>
+                <span className="text-[11px] text-slate-400">
+                  Rematches play the other format.
+                </span>
+              </div>
+            )}
+
             <div className="flex items-center gap-2 flex-wrap">
               <button
                 className="px-3 py-1.5 rounded bg-emerald-600 text-white hover:bg-emerald-700 text-[13px]"
@@ -415,7 +407,9 @@ export function MickeyTeamBuilder({
                 Generate Pool Matchups
               </button>
               <span className="text-[11px] text-slate-500">
-                Double round-robin — every team plays every other team twice (once each format).
+                {matchFormat === 'COMBINED'
+                  ? 'Single round-robin — every team plays every other team once (both sets per match).'
+                  : 'Double round-robin — every team plays every other team twice (once each format).'}
               </span>
             </div>
           </div>

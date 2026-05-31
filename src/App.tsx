@@ -47,9 +47,17 @@ type MickeyDivisionState = {
   brackets: BracketMatch[];
   courtCount?: number;
   firstFormat?: 'MICKEY' | 'MINNIE';
+  // 'COMBINED' = single round-robin, each match plays both Mickey + Minnie
+  // sets back-to-back (one match card with two score columns).
+  // 'ALTERNATING' = double round-robin, round 1 all one format and round 2
+  // the other (one set per match card).
+  matchFormat?: 'COMBINED' | 'ALTERNATING';
 };
 function emptyMickeyState(): MickeyDivisionState {
-  return { pairsText: "", freeAgentsText: "", teams: [], matches: [], brackets: [], courtCount: 1, firstFormat: 'MICKEY' };
+  return {
+    pairsText: "", freeAgentsText: "", teams: [], matches: [], brackets: [],
+    courtCount: 1, firstFormat: 'MICKEY', matchFormat: 'ALTERNATING',
+  };
 }
 
 // Short description for each format, shown at the top of its Home page.
@@ -767,6 +775,8 @@ export default function BlindDrawTourneyApp() {
               setMatches={(v: any) => setCurrentM(p => ({ ...p, matches: typeof v === 'function' ? v(p.matches) : v }))}
               firstFormat={currentM.firstFormat ?? 'MICKEY'}
               setFirstFormat={(f) => setCurrentM(p => ({ ...p, firstFormat: f }))}
+              matchFormat={currentM.matchFormat ?? 'ALTERNATING'}
+              setMatchFormat={(f) => setCurrentM(p => ({ ...p, matchFormat: f }))}
             />
           </fieldset>
         );
