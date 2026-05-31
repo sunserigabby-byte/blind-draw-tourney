@@ -335,8 +335,10 @@ export default function BlindDrawTourneyApp() {
           if (data.kob?.LOWER) setKobLower(data.kob.LOWER);
           if (data.mickey?.UPPER) setMUpper(data.mickey.UPPER);
           if (data.mickey?.LOWER) setMLower(data.mickey.LOWER);
-          if (data.mickeyBD?.UPPER) setMBDUpper(data.mickeyBD.UPPER);
-          if (data.mickeyBD?.LOWER) setMBDLower(data.mickeyBD.LOWER);
+          // Merge with empty state so older saves (which may not have all
+          // fields like `brackets`) don't crash on .length / .some().
+          if (data.mickeyBD?.UPPER) setMBDUpper({ ...emptyMickeyBDState(), ...data.mickeyBD.UPPER });
+          if (data.mickeyBD?.LOWER) setMBDLower({ ...emptyMickeyBDState(), ...data.mickeyBD.LOWER });
           if (data.dScoreSettings) setDScoreSettings(data.dScoreSettings);
           if (data.qScoreSettings) setQScoreSettings(data.qScoreSettings);
           else if (data.qScoreCap === 21 || data.qScoreCap === 25) setQScoreSettings({ playTo: 21, cap: data.qScoreCap });
@@ -538,15 +540,17 @@ export default function BlindDrawTourneyApp() {
       playoffsBadge = currentM.brackets.length > 0 ? 'Built' : 'Not built';
       playoffsSubtitle = 'Bracket and Redemption Rally';
     } else { // MICKEYBD
-      const totalMatches = currentMBD.rounds.reduce((n, r) => n + r.matches.length, 0);
-      const scoredSets = currentMBD.rounds.reduce(
+      const rounds = currentMBD.rounds ?? [];
+      const brackets = currentMBD.brackets ?? [];
+      const totalMatches = rounds.reduce((n, r) => n + r.matches.length, 0);
+      const scoredSets = rounds.reduce(
         (n, r) => n + scoredMickeyCount(r.matches), 0,
       );
-      teamsBadge = `${currentMBD.rounds.length}`;
-      teamsSubtitle = `Roster and round generator (${currentMBD.rounds.length} round${currentMBD.rounds.length === 1 ? '' : 's'} so far)`;
+      teamsBadge = `${rounds.length}`;
+      teamsSubtitle = `Roster and round generator (${rounds.length} round${rounds.length === 1 ? '' : 's'} so far)`;
       poolsBadge = `${scoredSets}/${totalMatches * 2}`;
       poolsSubtitle = 'Matches across all rounds + standings';
-      playoffsBadge = currentMBD.brackets.length > 0 ? 'Built' : 'Not built';
+      playoffsBadge = brackets.length > 0 ? 'Built' : 'Not built';
       playoffsSubtitle = 'Re-drawn playoff teams + Redemption Rally';
     }
 
@@ -955,17 +959,17 @@ export default function BlindDrawTourneyApp() {
           <>
             <fieldset disabled={!isAdmin} className={!isAdmin ? "opacity-95" : ""}>
               <MickeyBDPlayoffBuilder
-                rounds={currentMBD.rounds}
+                rounds={currentMBD.rounds ?? []}
                 pairsText={currentMBD.pairsText}
                 freeAgentsText={currentMBD.freeAgentsText}
-                brackets={currentMBD.brackets}
-                setBrackets={(v: any) => setCurrentMBD(p => ({ ...p, brackets: typeof v === 'function' ? v(p.brackets) : v }))}
+                brackets={currentMBD.brackets ?? []}
+                setBrackets={(v: any) => setCurrentMBD(p => ({ ...p, brackets: typeof v === 'function' ? v(p.brackets ?? []) : v }))}
                 division={activeDivision}
               />
             </fieldset>
             <MickeyBracketView
-              brackets={currentMBD.brackets}
-              setBrackets={(v: any) => setCurrentMBD(p => ({ ...p, brackets: typeof v === 'function' ? v(p.brackets) : v }))}
+              brackets={currentMBD.brackets ?? []}
+              setBrackets={(v: any) => setCurrentMBD(p => ({ ...p, brackets: typeof v === 'function' ? v(p.brackets ?? []) : v }))}
               isAdmin={isAdmin}
             />
           </>
