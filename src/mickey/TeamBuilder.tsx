@@ -147,6 +147,9 @@ function drawTeams(pairUnits: Unit[], freeUnits: Unit[], targetPoolSize: number)
   }));
 }
 
+// Build matches for each pool using a double round-robin so every team
+// plays every other team in its pool twice. Round 1 then Round 2 to spread
+// the rematches out.
 function buildMatches(teams: MickeyTeam[]): MickeyMatchRow[] {
   const byPool = new Map<number, MickeyTeam[]>();
   for (const t of teams) {
@@ -155,9 +158,11 @@ function buildMatches(teams: MickeyTeam[]): MickeyMatchRow[] {
   }
   const out: MickeyMatchRow[] = [];
   for (const [pool, ts] of [...byPool.entries()].sort((a, b) => a[0] - b[0])) {
-    for (let i = 0; i < ts.length; i++) {
-      for (let j = i + 1; j < ts.length; j++) {
-        out.push({ id: rid(), pool, teamAId: ts[i].id, teamBId: ts[j].id });
+    for (let pass = 0; pass < 2; pass++) {
+      for (let i = 0; i < ts.length; i++) {
+        for (let j = i + 1; j < ts.length; j++) {
+          out.push({ id: rid(), pool, teamAId: ts[i].id, teamBId: ts[j].id });
+        }
       }
     }
   }
