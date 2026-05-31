@@ -20,12 +20,12 @@ function toUnit(members: GenderedName[]): Unit {
   };
 }
 
-// "Smallest team first" draw. We pre-allocate ceil(N/4) teams, then walk
-// pairs (shuffled) first followed by free agents (shuffled), and for each unit
-// pick the team that's currently smallest — with gender balance and skill as
-// tiebreakers. This naturally SPREADS pairs across teams, so leftover same-
-// gender free agents land WITH a pair (e.g. 2 MF pairs + 4 male free agents
-// → two teams of 3M+1F instead of one perfect 2M+2F and one all-male team).
+// "Block of 2" interleaved draw. Pre-pair free agents into size-2 sub-blocks
+// (preferring 1M + 1F per block), then shuffle pairs and FA-blocks TOGETHER
+// and walk them in random order. Because every block is size 2, teams grow
+// 0 → 2 → 4 and never hit odd sizes — so a pair can always find a 2-slot
+// home no matter when it shows up in the order. Pairs and free-agent groups
+// genuinely interleave, no "pairs first" priority needed.
 function drawTeams(pairUnits: Unit[], freeUnits: Unit[], targetPoolSize: number): MickeyTeam[] {
   type Bin = { players: string[]; size: number; M: number; F: number; totalSkill: number };
 
@@ -41,6 +41,38 @@ function drawTeams(pairUnits: Unit[], freeUnits: Unit[], targetPoolSize: number)
     players: [], size: 0, M: 0, F: 0, totalSkill: 0,
   }));
 
+  // Build FA blocks of 2, preferring 1M + 1F per block. Same-gender blocks
+  // when stocks are uneven. Unknown-gender FAs pair up among themselves.
+  const malesFA = shuffle(freeUnits.filter(u => u.M === 1));
+  const femalesFA = shuffle(freeUnits.filter(u => u.F === 1));
+  const unknownFA = shuffle(freeUnits.filter(u => u.M === 0 && u.F === 0));
+
+  const combine = (a: Unit, b: Unit): Unit => ({
+    members: [...a.members, ...b.members],
+    size: a.size + b.size,
+    M: a.M + b.M,
+    F: a.F + b.F,
+    totalSkill: a.totalSkill + b.totalSkill,
+  });
+
+  const faBlocks: Unit[] = [];
+  while (malesFA.length > 0 && femalesFA.length > 0) {
+    faBlocks.push(combine(malesFA.shift()!, femalesFA.shift()!));
+  }
+  while (malesFA.length >= 2) {
+    faBlocks.push(combine(malesFA.shift()!, malesFA.shift()!));
+  }
+  while (femalesFA.length >= 2) {
+    faBlocks.push(combine(femalesFA.shift()!, femalesFA.shift()!));
+  }
+  while (unknownFA.length >= 2) {
+    faBlocks.push(combine(unknownFA.shift()!, unknownFA.shift()!));
+  }
+  const singletons: Unit[] = [...malesFA, ...femalesFA, ...unknownFA];
+
+  // True interleave: pairs and FA-blocks shuffled together.
+  const sizeTwoBlocks = shuffle([...pairUnits, ...faBlocks]);
+
   const addUnit = (team: Bin, u: Unit) => {
     team.players.push(...u.members.map(m => m.name));
     team.size += u.size;
@@ -49,10 +81,7 @@ function drawTeams(pairUnits: Unit[], freeUnits: Unit[], targetPoolSize: number)
     team.totalSkill += u.totalSkill;
   };
 
-  // Pairs first so they get distributed first; free agents fill the gaps.
-  const ordered = [...shuffle(pairUnits), ...shuffle(freeUnits)];
-
-  for (const u of ordered) {
+  const place = (u: Unit) => {
     let bestIdx = -1;
     let bestKey: [number, number, number] = [Infinity, Infinity, Infinity];
     for (let i = 0; i < teams.length; i++) {
@@ -64,8 +93,8 @@ function drawTeams(pairUnits: Unit[], freeUnits: Unit[], targetPoolSize: number)
       const newSkill = t.totalSkill + u.totalSkill;
       const genderDist = Math.abs(newM - 2) + Math.abs(newF - 2);
       const skillDist = Math.abs(newSkill - newSize * targetPerPlayer);
-      // Lex order: smallest size beats anything; gender breaks size ties;
-      // skill breaks gender ties.
+      // Lex order: smallest team size beats anything; gender breaks size
+      // ties; skill breaks gender ties.
       if (
         newSize < bestKey[0] ||
         (newSize === bestKey[0] &&
@@ -77,13 +106,15 @@ function drawTeams(pairUnits: Unit[], freeUnits: Unit[], targetPoolSize: number)
       }
     }
     if (bestIdx === -1) {
-      // No existing team had room (edge case with awkward splits) → start a
-      // new team.
       teams.push({ players: [], size: 0, M: 0, F: 0, totalSkill: 0 });
       bestIdx = teams.length - 1;
     }
     addUnit(teams[bestIdx], u);
-  }
+  };
+
+  for (const block of sizeTwoBlocks) place(block);
+  // Any single leftover (odd FA count) fills the remaining slot afterwards.
+  for (const s of singletons) place(s);
 
   const filled = teams.filter(t => t.size > 0);
   const poolCount = Math.max(1, Math.round(filled.length / Math.max(2, targetPoolSize)));
