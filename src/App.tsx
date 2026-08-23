@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import type { MatchRow, QuadsMatchRow, TriplesMatchRow, BracketMatch, KobGameRow, ScoreSettings, MickeyTeam, MickeyMatchRow, RevcoMatchRow, RevcoBDRound } from './types';
+import type { MatchRow, TriplesMatchRow, BracketMatch, KobGameRow, ScoreSettings, MickeyTeam, MickeyMatchRow, RevcoMatchRow, RevcoBDRound } from './types';
 import { apiGetState, apiSaveState } from './api';
 import { SunnyLogo } from './components/SunnyLogo';
 import { LineNumberTextarea } from './components/LinedTextarea';
@@ -8,10 +8,6 @@ import { MatchesView } from './doubles/MatchesView';
 import { RoundGenerator } from './doubles/RoundGenerator';
 import { Leaderboard } from './doubles/Leaderboard';
 import { PlayoffBuilder } from './doubles/PlayoffBuilder';
-import { QuadsMatchesView } from './quads/MatchesView';
-import { QuadsRoundGenerator } from './quads/RoundGenerator';
-import { QuadsLeaderboard } from './quads/Leaderboard';
-import { QuadsPlayoffBuilder } from './quads/PlayoffBuilder';
 import { TriplesMatchesView } from './triples/MatchesView';
 import { TriplesRoundGenerator } from './triples/RoundGenerator';
 import { TriplesLeaderboard } from './triples/Leaderboard';
@@ -91,6 +87,7 @@ function emptyMickeyBDState(): MickeyBDDivisionState {
 
 // Revco Quads Blind Draw — same pair-preserving draw, but one Revco set per match.
 // RevcoBDRound is defined in types.ts and imported above.
+type RosterType = 'mixed' | 'pairs' | 'freeAgents';
 type RevcoBDDivisionState = {
   pairsText: string;
   freeAgentsText: string;
@@ -101,9 +98,10 @@ type RevcoBDDivisionState = {
   slotMinutes?: number;
   scorerPin?: string;
   publicScoring?: boolean;
+  rosterType?: RosterType;
 };
 function emptyRevcoBDState(): RevcoBDDivisionState {
-  return { pairsText: "", freeAgentsText: "", rounds: [], brackets: [], courtCount: 1, startHour: 9, slotMinutes: 45, scorerPin: "", publicScoring: false };
+  return { pairsText: "", freeAgentsText: "", rounds: [], brackets: [], courtCount: 1, startHour: 9, slotMinutes: 45, scorerPin: "", publicScoring: false, rosterType: 'mixed' };
 }
 
 // Short description for each format, shown at the top of its Home page.
@@ -115,16 +113,6 @@ const FORMAT_DESCRIPTIONS: Record<SidebarTabKey, { tagline: string; details: Rea
         Players sign up individually and the app randomly pairs everyone into 2-person teams each round,
         mixing across guys and girls. Rosters refresh every round so you meet new partners and opponents.
         Pool play feeds into a seeded playoff bracket.
-      </>
-    ),
-  },
-  QUADS: {
-    tagline: '4-person blind-draw teams (typically 2 guys + 2 girls) · rally scoring to 21, cap at 25.',
-    details: (
-      <>
-        Same idea as Doubles but with 4-person teams. The app draws balanced 4-person rosters every round
-        and standings roll up across all rounds. Playoffs seed from combined pool-play wins and point
-        differential.
       </>
     ),
   },
@@ -171,13 +159,14 @@ const FORMAT_DESCRIPTIONS: Record<SidebarTabKey, { tagline: string; details: Rea
     ),
   },
   REVCOBD: {
-    tagline: 'Revco Quads blind draw — pairs sign up together, teams re-draw every round.',
+    tagline: 'Revco Quads blind draw — teams of 4 re-draw every round.',
     details: (
       <>
-        Players sign up as <strong>pairs</strong> (one guy + one girl). Each round, pairs are randomly
-        grouped into teams of 4 (two pairs per team). Teams re-shuffle every round so you meet new
-        teammates and opponents, but your pair partner stays with you the whole tournament. One Revco
-        Quads set per match. The leaderboard adds up each pair's wins across all rounds.
+        Choose your roster style: <strong>pairs only</strong> (everyone signs up with a partner),{' '}
+        <strong>free agents only</strong> (everyone signs up individually), or <strong>mixed</strong>{' '}
+        (some pairs, some individuals). Each round, units are randomly grouped into teams of 4 using a
+        history-aware algorithm that minimizes repeat teammates and opponents. One Revco Quads set per
+        match. The leaderboard tracks wins for every pair and individual across all rounds.
       </>
     ),
   },
@@ -260,10 +249,7 @@ export default function BlindDrawTourneyApp() {
 
   const [dUpper, setDUpper] = useState<DivisionState<MatchRow>>(emptyDivisionState<MatchRow>());
   const [dLower, setDLower] = useState<DivisionState<MatchRow>>(emptyDivisionState<MatchRow>());
-  const [qUpper, setQUpper] = useState<DivisionState<QuadsMatchRow>>(emptyDivisionState<QuadsMatchRow>());
-  const [qLower, setQLower] = useState<DivisionState<QuadsMatchRow>>(emptyDivisionState<QuadsMatchRow>());
   const [dScoreSettings, setDScoreSettings] = useState<ScoreSettings>({ playTo: 21, cap: null });
-  const [qScoreSettings, setQScoreSettings] = useState<ScoreSettings>({ playTo: 21, cap: 25 });
   const [tScoreSettings, setTScoreSettings] = useState<ScoreSettings>({ playTo: 21, cap: null });
   const [kobScoreSettings, setKobScoreSettings] = useState<ScoreSettings>({ playTo: 21, cap: 23 });
   const [tUpper, setTUpper] = useState<DivisionState<TriplesMatchRow>>(emptyDivisionState<TriplesMatchRow>());
@@ -288,8 +274,6 @@ export default function BlindDrawTourneyApp() {
 
     const emptyDUpper = emptyDivisionState<MatchRow>();
     const emptyDLower = emptyDivisionState<MatchRow>();
-    const emptyQUpper = emptyDivisionState<QuadsMatchRow>();
-    const emptyQLower = emptyDivisionState<QuadsMatchRow>();
     const emptyTUpper = emptyDivisionState<TriplesMatchRow>();
     const emptyTLower = emptyDivisionState<TriplesMatchRow>();
     const emptyKobUpper = emptyDivisionState<KobGameRow>();
@@ -303,8 +287,6 @@ export default function BlindDrawTourneyApp() {
 
     setDUpper(emptyDUpper);
     setDLower(emptyDLower);
-    setQUpper(emptyQUpper);
-    setQLower(emptyQLower);
     setTUpper(emptyTUpper);
     setTLower(emptyTLower);
     setKobUpper(emptyKobUpper);
@@ -328,11 +310,9 @@ export default function BlindDrawTourneyApp() {
         activeTab: "DOUBLES",
         activeDivision: "UPPER",
         doubles: { UPPER: emptyDUpper, LOWER: emptyDLower },
-        quads: { UPPER: emptyQUpper, LOWER: emptyQLower },
         triples: { UPPER: emptyTUpper, LOWER: emptyTLower },
         mickey: { UPPER: emptyMUpper, LOWER: emptyMLower },
         guysText: "", girlsText: "", matches: [], brackets: [],
-        qGuysText: "", qGirlsText: "", qMatches: [], qBrackets: [],
         tGuysText: "", tGirlsText: "", tMatches: [], tBrackets: [],
       };
 
@@ -349,17 +329,15 @@ export default function BlindDrawTourneyApp() {
     activeTab,
     activeDivision,
     doubles: { UPPER: dUpper, LOWER: dLower },
-    quads: { UPPER: qUpper, LOWER: qLower },
     triples: { UPPER: tUpper, LOWER: tLower },
     kob: { UPPER: kobUpper, LOWER: kobLower },
     mickey: { UPPER: mUpper, LOWER: mLower },
     mickeyBD: { UPPER: mbdUpper, LOWER: mbdLower },
     revcobd: { UPPER: rbdUpper, LOWER: rbdLower },
-    dScoreSettings, qScoreSettings, tScoreSettings, kobScoreSettings, mScoreSettings, mbdScoreSettings, rbdScoreSettings,
+    dScoreSettings, tScoreSettings, kobScoreSettings, mScoreSettings, mbdScoreSettings, rbdScoreSettings,
     guysText: dUpper.guysText, girlsText: dUpper.girlsText, matches: dUpper.matches, brackets: dUpper.brackets,
-    qGuysText: qUpper.guysText, qGirlsText: qUpper.girlsText, qMatches: qUpper.matches, qBrackets: qUpper.brackets,
     tGuysText: tUpper.guysText, tGirlsText: tUpper.girlsText, tMatches: tUpper.matches, tBrackets: tUpper.brackets,
-  } as any), [activeTab, activeDivision, dUpper, dLower, qUpper, qLower, tUpper, tLower, kobUpper, kobLower, mUpper, mLower, mbdUpper, mbdLower, rbdUpper, rbdLower, dScoreSettings, qScoreSettings, tScoreSettings, kobScoreSettings, mScoreSettings, mbdScoreSettings, rbdScoreSettings]);
+  } as any), [activeTab, activeDivision, dUpper, dLower, tUpper, tLower, kobUpper, kobLower, mUpper, mLower, mbdUpper, mbdLower, rbdUpper, rbdLower, dScoreSettings, tScoreSettings, kobScoreSettings, mScoreSettings, mbdScoreSettings, rbdScoreSettings]);
 
   useEffect(() => {
     (async () => {
@@ -369,8 +347,6 @@ export default function BlindDrawTourneyApp() {
         if (data) {
           if (data.doubles?.UPPER) setDUpper(data.doubles.UPPER); else setDUpper({ guysText: data.guysText || "", girlsText: data.girlsText || "", matches: Array.isArray(data.matches) ? data.matches : [], brackets: Array.isArray(data.brackets) ? data.brackets : [] });
           if (data.doubles?.LOWER) setDLower(data.doubles.LOWER);
-          if (data.quads?.UPPER) setQUpper(data.quads.UPPER); else setQUpper({ guysText: data.qGuysText || "", girlsText: data.qGirlsText || "", matches: Array.isArray(data.qMatches) ? data.qMatches : [], brackets: Array.isArray(data.qBrackets) ? data.qBrackets : [] });
-          if (data.quads?.LOWER) setQLower(data.quads.LOWER);
           if (data.triples?.UPPER) setTUpper(data.triples.UPPER); else setTUpper({ guysText: data.tGuysText || "", girlsText: data.tGirlsText || "", matches: Array.isArray(data.tMatches) ? data.tMatches : [], brackets: Array.isArray(data.tBrackets) ? data.tBrackets : [] });
           if (data.triples?.LOWER) setTLower(data.triples.LOWER);
           if (data.kob?.UPPER) setKobUpper(data.kob.UPPER);
@@ -384,14 +360,12 @@ export default function BlindDrawTourneyApp() {
           if (data.revcobd?.UPPER) setRBDUpper({ ...emptyRevcoBDState(), ...data.revcobd.UPPER });
           if (data.revcobd?.LOWER) setRBDLower({ ...emptyRevcoBDState(), ...data.revcobd.LOWER });
           if (data.dScoreSettings) setDScoreSettings(data.dScoreSettings);
-          if (data.qScoreSettings) setQScoreSettings(data.qScoreSettings);
-          else if (data.qScoreCap === 21 || data.qScoreCap === 25) setQScoreSettings({ playTo: 21, cap: data.qScoreCap });
           if (data.tScoreSettings) setTScoreSettings(data.tScoreSettings);
           if (data.kobScoreSettings) setKobScoreSettings(data.kobScoreSettings);
           if (data.mScoreSettings) setMScoreSettings(data.mScoreSettings);
           if (data.mbdScoreSettings) setMBDScoreSettings(data.mbdScoreSettings);
           if (data.rbdScoreSettings) setRBDScoreSettings(data.rbdScoreSettings);
-          if (data.activeTab === "DOUBLES" || data.activeTab === "QUADS" || data.activeTab === "TRIPLES" || data.activeTab === "KOB" || data.activeTab === "MICKEY" || data.activeTab === "MICKEYBD" || data.activeTab === "REVCOBD") setActiveTab(data.activeTab);
+          if (data.activeTab === "DOUBLES" || data.activeTab === "TRIPLES" || data.activeTab === "KOB" || data.activeTab === "MICKEY" || data.activeTab === "MICKEYBD" || data.activeTab === "REVCOBD") setActiveTab(data.activeTab);
           if (data.activeDivision === "UPPER" || data.activeDivision === "LOWER") setActiveDivision(data.activeDivision);
         }
         setLoadingRemote(false);
@@ -413,8 +387,6 @@ export default function BlindDrawTourneyApp() {
         if (!remote) return;
         if (remote.doubles?.UPPER) setDUpper(remote.doubles.UPPER);
         if (remote.doubles?.LOWER) setDLower(remote.doubles.LOWER);
-        if (remote.quads?.UPPER) setQUpper(remote.quads.UPPER);
-        if (remote.quads?.LOWER) setQLower(remote.quads.LOWER);
         if (remote.triples?.UPPER) setTUpper(remote.triples.UPPER);
         if (remote.triples?.LOWER) setTLower(remote.triples.LOWER);
         if (remote.kob?.UPPER) setKobUpper(remote.kob.UPPER);
@@ -426,7 +398,6 @@ export default function BlindDrawTourneyApp() {
         if (remote.revcobd?.UPPER) setRBDUpper({ ...emptyRevcoBDState(), ...remote.revcobd.UPPER });
         if (remote.revcobd?.LOWER) setRBDLower({ ...emptyRevcoBDState(), ...remote.revcobd.LOWER });
         if (remote.dScoreSettings) setDScoreSettings(remote.dScoreSettings);
-        if (remote.qScoreSettings) setQScoreSettings(remote.qScoreSettings);
         if (remote.tScoreSettings) setTScoreSettings(remote.tScoreSettings);
         if (remote.kobScoreSettings) setKobScoreSettings(remote.kobScoreSettings);
         if (remote.mScoreSettings) setMScoreSettings(remote.mScoreSettings);
@@ -471,8 +442,6 @@ export default function BlindDrawTourneyApp() {
   // ── Current per-format slices ───────────────────────────────────────────
   const currentD = activeDivision === "UPPER" ? dUpper : dLower;
   const setCurrentD = activeDivision === "UPPER" ? setDUpper : setDLower;
-  const currentQ = activeDivision === "UPPER" ? qUpper : qLower;
-  const setCurrentQ = activeDivision === "UPPER" ? setQUpper : setQLower;
   const currentT = activeDivision === "UPPER" ? tUpper : tLower;
   const setCurrentT = activeDivision === "UPPER" ? setTUpper : setTLower;
   const currentKob = activeDivision === "UPPER" ? kobUpper : kobLower;
@@ -588,15 +557,6 @@ export default function BlindDrawTourneyApp() {
       poolsBadge = `${scoredCount(currentD.matches)}/${currentD.matches.length}`;
       poolsSubtitle = 'Matches and standings';
       playoffsBadge = currentD.brackets.length > 0 ? 'Built' : 'Not built';
-      playoffsSubtitle = 'Bracket and Redemption Rally';
-    } else if (activeTab === 'QUADS') {
-      const guys = currentQ.guysText.split(/\r?\n/).filter(s => s.trim()).length;
-      const girls = currentQ.girlsText.split(/\r?\n/).filter(s => s.trim()).length;
-      teamsBadge = `${guys + girls}`;
-      teamsSubtitle = 'Roster and round generator';
-      poolsBadge = `${scoredCount(currentQ.matches)}/${currentQ.matches.length}`;
-      poolsSubtitle = 'Matches and standings';
-      playoffsBadge = currentQ.brackets.length > 0 ? 'Built' : 'Not built';
       playoffsSubtitle = 'Bracket and Redemption Rally';
     } else if (activeTab === 'TRIPLES') {
       const guys = currentT.guysText.split(/\r?\n/).filter(s => s.trim()).length;
@@ -766,44 +726,6 @@ export default function BlindDrawTourneyApp() {
               brackets={currentD.brackets}
               setBrackets={(v: any) => setCurrentD(p => ({ ...p, brackets: typeof v === 'function' ? v(p.brackets) : v }))}
             />
-          </>
-        );
-      }
-    }
-
-    if (activeTab === 'QUADS') {
-      if (activeSection === 'TEAMS') {
-        return (
-          <fieldset disabled={!isAdmin} className={!isAdmin ? "opacity-95" : ""}>
-            <section className="bg-white rounded-xl shadow-sm ring-1 ring-slate-200 p-4">
-              <SectionHeader
-                title={`Players (Quads – ${activeDivision})`}
-                right={<ScoreSettingsPanel settings={qScoreSettings} onChange={setQScoreSettings} />}
-              />
-              <div className="grid md:grid-cols-2 gap-4">
-                <LineNumberTextarea id={`q-guys-${activeDivision}`} label="Guys (Quads)" value={currentQ.guysText} onChange={(e) => setCurrentQ(p => ({ ...p, guysText: e.target.value }))} />
-                <LineNumberTextarea id={`q-girls-${activeDivision}`} label="Girls (Quads)" value={currentQ.girlsText} onChange={(e) => setCurrentQ(p => ({ ...p, girlsText: e.target.value }))} />
-              </div>
-            </section>
-            <QuadsRoundGenerator guysText={currentQ.guysText} girlsText={currentQ.girlsText} matches={currentQ.matches} setMatches={(v: any) => setCurrentQ(p => ({ ...p, matches: typeof v === 'function' ? v(p.matches) : v }))} />
-          </fieldset>
-        );
-      }
-      if (activeSection === 'POOLS') {
-        return (
-          <>
-            <QuadsMatchesView matches={currentQ.matches} setMatches={(v: any) => setCurrentQ(p => ({ ...p, matches: typeof v === 'function' ? v(p.matches) : v }))} isAdmin={isAdmin} scoreSettings={qScoreSettings} />
-            <QuadsLeaderboard matches={currentQ.matches} guysText={currentQ.guysText} girlsText={currentQ.girlsText} scoreSettings={qScoreSettings} />
-          </>
-        );
-      }
-      if (activeSection === 'PLAYOFFS') {
-        return (
-          <>
-            <fieldset disabled={!isAdmin} className={!isAdmin ? "opacity-95" : ""}>
-              <QuadsPlayoffBuilder matches={currentQ.matches} guysText={currentQ.guysText} girlsText={currentQ.girlsText} setBrackets={(v: any) => setCurrentQ(p => ({ ...p, brackets: typeof v === 'function' ? v(p.brackets) : v }))} baseDivision={activeDivision} scoreSettings={qScoreSettings} />
-            </fieldset>
-            {currentQ.brackets.length > 0 && <BracketView brackets={currentQ.brackets} setBrackets={(v: any) => setCurrentQ(p => ({ ...p, brackets: typeof v === 'function' ? v(p.brackets) : v }))} />}
           </>
         );
       }
@@ -1091,27 +1013,59 @@ export default function BlindDrawTourneyApp() {
 
     if (activeTab === 'REVCOBD') {
       if (activeSection === 'TEAMS') {
+        const rosterType: RosterType = currentRBD.rosterType ?? 'mixed';
+        const showPairs = rosterType === 'pairs' || rosterType === 'mixed';
+        const showFree = rosterType === 'freeAgents' || rosterType === 'mixed';
+        const rosterOptions: { key: RosterType; label: string }[] = [
+          { key: 'pairs', label: 'Pairs only' },
+          { key: 'mixed', label: 'Mixed' },
+          { key: 'freeAgents', label: 'Free agents only' },
+        ];
         return (
           <fieldset disabled={!isAdmin} className={!isAdmin ? "opacity-95" : ""}>
             <section className="bg-white rounded-xl shadow-sm ring-1 ring-slate-200 p-4">
               <SectionHeader
-                title={`Sign-ups (Revco Quads Blind Draw – ${activeDivision})`}
-                subtitle={"Enter pairs as one per line: Guy / Girl. Teams of 4 (two pairs) re-draw every round."}
+                title={`Sign-ups (Revco Quads – ${activeDivision})`}
                 right={<ScoreSettingsPanel settings={rbdScoreSettings} onChange={setRBDScoreSettings} />}
               />
-              <div className="grid md:grid-cols-2 gap-4">
-                <LineNumberTextarea
-                  id={`rbd-pairs-${activeDivision}`}
-                  label="Pairs"
-                  value={currentRBD.pairsText}
-                  onChange={(e) => setCurrentRBD(p => ({ ...p, pairsText: e.target.value }))}
-                />
-                <LineNumberTextarea
-                  id={`rbd-free-${activeDivision}`}
-                  label="Free Agents"
-                  value={currentRBD.freeAgentsText}
-                  onChange={(e) => setCurrentRBD(p => ({ ...p, freeAgentsText: e.target.value }))}
-                />
+              {/* Roster type selector */}
+              <div className="flex items-center gap-2 mb-4 flex-wrap">
+                <span className="text-[12px] text-slate-500 font-medium">Roster type:</span>
+                <div className="flex rounded-lg border border-slate-200 overflow-hidden text-[12px] font-medium">
+                  {rosterOptions.map(opt => (
+                    <button
+                      key={opt.key}
+                      type="button"
+                      className={
+                        'px-3 py-1.5 transition-colors ' +
+                        (rosterType === opt.key
+                          ? 'bg-sky-600 text-white'
+                          : 'bg-white text-slate-600 hover:bg-slate-50')
+                      }
+                      onClick={() => setCurrentRBD(p => ({ ...p, rosterType: opt.key }))}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className={`grid gap-4 ${showPairs && showFree ? 'md:grid-cols-2' : 'md:grid-cols-1 max-w-md'}`}>
+                {showPairs && (
+                  <LineNumberTextarea
+                    id={`rbd-pairs-${activeDivision}`}
+                    label="Pairs (one per line: Guy / Girl)"
+                    value={currentRBD.pairsText}
+                    onChange={(e) => setCurrentRBD(p => ({ ...p, pairsText: e.target.value }))}
+                  />
+                )}
+                {showFree && (
+                  <LineNumberTextarea
+                    id={`rbd-free-${activeDivision}`}
+                    label={rosterType === 'freeAgents' ? 'Players (one per line)' : 'Free Agents (one per line)'}
+                    value={currentRBD.freeAgentsText}
+                    onChange={(e) => setCurrentRBD(p => ({ ...p, freeAgentsText: e.target.value }))}
+                  />
+                )}
               </div>
             </section>
             <RevcoBDRoundManager
