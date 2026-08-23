@@ -255,6 +255,10 @@ export function RevcoBDRoundManager({
   setStartHour,
   slotMinutes,
   setSlotMinutes,
+  scorerPin,
+  setScorerPin,
+  publicScoring,
+  setPublicScoring,
 }: {
   pairsText: string;
   freeAgentsText: string;
