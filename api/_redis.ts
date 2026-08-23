@@ -5,12 +5,22 @@ import { Redis } from "@upstash/redis";
 // "KV_REST_API_URL" name. Rather than hardcode that prefix — which would
 // break again if the store is ever renamed or reconnected — find whichever
 // env var *ends with* the name we need.
-function findEnv(suffix: string): string {
-  const key = Object.keys(process.env).find(k => k.endsWith(suffix));
-  return (key && process.env[key]) || "";
+function findEnvKey(suffix: string): string | undefined {
+  return Object.keys(process.env).find(k => k.endsWith(suffix));
 }
 
-const url = process.env.KV_REST_API_URL || findEnv("_KV_REST_API_URL") || findEnv("_UPSTASH_REDIS_REST_URL");
-const token = process.env.KV_REST_API_TOKEN || findEnv("_KV_REST_API_TOKEN") || findEnv("_UPSTASH_REDIS_REST_TOKEN");
+const urlKey = process.env.KV_REST_API_URL
+  ? "KV_REST_API_URL"
+  : findEnvKey("_KV_REST_API_URL") || findEnvKey("_UPSTASH_REDIS_REST_URL");
+const tokenKey = process.env.KV_REST_API_TOKEN
+  ? "KV_REST_API_TOKEN"
+  : findEnvKey("_KV_REST_API_TOKEN") || findEnvKey("_UPSTASH_REDIS_REST_TOKEN");
+
+// Not secret — env var *names* only, used to confirm the right variables
+// were found when debugging a connection failure.
+export const redisEnvDebug = { urlKey, tokenKey };
+
+const url = (urlKey && process.env[urlKey]) || "";
+const token = (tokenKey && process.env[tokenKey]) || "";
 
 export const redis = new Redis({ url, token });
