@@ -156,3 +156,41 @@ export function RevcoBDLeaderboard({
     </section>
   );
 }
+
+// Condensed, two-column standings for reference on the Playoffs tab — same
+// ranking as the full table, just one line per pair/free agent.
+export function RevcoBDStandingsCompact({
+  rounds,
+  pairsText,
+  freeAgentsText,
+  scoreSettings = { playTo: 21, cap: null },
+}: {
+  rounds: RevcoBDRound[];
+  pairsText: string;
+  freeAgentsText: string;
+  scoreSettings?: ScoreSettings;
+}) {
+  const unitRows = useMemo<UnitRow[]>(
+    () => computeRevcoStandings(rounds, pairsText, freeAgentsText, scoreSettings),
+    [rounds, pairsText, freeAgentsText, scoreSettings],
+  );
+
+  if (unitRows.length === 0) return null;
+
+  return (
+    <section className="bg-white/95 backdrop-blur rounded-xl shadow ring-1 ring-slate-200 p-4">
+      <h3 className="text-[14px] font-semibold text-sky-800 mb-2">Standings (reference)</h3>
+      <div className="grid sm:grid-cols-2 gap-x-6 gap-y-0.5">
+        {unitRows.map((r, i) => (
+          <div key={r.key} className="flex items-baseline gap-1.5 text-[12px] py-0.5 border-b border-slate-100 last:border-0">
+            <span className="tabular-nums font-semibold text-sky-800 w-4 shrink-0">{i + 1}.</span>
+            <span className="truncate">{r.label}</span>
+            <span className="ml-auto tabular-nums text-slate-500 shrink-0">
+              {r.W}-{r.L} ({r.PD > 0 ? `+${r.PD}` : r.PD})
+            </span>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}

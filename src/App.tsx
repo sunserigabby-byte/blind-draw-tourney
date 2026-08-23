@@ -28,7 +28,7 @@ import { MickeyBDPlayoffBuilder } from './mickeyBlind/PlayoffBuilder';
 import { MickeyBDFairnessReport } from './mickeyBlind/FairnessReport';
 import { RevcoBDRoundManager } from './revcoBlind/RoundManager';
 import { RevcoBDMatchesView } from './revcoBlind/MatchesView';
-import { RevcoBDLeaderboard } from './revcoBlind/Leaderboard';
+import { RevcoBDLeaderboard, RevcoBDStandingsCompact } from './revcoBlind/Leaderboard';
 import { RevcoBDFairnessReport } from './revcoBlind/FairnessReport';
 import { RevcoBDPlayoffBuilder } from './revcoBlind/PlayoffBuilder';
 import { RevcoBDBracketView } from './revcoBlind/BracketView';
@@ -1242,7 +1242,7 @@ export default function BlindDrawTourneyApp() {
       if (activeSection === 'PLAYOFFS') {
         return (
           <>
-            <RevcoBDLeaderboard
+            <RevcoBDStandingsCompact
               rounds={currentRBD.rounds ?? []}
               pairsText={currentRBD.pairsText}
               freeAgentsText={
