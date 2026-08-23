@@ -106,6 +106,13 @@ export type RevcoMatchRow = {
   scoreText?: string;
 };
 
+export type RevcoBDRound = {
+  id: string;
+  number: number;
+  teams: MickeyTeam[];
+  matches: RevcoMatchRow[];
+};
+
 // Configurable score rules — changeable per format anytime during the tournament
 export type ScoreSettings = { playTo: number; cap: number | null };
 

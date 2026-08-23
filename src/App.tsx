@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import type { MatchRow, QuadsMatchRow, TriplesMatchRow, BracketMatch, KobGameRow, ScoreSettings, MickeyTeam, MickeyMatchRow, RevcoMatchRow } from './types';
+import type { MatchRow, QuadsMatchRow, TriplesMatchRow, BracketMatch, KobGameRow, ScoreSettings, MickeyTeam, MickeyMatchRow, RevcoMatchRow, RevcoBDRound } from './types';
 import { apiGetState, apiSaveState } from './api';
 import { SunnyLogo } from './components/SunnyLogo';
 import { LineNumberTextarea } from './components/LinedTextarea';
@@ -33,6 +33,7 @@ import { MickeyBDFairnessReport } from './mickeyBlind/FairnessReport';
 import { RevcoBDRoundManager } from './revcoBlind/RoundManager';
 import { RevcoBDMatchesView } from './revcoBlind/MatchesView';
 import { RevcoBDLeaderboard } from './revcoBlind/Leaderboard';
+import { RevcoBDFairnessReport } from './revcoBlind/FairnessReport';
 import { ScoreSettingsPanel } from './components/ScoreSettingsPanel';
 import { Sidebar, SIDEBAR_DIVISIONS, SIDEBAR_SECTIONS, type SidebarSection, type SidebarTabKey } from './components/Sidebar';
 import { ThemeToggle, readStoredTheme, applyTheme, persistTheme, type Theme } from './components/ThemeToggle';
@@ -89,12 +90,7 @@ function emptyMickeyBDState(): MickeyBDDivisionState {
 }
 
 // Revco Quads Blind Draw — same pair-preserving draw, but one Revco set per match.
-type RevcoBDRound = {
-  id: string;
-  number: number;
-  teams: MickeyTeam[];
-  matches: RevcoMatchRow[];
-};
+// RevcoBDRound is defined in types.ts and imported above.
 type RevcoBDDivisionState = {
   pairsText: string;
   freeAgentsText: string;
@@ -1138,6 +1134,11 @@ export default function BlindDrawTourneyApp() {
               pairsText={currentRBD.pairsText}
               freeAgentsText={currentRBD.freeAgentsText}
               scoreSettings={rbdScoreSettings}
+            />
+            <RevcoBDFairnessReport
+              rounds={currentRBD.rounds ?? []}
+              pairsText={currentRBD.pairsText}
+              freeAgentsText={currentRBD.freeAgentsText}
             />
           </>
         );

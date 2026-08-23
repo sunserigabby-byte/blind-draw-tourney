@@ -1,129 +1,28 @@
 import React, { useMemo, useState } from 'react';
-import type { MickeyTeam, RevcoMatchRow } from '../types';
+import type { MickeyTeam, RevcoMatchRow, RevcoBDRound } from '../types';
 import {
   parseMickeyPairsGendered, parseMickeyFreeGendered, mickeyMemberList,
-  shuffle, slug, uniq,
+  pickFunTeamNames, slug, uniq,
 } from '../utils';
-import { drawTeams, toUnit, type Unit } from '../mickey/TeamBuilder';
+import { toUnit, type Unit } from '../mickey/TeamBuilder';
+import {
+  buildPairMap, buildPairHistory, getPairIds, pairKey,
+  type PairId, type PairHistory,
+} from './pairUtils';
 
 const rid = () => Math.random().toString(36).slice(2, 10);
 const SMART_CANDIDATES = 150;
 
-export type RevcoBDRound = {
-  id: string;
-  number: number;
-  teams: MickeyTeam[];
-  matches: RevcoMatchRow[];
-};
-
-// ── Pair-level identity ───────────────────────────────────────────────────────
-// Each registered pair gets a stable ID = sorted player slugs joined by "|".
-// Free agents each get their own slug as ID.
-// This way the unit of memory is the PAIR (not individual players), which is
-// more accurate for a format where pairs always stay together.
-
-type PairId = string;
-
-function buildPairMap(pairsText: string, freeAgentsText: string): Map<string, PairId> {
-  const map = new Map<string, PairId>();
-  for (const members of parseMickeyPairsGendered(pairsText)) {
-    const slugs = members.map(m => slug(m.name)).sort();
-    const pairId = slugs.join('|');
-    for (const m of members) map.set(slug(m.name), pairId);
-  }
-  for (const m of parseMickeyFreeGendered(freeAgentsText)) {
-    const s = slug(m.name);
-    map.set(s, s);
-  }
-  return map;
-}
-
-// Get the unique pair IDs present on a team (typically 2 for a full team of 4).
-function getPairIds(players: string[], pairMap: Map<string, PairId>): PairId[] {
-  const seen = new Set<PairId>();
-  const result: PairId[] = [];
-  for (const p of players) {
-    const id = pairMap.get(slug(p)) ?? slug(p);
-    if (!seen.has(id)) { seen.add(id); result.push(id); }
-  }
-  return result;
-}
-
-// Stable unordered key for a pair-of-pairs relationship.
-// Uses "::" as separator to avoid collisions with "|" inside pairIds.
-function pairKey(a: PairId, b: PairId): string {
-  return [a, b].sort().join('::');
-}
-
-// ── History ───────────────────────────────────────────────────────────────────
-
-type PairHistory = {
-  teammateCount: Map<string, number>;          // pairKey(pairId1, pairId2) → times they shared a team
-  opponentCount: Map<string, number>;          // pairKey(pairId1, pairId2) → times they faced each other
-  courtCount: Map<PairId, Map<number, number>>; // pairId → courtIdx → times on that court
-  sitOutCount: Map<PairId, number>;            // pairId → times they sat out without a match
-};
-
-function buildPairHistory(rounds: RevcoBDRound[], pairMap: Map<string, PairId>): PairHistory {
-  const teammateCount = new Map<string, number>();
-  const opponentCount = new Map<string, number>();
-  const courtCount = new Map<PairId, Map<number, number>>();
-  const sitOutCount = new Map<PairId, number>();
-  const bump = (map: Map<string, number>, key: string) =>
-    map.set(key, (map.get(key) ?? 0) + 1);
-
-  for (const round of rounds) {
-    const playingTeamIds = new Set(round.matches.flatMap(m => [m.teamAId, m.teamBId]));
-
-    // Teammate tracking for ALL formed teams (including sit-outs — being grouped
-    // with a pair counts even if you don't play a match that round).
-    for (const team of round.teams) {
-      const pairIds = getPairIds(team.players, pairMap);
-      for (let i = 0; i < pairIds.length; i++) {
-        for (let j = i + 1; j < pairIds.length; j++) {
-          bump(teammateCount, pairKey(pairIds[i], pairIds[j]));
-        }
-      }
-      // Track sit-outs so the draw can prioritise getting them into the next match.
-      if (!playingTeamIds.has(team.id)) {
-        for (const pId of pairIds) bump(sitOutCount, pId);
-      }
-    }
-
-    // Opponent + court tracking for played matches only.
-    for (let courtIdx = 0; courtIdx < round.matches.length; courtIdx++) {
-      const match = round.matches[courtIdx];
-      const teamA = round.teams.find(t => t.id === match.teamAId);
-      const teamB = round.teams.find(t => t.id === match.teamBId);
-      const aPairIds = getPairIds(teamA?.players ?? [], pairMap);
-      const bPairIds = getPairIds(teamB?.players ?? [], pairMap);
-
-      for (const pA of aPairIds) {
-        for (const pB of bPairIds) {
-          bump(opponentCount, pairKey(pA, pB));
-        }
-      }
-
-      for (const pId of [...aPairIds, ...bPairIds]) {
-        if (!courtCount.has(pId)) courtCount.set(pId, new Map());
-        const m = courtCount.get(pId)!;
-        m.set(courtIdx, (m.get(courtIdx) ?? 0) + 1);
-      }
-    }
-  }
-
-  return { teammateCount, opponentCount, courtCount, sitOutCount };
-}
+export type { RevcoBDRound };
 
 // ── Scoring ───────────────────────────────────────────────────────────────────
-// Weights are equal for teammates and opponents — we want maximum variety in
-// BOTH directions. Sit-outs are weighted highest so no pair is left out twice
-// when others haven't sat out yet.
+// Weights: teammate and opponent repeats are equally bad. Sit-outs weighted
+// highest so no pair is skipped twice while others haven't sat out yet.
 
 const TEAMMATE_WEIGHT = 3;
 const OPPONENT_WEIGHT = 3;
 const COURT_WEIGHT    = 1;
-const SITOUT_WEIGHT   = 5; // Strongest: being skipped a second time is unfair
+const SITOUT_WEIGHT   = 5;
 
 function scorePairCandidate(
   teams: MickeyTeam[],
@@ -137,7 +36,6 @@ function scorePairCandidate(
   for (const team of teams) {
     const pairIds = getPairIds(team.players, pairMap);
 
-    // Teammate repeat penalty
     for (let i = 0; i < pairIds.length; i++) {
       for (let j = i + 1; j < pairIds.length; j++) {
         const count = history.teammateCount.get(pairKey(pairIds[i], pairIds[j])) ?? 0;
@@ -145,8 +43,6 @@ function scorePairCandidate(
       }
     }
 
-    // Sit-out repeat penalty — penalise putting a pair on the bench again
-    // when they've already sat out and others haven't.
     if (!playingTeamIds.has(team.id)) {
       for (const pId of pairIds) {
         penalty += (history.sitOutCount.get(pId) ?? 0) * SITOUT_WEIGHT;
@@ -161,7 +57,6 @@ function scorePairCandidate(
     const aPairIds = getPairIds(teamA?.players ?? [], pairMap);
     const bPairIds = getPairIds(teamB?.players ?? [], pairMap);
 
-    // Opponent repeat penalty
     for (const pA of aPairIds) {
       for (const pB of bPairIds) {
         const count = history.opponentCount.get(pairKey(pA, pB)) ?? 0;
@@ -169,8 +64,6 @@ function scorePairCandidate(
       }
     }
 
-    // Court repeat penalty — tracks how many times each pair has played
-    // each specific court and penalises overuse.
     for (const pId of [...aPairIds, ...bPairIds]) {
       const timesOnCourt = history.courtCount.get(pId)?.get(courtIdx) ?? 0;
       penalty += timesOnCourt * COURT_WEIGHT;
@@ -180,35 +73,151 @@ function scorePairCandidate(
   return penalty;
 }
 
-// ── Draw ──────────────────────────────────────────────────────────────────────
+// ── History-aware draw ────────────────────────────────────────────────────────
 
-function buildMatchesForRound(teams: MickeyTeam[], roundNumber: number): RevcoMatchRow[] {
-  const shuffled = shuffle(teams);
-  const out: RevcoMatchRow[] = [];
-  for (let i = 0; i + 1 < shuffled.length; i += 2) {
-    out.push({ id: rid(), pool: roundNumber, teamAId: shuffled[i].id, teamBId: shuffled[i + 1].id });
+function getAllPairIds(pairsText: string, freeAgentsText: string): PairId[] {
+  const ids: PairId[] = [];
+  for (const members of parseMickeyPairsGendered(pairsText)) {
+    ids.push(members.map(m => slug(m.name)).sort().join('|'));
   }
-  return out;
+  for (const m of parseMickeyFreeGendered(freeAgentsText)) {
+    ids.push(slug(m.name));
+  }
+  return ids;
 }
 
+function buildPairIdToPlayers(pairsText: string, freeAgentsText: string): Map<PairId, string[]> {
+  const map = new Map<PairId, string[]>();
+  for (const members of parseMickeyPairsGendered(pairsText)) {
+    const slugs = members.map(m => slug(m.name)).sort();
+    map.set(slugs.join('|'), members.map(m => m.name));
+  }
+  for (const m of parseMickeyFreeGendered(freeAgentsText)) {
+    map.set(slug(m.name), [m.name]);
+  }
+  return map;
+}
+
+// Phase 1 — Greedy history-aware team formation.
+// Pairs that have been teammates least often get grouped first.
+// noise > 0 adds random jitter so repeated calls explore different groupings.
+function greedyTeamFormation(
+  allPairIds: PairId[],
+  history: PairHistory,
+  noise: number,
+): PairId[][] {
+  const candidates: { a: PairId; b: PairId; cost: number }[] = [];
+  for (let i = 0; i < allPairIds.length; i++) {
+    for (let j = i + 1; j < allPairIds.length; j++) {
+      const baseCost =
+        (history.teammateCount.get(pairKey(allPairIds[i], allPairIds[j])) ?? 0) * TEAMMATE_WEIGHT;
+      const jitter = noise > 0 ? Math.random() * noise : 0;
+      candidates.push({ a: allPairIds[i], b: allPairIds[j], cost: baseCost + jitter });
+    }
+  }
+  candidates.sort((x, y) => x.cost - y.cost);
+
+  const assigned = new Set<PairId>();
+  const groups: PairId[][] = [];
+
+  for (const { a, b } of candidates) {
+    if (assigned.has(a) || assigned.has(b)) continue;
+    groups.push([a, b]);
+    assigned.add(a);
+    assigned.add(b);
+  }
+  // Odd pair out → singleton team that will sit out this round
+  for (const pId of allPairIds) {
+    if (!assigned.has(pId)) groups.push([pId]);
+  }
+  return groups;
+}
+
+// Phase 2 — Greedy history-aware opponent matching.
+// Teams whose pairs have played each other least often get matched first.
+function greedyOpponentMatching(
+  groups: PairId[][],
+  history: PairHistory,
+  noise: number,
+): [number, number][] {
+  const candidates: { a: number; b: number; cost: number }[] = [];
+  for (let i = 0; i < groups.length; i++) {
+    for (let j = i + 1; j < groups.length; j++) {
+      let cost = 0;
+      for (const pA of groups[i]) {
+        for (const pB of groups[j]) {
+          cost += (history.opponentCount.get(pairKey(pA, pB)) ?? 0) * OPPONENT_WEIGHT;
+        }
+      }
+      const jitter = noise > 0 ? Math.random() * noise : 0;
+      candidates.push({ a: i, b: j, cost: cost + jitter });
+    }
+  }
+  candidates.sort((x, y) => x.cost - y.cost);
+
+  const matched = new Set<number>();
+  const pairs: [number, number][] = [];
+  for (const { a, b } of candidates) {
+    if (matched.has(a) || matched.has(b)) continue;
+    pairs.push([a, b]);
+    matched.add(a);
+    matched.add(b);
+  }
+  return pairs;
+}
+
+// Phase 3 — Convert pair groups + match pairings into proper domain objects.
+function buildRoundFromGroups(
+  groups: PairId[][],
+  matchPairs: [number, number][],
+  pairIdToPlayers: Map<PairId, string[]>,
+  roundNumber: number,
+): { teams: MickeyTeam[]; matches: RevcoMatchRow[] } {
+  const names = pickFunTeamNames(groups.length);
+  const teams: MickeyTeam[] = groups.map((group, i) => ({
+    id: rid(),
+    name: names[i],
+    players: group.flatMap(pId => pairIdToPlayers.get(pId) ?? []),
+    pool: 1,
+  }));
+  const matches: RevcoMatchRow[] = matchPairs.map(([ai, bi]) => ({
+    id: rid(),
+    pool: roundNumber,
+    teamAId: teams[ai].id,
+    teamBId: teams[bi].id,
+  }));
+  return { teams, matches };
+}
+
+// Main draw: candidate 0 is pure greedy (optimal for known history).
+// Candidates 1–N add jitter to explore near-optimal alternatives.
+// Returns the lowest-penalty result across all tries.
 function pickBestCandidate(
-  pairUnits: Unit[],
-  freeUnits: Unit[],
-  targetPoolSize: number,
+  pairsText: string,
+  freeAgentsText: string,
   roundNumber: number,
   history: PairHistory,
   pairMap: Map<string, PairId>,
   useSmart: boolean,
 ): { teams: MickeyTeam[]; matches: RevcoMatchRow[] } | null {
+  const allPairIds = getAllPairIds(pairsText, freeAgentsText);
+  if (allPairIds.length < 2) return null;
+
+  const pairIdToPlayers = buildPairIdToPlayers(pairsText, freeAgentsText);
   const tries = useSmart ? SMART_CANDIDATES : 1;
   let best: { teams: MickeyTeam[]; matches: RevcoMatchRow[]; score: number } | null = null;
+
   for (let i = 0; i < tries; i++) {
-    const teams = drawTeams(pairUnits, freeUnits, targetPoolSize);
-    if (teams.length < 2) continue;
-    const matches = buildMatchesForRound(teams, roundNumber);
+    const noise = i === 0 ? 0 : 2.0;
+    const groups = greedyTeamFormation(allPairIds, history, noise);
+    if (groups.length < 2) continue;
+    const matchPairs = greedyOpponentMatching(groups, history, noise);
+    if (matchPairs.length === 0) continue;
+    const { teams, matches } = buildRoundFromGroups(groups, matchPairs, pairIdToPlayers, roundNumber);
     const score = useSmart ? scorePairCandidate(teams, matches, history, pairMap) : 0;
     if (!best || score < best.score) best = { teams, matches, score };
   }
+
   return best ? { teams: best.teams, matches: best.matches } : null;
 }
 
@@ -245,7 +254,6 @@ export function RevcoBDRoundManager({
   courtCount: number;
   setCourtCount: (n: number) => void;
 }) {
-  const [targetPoolSize, setTargetPoolSize] = useState(5);
   const [confirmRemoveId, setConfirmRemoveId] = useState<string | null>(null);
   const [confirmRedrawId, setConfirmRedrawId] = useState<string | null>(null);
   const [useSmart, setUseSmart] = useState(true);
@@ -274,9 +282,9 @@ export function RevcoBDRoundManager({
   const generateRound = () => {
     const pairMap = buildPairMap(pairsText, freeAgentsText);
     const history = buildPairHistory(rounds, pairMap);
-    const result = pickBestCandidate(pairUnits, freeUnits, targetPoolSize, rounds.length + 1, history, pairMap, useSmart);
+    const result = pickBestCandidate(pairsText, freeAgentsText, rounds.length + 1, history, pairMap, useSmart);
     if (!result) {
-      alert('Need at least 2 teams to make a round. Add more pairs or free agents.');
+      alert('Need at least 2 pairs to make a round.');
       return;
     }
     setRounds(prev => [...prev, {
@@ -297,7 +305,7 @@ export function RevcoBDRoundManager({
       const working = [...prev];
       for (let i = 0; i < count; i++) {
         const history = buildPairHistory(working, pairMap);
-        const result = pickBestCandidate(pairUnits, freeUnits, targetPoolSize, working.length + 1, history, pairMap, useSmart);
+        const result = pickBestCandidate(pairsText, freeAgentsText, working.length + 1, history, pairMap, useSmart);
         if (!result) break;
         working.push({ id: rid(), number: working.length + 1, teams: result.teams, matches: result.matches });
       }
@@ -311,7 +319,7 @@ export function RevcoBDRoundManager({
       if (r.id !== roundId) return r;
       const otherRounds = prev.filter(p => p.id !== roundId);
       const history = buildPairHistory(otherRounds, pairMap);
-      const result = pickBestCandidate(pairUnits, freeUnits, targetPoolSize, r.number, history, pairMap, useSmart);
+      const result = pickBestCandidate(pairsText, freeAgentsText, r.number, history, pairMap, useSmart);
       if (!result) return r;
       return { ...r, teams: result.teams, matches: result.matches };
     }));
@@ -360,9 +368,9 @@ export function RevcoBDRoundManager({
       <div>
         <h2 className="text-[16px] font-semibold text-sky-800">Rounds</h2>
         <p className="text-[11px] text-slate-500 mt-1">
-          Each round uses a smart draw that checks {SMART_CANDIDATES} candidate arrangements and picks the one where
-          pairs have the fewest repeat teammates, repeat opponents, repeated courts, and repeated sit-outs.
-          Click <span className="font-medium">Generate Next Round</span> when ready.
+          Smart draw checks {SMART_CANDIDATES} arrangements using a history-aware greedy algorithm:
+          pairs that have been teammates or opponents least often get prioritised first,
+          then jitter is added to explore alternatives. Picks the lowest-penalty result.
         </p>
       </div>
 
@@ -393,7 +401,7 @@ export function RevcoBDRoundManager({
           Smart draw (avoid repeats)
         </label>
         <span className="text-[11px] text-slate-400">
-          Tries {SMART_CANDIDATES} draws. Tracks teammate repeats, opponent repeats, court rotation, and sit-outs equally.
+          Greedy history-aware algorithm: teammate repeats, opponent repeats, court rotation, and sit-out fairness.
         </span>
       </div>
 
