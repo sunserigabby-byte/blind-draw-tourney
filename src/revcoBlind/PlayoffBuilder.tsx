@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import type { Team, BracketMatch, RevcoBDRound, ScoreSettings } from '../types';
-import { slug, shuffle, pickFunTeamNames } from '../utils';
+import { slug, shuffle } from '../utils';
 import { buildBracket } from '../components/BracketView';
 import { computeRevcoStandings, type UnitRow } from './Leaderboard';
 
@@ -21,10 +21,9 @@ function toTeamObjs(teams: PreparedTeam[], division: 'UPPER' | 'LOWER'): Team[] 
 function formRandomTeams(units: UnitRow[]): PreparedTeam[] {
   const shuffled = shuffle(units);
   const teams: PreparedTeam[] = [];
-  const names = pickFunTeamNames(Math.max(1, Math.floor(shuffled.length / 2)));
   for (let i = 0; i + 1 < shuffled.length; i += 2) {
     teams.push({
-      name: names[teams.length] ?? `Team ${teams.length + 1}`,
+      name: `${shuffled[i].label} / ${shuffled[i + 1].label}`,
       players: [...shuffled[i].players, ...shuffled[i + 1].players],
     });
   }
@@ -39,9 +38,8 @@ function formCrossoverTeams(units: UnitRow[]): PreparedTeam[] {
   const ranked = [...units].sort((a, b) => b.W - a.W || b.PD - a.PD || a.label.localeCompare(b.label));
   const top = ranked.slice(0, 6);
   const bottom = shuffle(ranked.slice(6, 12));
-  const names = pickFunTeamNames(6);
   return top.map((u, i) => ({
-    name: names[i] ?? `Team ${i + 1}`,
+    name: `${u.label} / ${bottom[i].label}`,
     players: [...u.players, ...bottom[i].players],
   }));
 }
