@@ -1242,6 +1242,16 @@ export default function BlindDrawTourneyApp() {
       if (activeSection === 'PLAYOFFS') {
         return (
           <>
+            <RevcoBDLeaderboard
+              rounds={currentRBD.rounds ?? []}
+              pairsText={currentRBD.pairsText}
+              freeAgentsText={
+                (currentRBD.rosterType ?? 'mixed') === 'freeAgents'
+                  ? [currentRBD.guysText ?? '', currentRBD.girlsText ?? ''].join('\n')
+                  : currentRBD.freeAgentsText
+              }
+              scoreSettings={rbdScoreSettings}
+            />
             <fieldset disabled={!isAdmin} className={!isAdmin ? "opacity-95" : ""}>
               <RevcoBDPlayoffBuilder
                 rounds={currentRBD.rounds ?? []}
