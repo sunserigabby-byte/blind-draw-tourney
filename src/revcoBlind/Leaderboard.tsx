@@ -2,15 +2,92 @@ import React, { useMemo } from 'react';
 import type { ScoreSettings, RevcoBDRound } from '../types';
 import { parseScore, isValidScore, slug, parseMickeyPairsGendered, parseMickeyFreeGendered } from '../utils';
 
-type UnitRow = {
+export type UnitRow = {
   key: string;
   label: string;
   kind: 'pair' | 'free';
+  players: string[];
   W: number;
   L: number;
   PD: number;
   rounds: number;
 };
+
+// Per-pair (or free agent) standings across every round played — shared by
+// the leaderboard display and the playoff builder's seeding.
+export function computeRevcoStandings(
+  rounds: RevcoBDRound[],
+  pairsText: string,
+  freeAgentsText: string,
+  scoreSettings: ScoreSettings,
+): UnitRow[] {
+  const pairUnits = parseMickeyPairsGendered(pairsText).map((u, i) => ({
+    kind: 'pair' as const,
+    key: `pair-${i}-${u.map(m => slug(m.name)).join('|')}`,
+    label: u.map(m => m.name).join(' & '),
+    players: u.map(m => m.name),
+    slugs: u.map(m => slug(m.name)),
+  }));
+  const freeUnitsRaw = parseMickeyFreeGendered(freeAgentsText).map((m, i) => ({
+    kind: 'free' as const,
+    key: `free-${i}-${slug(m.name)}`,
+    label: m.name,
+    players: [m.name],
+    slugs: [slug(m.name)],
+  }));
+
+  type Acc = UnitRow & { slugs: string[] };
+  const accs = new Map<string, Acc>();
+  for (const u of [...pairUnits, ...freeUnitsRaw]) {
+    accs.set(u.key, { key: u.key, label: u.label, kind: u.kind, players: u.players, slugs: u.slugs, W: 0, L: 0, PD: 0, rounds: 0 });
+  }
+
+  const allUnits = [...pairUnits, ...freeUnitsRaw];
+
+  for (const round of rounds) {
+    const teamFor = (slugs: string[]) => {
+      const team = round.teams.find(t => {
+        const set = new Set(t.players.map(slug));
+        return slugs.every(s => set.has(s));
+      });
+      if (team) return team;
+      return round.teams.find(t => t.players.some(p => slug(p) === slugs[0])) ?? null;
+    };
+
+    for (const u of allUnits) {
+      const team = teamFor(u.slugs);
+      if (!team) continue;
+      const acc = accs.get(u.key)!;
+      acc.rounds += 1;
+
+      const match = round.matches.find(m => m.teamAId === team.id || m.teamBId === team.id);
+      if (!match) continue;
+      const isTeamA = match.teamAId === team.id;
+
+      const p = parseScore(match.scoreText);
+      if (!p || p[0] === p[1]) continue;
+      if (!isValidScore(p[0], p[1], scoreSettings)) continue;
+      const diff = Math.abs(p[0] - p[1]);
+      const teamAWon = p[0] > p[1];
+      const won = (isTeamA && teamAWon) || (!isTeamA && !teamAWon);
+      if (won) {
+        acc.W += 1;
+        acc.PD += diff;
+      } else {
+        acc.L += 1;
+        acc.PD -= diff;
+      }
+    }
+  }
+
+  const rows: UnitRow[] = Array.from(accs.values()).map(({ slugs, ...rest }) => rest);
+  rows.sort((a, b) => {
+    if (b.W !== a.W) return b.W - a.W;
+    if (b.PD !== a.PD) return b.PD - a.PD;
+    return a.label.localeCompare(b.label);
+  });
+  return rows;
+}
 
 export function RevcoBDLeaderboard({
   rounds,
@@ -23,72 +100,10 @@ export function RevcoBDLeaderboard({
   freeAgentsText: string;
   scoreSettings?: ScoreSettings;
 }) {
-  const unitRows = useMemo<UnitRow[]>(() => {
-    const pairUnits = parseMickeyPairsGendered(pairsText).map((u, i) => ({
-      kind: 'pair' as const,
-      key: `pair-${i}-${u.map(m => slug(m.name)).join('|')}`,
-      label: u.map(m => m.name).join(' & '),
-      slugs: u.map(m => slug(m.name)),
-    }));
-    const freeUnitsRaw = parseMickeyFreeGendered(freeAgentsText).map((m, i) => ({
-      kind: 'free' as const,
-      key: `free-${i}-${slug(m.name)}`,
-      label: m.name,
-      slugs: [slug(m.name)],
-    }));
-
-    type Acc = { key: string; label: string; kind: 'pair' | 'free'; W: number; L: number; PD: number; rounds: number };
-    const accs = new Map<string, Acc>();
-    for (const u of [...pairUnits, ...freeUnitsRaw]) {
-      accs.set(u.key, { key: u.key, label: u.label, kind: u.kind, W: 0, L: 0, PD: 0, rounds: 0 });
-    }
-
-    const allUnits = [...pairUnits, ...freeUnitsRaw];
-
-    for (const round of rounds) {
-      const teamFor = (slugs: string[]) => {
-        const team = round.teams.find(t => {
-          const set = new Set(t.players.map(slug));
-          return slugs.every(s => set.has(s));
-        });
-        if (team) return team;
-        return round.teams.find(t => t.players.some(p => slug(p) === slugs[0])) ?? null;
-      };
-
-      for (const u of allUnits) {
-        const team = teamFor(u.slugs);
-        if (!team) continue;
-        const acc = accs.get(u.key)!;
-        acc.rounds += 1;
-
-        const match = round.matches.find(m => m.teamAId === team.id || m.teamBId === team.id);
-        if (!match) continue;
-        const isTeamA = match.teamAId === team.id;
-
-        const p = parseScore(match.scoreText);
-        if (!p || p[0] === p[1]) continue;
-        if (!isValidScore(p[0], p[1], scoreSettings)) continue;
-        const diff = Math.abs(p[0] - p[1]);
-        const teamAWon = p[0] > p[1];
-        const won = (isTeamA && teamAWon) || (!isTeamA && !teamAWon);
-        if (won) {
-          acc.W += 1;
-          acc.PD += diff;
-        } else {
-          acc.L += 1;
-          acc.PD -= diff;
-        }
-      }
-    }
-
-    const rows: UnitRow[] = Array.from(accs.values());
-    rows.sort((a, b) => {
-      if (b.W !== a.W) return b.W - a.W;
-      if (b.PD !== a.PD) return b.PD - a.PD;
-      return a.label.localeCompare(b.label);
-    });
-    return rows;
-  }, [rounds, pairsText, freeAgentsText]);
+  const unitRows = useMemo<UnitRow[]>(
+    () => computeRevcoStandings(rounds, pairsText, freeAgentsText, scoreSettings),
+    [rounds, pairsText, freeAgentsText, scoreSettings],
+  );
 
   if (unitRows.length === 0) return null;
 

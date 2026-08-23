@@ -30,6 +30,7 @@ import { RevcoBDRoundManager } from './revcoBlind/RoundManager';
 import { RevcoBDMatchesView } from './revcoBlind/MatchesView';
 import { RevcoBDLeaderboard } from './revcoBlind/Leaderboard';
 import { RevcoBDFairnessReport } from './revcoBlind/FairnessReport';
+import { RevcoBDPlayoffBuilder } from './revcoBlind/PlayoffBuilder';
 import { ScoreSettingsPanel } from './components/ScoreSettingsPanel';
 import { Sidebar, SIDEBAR_DIVISIONS, SIDEBAR_SECTIONS, type SidebarSection, type SidebarTabKey } from './components/Sidebar';
 import { ThemeToggle, readStoredTheme, applyTheme, persistTheme, type Theme } from './components/ThemeToggle';
@@ -1239,9 +1240,29 @@ export default function BlindDrawTourneyApp() {
       }
       if (activeSection === 'PLAYOFFS') {
         return (
-          <section className="bg-white rounded-xl shadow-sm ring-1 ring-slate-200 p-6 text-center text-slate-500 text-[14px]">
-            Playoffs are not yet available for Revco Quads Blind Draw. Use the Standings in the Pools tab to seed a manual bracket.
-          </section>
+          <>
+            <fieldset disabled={!isAdmin} className={!isAdmin ? "opacity-95" : ""}>
+              <RevcoBDPlayoffBuilder
+                rounds={currentRBD.rounds ?? []}
+                pairsText={currentRBD.pairsText}
+                freeAgentsText={
+                  (currentRBD.rosterType ?? 'mixed') === 'freeAgents'
+                    ? [currentRBD.guysText ?? '', currentRBD.girlsText ?? ''].join('\n')
+                    : currentRBD.freeAgentsText
+                }
+                brackets={currentRBD.brackets ?? []}
+                setBrackets={(v: any) => setCurrentRBD(p => ({ ...p, brackets: typeof v === 'function' ? v(p.brackets ?? []) : v }))}
+                division={activeDivision}
+                scoreSettings={rbdScoreSettings}
+              />
+            </fieldset>
+            <fieldset disabled={!isAdmin} className={!isAdmin ? "opacity-95" : ""}>
+              <BracketView
+                brackets={currentRBD.brackets ?? []}
+                setBrackets={(v: any) => setCurrentRBD(p => ({ ...p, brackets: typeof v === 'function' ? v(p.brackets ?? []) : v }))}
+              />
+            </fieldset>
+          </>
         );
       }
     }
