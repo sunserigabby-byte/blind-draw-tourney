@@ -1,6 +1,6 @@
 import React from 'react';
 
-export type SidebarTabKey = 'DOUBLES' | 'QUADS' | 'TRIPLES' | 'KOB' | 'MICKEY' | 'MICKEYBD';
+export type SidebarTabKey = 'DOUBLES' | 'QUADS' | 'TRIPLES' | 'KOB' | 'MICKEY' | 'MICKEYBD' | 'REVCOBD';
 export type SidebarSection = 'HOME' | 'TEAMS' | 'POOLS' | 'PLAYOFFS';
 export type SidebarDivision = 'UPPER' | 'LOWER';
 
@@ -15,6 +15,10 @@ export const SIDEBAR_DIVISIONS: { key: SidebarTabKey; label: string; blindDraw: 
   // Mickey & Minnie Blind Draw — teams re-randomize every round; each
   // round plays a single match with Mickey + Minnie sets back-to-back.
   { key: 'MICKEYBD', label: 'Mickey & Minnie Blind Draw', blindDraw: true },
+  // Revco Quads Blind Draw — pairs sign up together, stay together each
+  // round, but which pairs are on the same team re-draws every round.
+  // One Revco Quads set per match (no coed set).
+  { key: 'REVCOBD', label: 'Revco Quads Blind Draw', blindDraw: true },
 ];
 
 export const SIDEBAR_SECTIONS: { key: SidebarSection; label: string }[] = [

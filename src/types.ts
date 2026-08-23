@@ -97,6 +97,15 @@ export type MickeyMatchRow = {
   minnieScore?: string; // revco set
 };
 
+// Revco Quads Blind Draw — same team structure as Mickey, single set per match
+export type RevcoMatchRow = {
+  id: string;
+  pool: number;
+  teamAId: string;
+  teamBId: string;
+  scoreText?: string;
+};
+
 // Configurable score rules — changeable per format anytime during the tournament
 export type ScoreSettings = { playTo: number; cap: number | null };
 

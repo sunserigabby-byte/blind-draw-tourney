@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import type { MatchRow, QuadsMatchRow, TriplesMatchRow, BracketMatch, KobGameRow, ScoreSettings, MickeyTeam, MickeyMatchRow } from './types';
+import type { MatchRow, QuadsMatchRow, TriplesMatchRow, BracketMatch, KobGameRow, ScoreSettings, MickeyTeam, MickeyMatchRow, RevcoMatchRow } from './types';
 import { apiGetState, apiSaveState } from './api';
 import { SunnyLogo } from './components/SunnyLogo';
 import { LineNumberTextarea } from './components/LinedTextarea';
@@ -30,6 +30,9 @@ import { MickeyBDMatchesView } from './mickeyBlind/MatchesView';
 import { MickeyBDLeaderboard } from './mickeyBlind/Leaderboard';
 import { MickeyBDPlayoffBuilder } from './mickeyBlind/PlayoffBuilder';
 import { MickeyBDFairnessReport } from './mickeyBlind/FairnessReport';
+import { RevcoBDRoundManager } from './revcoBlind/RoundManager';
+import { RevcoBDMatchesView } from './revcoBlind/MatchesView';
+import { RevcoBDLeaderboard } from './revcoBlind/Leaderboard';
 import { ScoreSettingsPanel } from './components/ScoreSettingsPanel';
 import { Sidebar, SIDEBAR_DIVISIONS, SIDEBAR_SECTIONS, type SidebarSection, type SidebarTabKey } from './components/Sidebar';
 import { ThemeToggle, readStoredTheme, applyTheme, persistTheme, type Theme } from './components/ThemeToggle';
@@ -82,6 +85,24 @@ type MickeyBDDivisionState = {
   courtCount?: number;
 };
 function emptyMickeyBDState(): MickeyBDDivisionState {
+  return { pairsText: "", freeAgentsText: "", rounds: [], brackets: [], courtCount: 1 };
+}
+
+// Revco Quads Blind Draw — same pair-preserving draw, but one Revco set per match.
+type RevcoBDRound = {
+  id: string;
+  number: number;
+  teams: MickeyTeam[];
+  matches: RevcoMatchRow[];
+};
+type RevcoBDDivisionState = {
+  pairsText: string;
+  freeAgentsText: string;
+  rounds: RevcoBDRound[];
+  brackets: BracketMatch[];
+  courtCount?: number;
+};
+function emptyRevcoBDState(): RevcoBDDivisionState {
   return { pairsText: "", freeAgentsText: "", rounds: [], brackets: [], courtCount: 1 };
 }
 
@@ -146,6 +167,17 @@ const FORMAT_DESCRIPTIONS: Record<SidebarTabKey, { tagline: string; details: Rea
         set back-to-back, then everyone is re-shuffled into new teams of 4 for the next round. Pairs always
         stay together inside a round. The leaderboard adds up each pair's and free agent's wins across all
         rounds played.
+      </>
+    ),
+  },
+  REVCOBD: {
+    tagline: 'Revco Quads blind draw — pairs sign up together, teams re-draw every round.',
+    details: (
+      <>
+        Players sign up as <strong>pairs</strong> (one guy + one girl). Each round, pairs are randomly
+        grouped into teams of 4 (two pairs per team). Teams re-shuffle every round so you meet new
+        teammates and opponents, but your pair partner stays with you the whole tournament. One Revco
+        Quads set per match. The leaderboard adds up each pair's wins across all rounds.
       </>
     ),
   },
@@ -243,6 +275,9 @@ export default function BlindDrawTourneyApp() {
   const [mbdUpper, setMBDUpper] = useState<MickeyBDDivisionState>(emptyMickeyBDState());
   const [mbdLower, setMBDLower] = useState<MickeyBDDivisionState>(emptyMickeyBDState());
   const [mbdScoreSettings, setMBDScoreSettings] = useState<ScoreSettings>({ playTo: 21, cap: null });
+  const [rbdUpper, setRBDUpper] = useState<RevcoBDDivisionState>(emptyRevcoBDState());
+  const [rbdLower, setRBDLower] = useState<RevcoBDDivisionState>(emptyRevcoBDState());
+  const [rbdScoreSettings, setRBDScoreSettings] = useState<ScoreSettings>({ playTo: 21, cap: null });
 
   async function handleResetApp() {
     const ok = window.confirm(
@@ -262,6 +297,8 @@ export default function BlindDrawTourneyApp() {
     const emptyMLower = emptyMickeyState();
     const emptyMBDUpper = emptyMickeyBDState();
     const emptyMBDLower = emptyMickeyBDState();
+    const emptyRBDUpper = emptyRevcoBDState();
+    const emptyRBDLower = emptyRevcoBDState();
 
     setDUpper(emptyDUpper);
     setDLower(emptyDLower);
@@ -275,6 +312,8 @@ export default function BlindDrawTourneyApp() {
     setMLower(emptyMLower);
     setMBDUpper(emptyMBDUpper);
     setMBDLower(emptyMBDLower);
+    setRBDUpper(emptyRBDUpper);
+    setRBDLower(emptyRBDLower);
     setActiveTab("DOUBLES");
     setActiveDivision("UPPER");
     setActiveSection("HOME");
@@ -314,11 +353,12 @@ export default function BlindDrawTourneyApp() {
     kob: { UPPER: kobUpper, LOWER: kobLower },
     mickey: { UPPER: mUpper, LOWER: mLower },
     mickeyBD: { UPPER: mbdUpper, LOWER: mbdLower },
-    dScoreSettings, qScoreSettings, tScoreSettings, kobScoreSettings, mScoreSettings, mbdScoreSettings,
+    revcobd: { UPPER: rbdUpper, LOWER: rbdLower },
+    dScoreSettings, qScoreSettings, tScoreSettings, kobScoreSettings, mScoreSettings, mbdScoreSettings, rbdScoreSettings,
     guysText: dUpper.guysText, girlsText: dUpper.girlsText, matches: dUpper.matches, brackets: dUpper.brackets,
     qGuysText: qUpper.guysText, qGirlsText: qUpper.girlsText, qMatches: qUpper.matches, qBrackets: qUpper.brackets,
     tGuysText: tUpper.guysText, tGirlsText: tUpper.girlsText, tMatches: tUpper.matches, tBrackets: tUpper.brackets,
-  } as any), [activeTab, activeDivision, dUpper, dLower, qUpper, qLower, tUpper, tLower, kobUpper, kobLower, mUpper, mLower, mbdUpper, mbdLower, dScoreSettings, qScoreSettings, tScoreSettings, kobScoreSettings, mScoreSettings, mbdScoreSettings]);
+  } as any), [activeTab, activeDivision, dUpper, dLower, qUpper, qLower, tUpper, tLower, kobUpper, kobLower, mUpper, mLower, mbdUpper, mbdLower, rbdUpper, rbdLower, dScoreSettings, qScoreSettings, tScoreSettings, kobScoreSettings, mScoreSettings, mbdScoreSettings, rbdScoreSettings]);
 
   useEffect(() => {
     (async () => {
@@ -340,6 +380,8 @@ export default function BlindDrawTourneyApp() {
           // fields like `brackets`) don't crash on .length / .some().
           if (data.mickeyBD?.UPPER) setMBDUpper({ ...emptyMickeyBDState(), ...data.mickeyBD.UPPER });
           if (data.mickeyBD?.LOWER) setMBDLower({ ...emptyMickeyBDState(), ...data.mickeyBD.LOWER });
+          if (data.revcobd?.UPPER) setRBDUpper({ ...emptyRevcoBDState(), ...data.revcobd.UPPER });
+          if (data.revcobd?.LOWER) setRBDLower({ ...emptyRevcoBDState(), ...data.revcobd.LOWER });
           if (data.dScoreSettings) setDScoreSettings(data.dScoreSettings);
           if (data.qScoreSettings) setQScoreSettings(data.qScoreSettings);
           else if (data.qScoreCap === 21 || data.qScoreCap === 25) setQScoreSettings({ playTo: 21, cap: data.qScoreCap });
@@ -347,7 +389,8 @@ export default function BlindDrawTourneyApp() {
           if (data.kobScoreSettings) setKobScoreSettings(data.kobScoreSettings);
           if (data.mScoreSettings) setMScoreSettings(data.mScoreSettings);
           if (data.mbdScoreSettings) setMBDScoreSettings(data.mbdScoreSettings);
-          if (data.activeTab === "DOUBLES" || data.activeTab === "QUADS" || data.activeTab === "TRIPLES" || data.activeTab === "KOB" || data.activeTab === "MICKEY" || data.activeTab === "MICKEYBD") setActiveTab(data.activeTab);
+          if (data.rbdScoreSettings) setRBDScoreSettings(data.rbdScoreSettings);
+          if (data.activeTab === "DOUBLES" || data.activeTab === "QUADS" || data.activeTab === "TRIPLES" || data.activeTab === "KOB" || data.activeTab === "MICKEY" || data.activeTab === "MICKEYBD" || data.activeTab === "REVCOBD") setActiveTab(data.activeTab);
           if (data.activeDivision === "UPPER" || data.activeDivision === "LOWER") setActiveDivision(data.activeDivision);
         }
         setLoadingRemote(false);
@@ -379,12 +422,15 @@ export default function BlindDrawTourneyApp() {
         if (remote.mickey?.LOWER) setMLower(remote.mickey.LOWER);
         if (remote.mickeyBD?.UPPER) setMBDUpper({ ...emptyMickeyBDState(), ...remote.mickeyBD.UPPER });
         if (remote.mickeyBD?.LOWER) setMBDLower({ ...emptyMickeyBDState(), ...remote.mickeyBD.LOWER });
+        if (remote.revcobd?.UPPER) setRBDUpper({ ...emptyRevcoBDState(), ...remote.revcobd.UPPER });
+        if (remote.revcobd?.LOWER) setRBDLower({ ...emptyRevcoBDState(), ...remote.revcobd.LOWER });
         if (remote.dScoreSettings) setDScoreSettings(remote.dScoreSettings);
         if (remote.qScoreSettings) setQScoreSettings(remote.qScoreSettings);
         if (remote.tScoreSettings) setTScoreSettings(remote.tScoreSettings);
         if (remote.kobScoreSettings) setKobScoreSettings(remote.kobScoreSettings);
         if (remote.mScoreSettings) setMScoreSettings(remote.mScoreSettings);
         if (remote.mbdScoreSettings) setMBDScoreSettings(remote.mbdScoreSettings);
+        if (remote.rbdScoreSettings) setRBDScoreSettings(remote.rbdScoreSettings);
       } catch {
         // Swallow polling errors so a flaky network doesn't blow up viewers.
       }
@@ -434,6 +480,8 @@ export default function BlindDrawTourneyApp() {
   const setCurrentM = activeDivision === "UPPER" ? setMUpper : setMLower;
   const currentMBD = activeDivision === "UPPER" ? mbdUpper : mbdLower;
   const setCurrentMBD = activeDivision === "UPPER" ? setMBDUpper : setMBDLower;
+  const currentRBD = activeDivision === "UPPER" ? rbdUpper : rbdLower;
+  const setCurrentRBD = activeDivision === "UPPER" ? setRBDUpper : setRBDLower;
 
   const currentDivisionMeta = SIDEBAR_DIVISIONS.find(d => d.key === activeTab);
   const divisionLabel = currentDivisionMeta?.label ?? activeTab;
@@ -577,7 +625,7 @@ export default function BlindDrawTourneyApp() {
       poolsSubtitle = 'Pool matchups and standings';
       playoffsBadge = currentM.brackets.length > 0 ? 'Built' : 'Not built';
       playoffsSubtitle = 'Bracket and Redemption Rally';
-    } else { // MICKEYBD
+    } else if (activeTab === 'MICKEYBD') {
       const rounds = currentMBD.rounds ?? [];
       const brackets = currentMBD.brackets ?? [];
       const totalMatches = rounds.reduce((n, r) => n + r.matches.length, 0);
@@ -590,6 +638,21 @@ export default function BlindDrawTourneyApp() {
       poolsSubtitle = 'Matches across all rounds + standings';
       playoffsBadge = brackets.length > 0 ? 'Built' : 'Not built';
       playoffsSubtitle = 'Re-drawn playoff teams + Redemption Rally';
+    } else { // REVCOBD
+      const rounds = currentRBD.rounds ?? [];
+      const totalMatches = rounds.reduce((n, r) => n + r.matches.length, 0);
+      const scoredMatches = rounds.reduce((n, r) => n + r.matches.filter(m => {
+        const t = (m.scoreText || '').trim();
+        if (!t) return false;
+        const p = t.match(/^(\d+)\s*[-–]\s*(\d+)$/);
+        return !!p && parseInt(p[1], 10) !== parseInt(p[2], 10);
+      }).length, 0);
+      teamsBadge = `${rounds.length}`;
+      teamsSubtitle = `Roster and round generator (${rounds.length} round${rounds.length === 1 ? '' : 's'} so far)`;
+      poolsBadge = `${scoredMatches}/${totalMatches}`;
+      poolsSubtitle = 'Matches across all rounds + standings';
+      playoffsBadge = 'N/A';
+      playoffsSubtitle = 'No playoffs in this format yet';
     }
 
     const desc = FORMAT_DESCRIPTIONS[activeTab];
@@ -1019,6 +1082,71 @@ export default function BlindDrawTourneyApp() {
               isAdmin={isAdmin}
             />
           </>
+        );
+      }
+    }
+
+    if (activeTab === 'REVCOBD') {
+      if (activeSection === 'TEAMS') {
+        return (
+          <fieldset disabled={!isAdmin} className={!isAdmin ? "opacity-95" : ""}>
+            <section className="bg-white rounded-xl shadow-sm ring-1 ring-slate-200 p-4">
+              <SectionHeader
+                title={`Sign-ups (Revco Quads Blind Draw – ${activeDivision})`}
+                subtitle={"Enter pairs as one per line: Guy / Girl. Teams of 4 (two pairs) re-draw every round."}
+                right={<ScoreSettingsPanel settings={rbdScoreSettings} onChange={setRBDScoreSettings} />}
+              />
+              <div className="grid md:grid-cols-2 gap-4">
+                <LineNumberTextarea
+                  id={`rbd-pairs-${activeDivision}`}
+                  label="Pairs"
+                  value={currentRBD.pairsText}
+                  onChange={(e) => setCurrentRBD(p => ({ ...p, pairsText: e.target.value }))}
+                />
+                <LineNumberTextarea
+                  id={`rbd-free-${activeDivision}`}
+                  label="Free Agents"
+                  value={currentRBD.freeAgentsText}
+                  onChange={(e) => setCurrentRBD(p => ({ ...p, freeAgentsText: e.target.value }))}
+                />
+              </div>
+            </section>
+            <RevcoBDRoundManager
+              pairsText={currentRBD.pairsText}
+              freeAgentsText={currentRBD.freeAgentsText}
+              rounds={currentRBD.rounds ?? []}
+              setRounds={(v: any) => setCurrentRBD(p => ({ ...p, rounds: typeof v === 'function' ? v(p.rounds ?? []) : v }))}
+              courtCount={currentRBD.courtCount ?? 1}
+              setCourtCount={(n: number) => setCurrentRBD(p => ({ ...p, courtCount: Math.max(1, Math.floor(n) || 1) }))}
+            />
+          </fieldset>
+        );
+      }
+      if (activeSection === 'POOLS') {
+        return (
+          <>
+            <RevcoBDMatchesView
+              rounds={currentRBD.rounds ?? []}
+              setRounds={(v: any) => setCurrentRBD(p => ({ ...p, rounds: typeof v === 'function' ? v(p.rounds ?? []) : v }))}
+              pairsText={currentRBD.pairsText}
+              courtCount={currentRBD.courtCount ?? 1}
+              isAdmin={isAdmin}
+              scoreSettings={rbdScoreSettings}
+            />
+            <RevcoBDLeaderboard
+              rounds={currentRBD.rounds ?? []}
+              pairsText={currentRBD.pairsText}
+              freeAgentsText={currentRBD.freeAgentsText}
+              scoreSettings={rbdScoreSettings}
+            />
+          </>
+        );
+      }
+      if (activeSection === 'PLAYOFFS') {
+        return (
+          <section className="bg-white rounded-xl shadow-sm ring-1 ring-slate-200 p-6 text-center text-slate-500 text-[14px]">
+            Playoffs are not yet available for Revco Quads Blind Draw. Use the Standings in the Pools tab to seed a manual bracket.
+          </section>
         );
       }
     }
