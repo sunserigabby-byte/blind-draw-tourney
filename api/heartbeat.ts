@@ -1,5 +1,5 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { kv } from "@vercel/kv";
+import { redis } from "./_redis";
 
 export const config = { runtime: "nodejs" };
 
@@ -22,18 +22,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const { sessionId } = req.body ?? {};
       if (!sessionId) return res.status(400).json({ ok: false, error: "Missing sessionId" });
 
-      const entries: HeartbeatEntry[] = (await kv.get(KEY)) ?? [];
+      const entries: HeartbeatEntry[] = (await redis.get(KEY)) ?? [];
       // Update or add this session, prune stale ones
       const fresh = entries.filter(e => e.sessionId !== sessionId && now - e.ts < EXPIRE_MS);
       fresh.push({ sessionId, ts: now });
-      await kv.set(KEY, fresh);
+      await redis.set(KEY, fresh);
 
       const otherActive = fresh.filter(e => e.sessionId !== sessionId).length;
       return res.status(200).json({ ok: true, otherActive });
     }
 
     if (req.method === "GET") {
-      const entries: HeartbeatEntry[] = (await kv.get(KEY)) ?? [];
+      const entries: HeartbeatEntry[] = (await redis.get(KEY)) ?? [];
       const fresh = entries.filter(e => now - e.ts < EXPIRE_MS);
       return res.status(200).json({ ok: true, active: fresh.length });
     }

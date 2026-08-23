@@ -1,5 +1,5 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { kv } from "@vercel/kv";
+import { redis } from "./_redis";
 
 export const config = {
   runtime: "nodejs",
@@ -19,7 +19,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     if (req.method === "GET") {
-      const data = await kv.get(KEY);
+      const data = await redis.get(KEY);
       return res.status(200).json({ ok: true, data: data ?? null });
     }
 
@@ -35,7 +35,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return res.status(401).json({ ok: false, error: "Unauthorized" });
       }
 
-      await kv.set(KEY, req.body ?? null);
+      await redis.set(KEY, req.body ?? null);
 
       return res.status(200).json({ ok: true });
     }
