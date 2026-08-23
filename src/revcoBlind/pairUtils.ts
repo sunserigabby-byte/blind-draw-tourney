@@ -19,7 +19,13 @@ export function pairKey(a: PairId, b: PairId): string {
 }
 
 // Build a map from each individual player's slug → their registered pair ID.
-export function buildPairMap(pairsText: string, freeAgentsText: string): Map<string, PairId> {
+// guysText/girlsText are the separate boxes used in free-agents-only mode.
+export function buildPairMap(
+  pairsText: string,
+  freeAgentsText: string,
+  guysText = '',
+  girlsText = '',
+): Map<string, PairId> {
   const map = new Map<string, PairId>();
   for (const members of parseMickeyPairsGendered(pairsText)) {
     const pairId = members.map(m => slug(m.name)).sort().join('|');
@@ -27,6 +33,12 @@ export function buildPairMap(pairsText: string, freeAgentsText: string): Map<str
   }
   for (const m of parseMickeyFreeGendered(freeAgentsText)) {
     const s = slug(m.name);
+    map.set(s, s);
+  }
+  // Individuals from the free-agents-only Guys/Girls boxes
+  for (const name of [...guysText.split(/\r?\n/), ...girlsText.split(/\r?\n/)]
+    .map(s => s.trim()).filter(Boolean)) {
+    const s = slug(name);
     map.set(s, s);
   }
   return map;

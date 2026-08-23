@@ -75,27 +75,49 @@ function scorePairCandidate(
 
 // ── History-aware draw ────────────────────────────────────────────────────────
 
-function getAllPairIds(pairsText: string, freeAgentsText: string): PairId[] {
-  const ids: PairId[] = [];
-  for (const members of parseMickeyPairsGendered(pairsText)) {
-    ids.push(members.map(m => slug(m.name)).sort().join('|'));
-  }
-  for (const m of parseMickeyFreeGendered(freeAgentsText)) {
-    ids.push(slug(m.name));
-  }
-  return ids;
+function parseNames(text: string): string[] {
+  return (text || '').split(/\r?\n/).map(s => s.trim()).filter(Boolean);
 }
 
-function buildPairIdToPlayers(pairsText: string, freeAgentsText: string): Map<PairId, string[]> {
-  const map = new Map<PairId, string[]>();
-  for (const members of parseMickeyPairsGendered(pairsText)) {
-    const slugs = members.map(m => slug(m.name)).sort();
-    map.set(slugs.join('|'), members.map(m => m.name));
+// Phase 0 — Greedy M+F free-agent pairing.
+// Free agents rotate partners each round. Each guy is paired with a girl he
+// hasn't been on the same team with recently. The resulting temporary pairs
+// are passed into Phase 1 as first-class units, so partners always stay
+// together within a round.
+function pairFreeAgentsGreedy(
+  guyNames: string[],
+  girlNames: string[],
+  history: PairHistory,
+  noise: number,
+): Array<{ pairId: PairId; players: string[] }> {
+  if (guyNames.length === 0 || girlNames.length === 0) return [];
+
+  const guySlugs = guyNames.map(slug);
+  const girlSlugs = girlNames.map(slug);
+
+  const candidates: { gi: number; fi: number; cost: number }[] = [];
+  for (let gi = 0; gi < guySlugs.length; gi++) {
+    for (let fi = 0; fi < girlSlugs.length; fi++) {
+      const past = history.teammateCount.get(pairKey(guySlugs[gi], girlSlugs[fi])) ?? 0;
+      const jitter = noise > 0 ? Math.random() * noise : 0;
+      candidates.push({ gi, fi, cost: past * TEAMMATE_WEIGHT + jitter });
+    }
   }
-  for (const m of parseMickeyFreeGendered(freeAgentsText)) {
-    map.set(slug(m.name), [m.name]);
+  candidates.sort((a, b) => a.cost - b.cost);
+
+  const usedGuys = new Set<number>();
+  const usedGirls = new Set<number>();
+  const pairs: Array<{ pairId: PairId; players: string[] }> = [];
+
+  for (const { gi, fi } of candidates) {
+    if (usedGuys.has(gi) || usedGirls.has(fi)) continue;
+    usedGuys.add(gi);
+    usedGirls.add(fi);
+    const pId = [guySlugs[gi], girlSlugs[fi]].sort().join('|');
+    pairs.push({ pairId: pId, players: [guyNames[gi], girlNames[fi]] });
   }
-  return map;
+
+  return pairs;
 }
 
 // Phase 1 — Greedy history-aware team formation.
@@ -192,23 +214,72 @@ function buildRoundFromGroups(
 // Main draw: candidate 0 is pure greedy (optimal for known history).
 // Candidates 1–N add jitter to explore near-optimal alternatives.
 // Returns the lowest-penalty result across all tries.
+//
+// rosterType controls where free agents come from:
+//   'freeAgents' — guysText / girlsText boxes; Phase 0 pairs them M+F each round
+//   'mixed'      — freeAgentsText with (M)/(F) markers; gendered ones go through
+//                  Phase 0, ungendered stay as solo units
+//   'pairs'      — no free agents; Phase 0 is skipped
 function pickBestCandidate(
   pairsText: string,
   freeAgentsText: string,
+  guysText: string,
+  girlsText: string,
+  rosterType: string,
   roundNumber: number,
   history: PairHistory,
   pairMap: Map<string, PairId>,
   useSmart: boolean,
 ): { teams: MickeyTeam[]; matches: RevcoMatchRow[] } | null {
-  const allPairIds = getAllPairIds(pairsText, freeAgentsText);
-  if (allPairIds.length < 2) return null;
+  // Registered pairs — always stay together
+  const registeredPairIds: PairId[] = parseMickeyPairsGendered(pairsText)
+    .map(members => members.map(m => slug(m.name)).sort().join('|'));
 
-  const pairIdToPlayers = buildPairIdToPlayers(pairsText, freeAgentsText);
+  const basePairIdToPlayers = new Map<PairId, string[]>();
+  for (const members of parseMickeyPairsGendered(pairsText)) {
+    const slugs = members.map(m => slug(m.name)).sort();
+    basePairIdToPlayers.set(slugs.join('|'), members.map(m => m.name));
+  }
+
+  // Free agents — determine who needs M+F pairing (Phase 0) vs. solo units
+  let guyNames: string[] = [];
+  let girlNames: string[] = [];
+  let soloNames: string[] = [];
+
+  if (rosterType === 'freeAgents') {
+    guyNames = parseNames(guysText);
+    girlNames = parseNames(girlsText);
+  } else if (rosterType === 'mixed') {
+    const allFree = parseMickeyFreeGendered(freeAgentsText);
+    guyNames = allFree.filter(m => m.gender === 'M').map(m => m.name);
+    girlNames = allFree.filter(m => m.gender === 'F').map(m => m.name);
+    soloNames = allFree.filter(m => m.gender === null).map(m => m.name);
+  }
+
+  // Solo free agents (no gender) remain as individual units
+  for (const name of soloNames) basePairIdToPlayers.set(slug(name), [name]);
+  const soloIds: PairId[] = soloNames.map(n => slug(n));
+
   const tries = useSmart ? SMART_CANDIDATES : 1;
   let best: { teams: MickeyTeam[]; matches: RevcoMatchRow[]; score: number } | null = null;
 
   for (let i = 0; i < tries; i++) {
     const noise = i === 0 ? 0 : 2.0;
+
+    // Phase 0: pair free agents into temporary M+F partners for this round
+    const tempPairs = pairFreeAgentsGreedy(guyNames, girlNames, history, noise);
+
+    const allPairIds: PairId[] = [
+      ...registeredPairIds,
+      ...tempPairs.map(p => p.pairId),
+      ...soloIds,
+    ];
+    if (allPairIds.length < 2) continue;
+
+    const pairIdToPlayers = new Map(basePairIdToPlayers);
+    for (const { pairId, players } of tempPairs) pairIdToPlayers.set(pairId, players);
+
+    // Phases 1 + 2
     const groups = greedyTeamFormation(allPairIds, history, noise);
     if (groups.length < 2) continue;
     const matchPairs = greedyOpponentMatching(groups, history, noise);
@@ -247,6 +318,9 @@ function to24h(h12: number, ampm: 'AM' | 'PM'): number {
 export function RevcoBDRoundManager({
   pairsText,
   freeAgentsText,
+  guysText = '',
+  girlsText = '',
+  rosterType = 'mixed',
   rounds,
   setRounds,
   courtCount,
@@ -262,6 +336,9 @@ export function RevcoBDRoundManager({
 }: {
   pairsText: string;
   freeAgentsText: string;
+  guysText?: string;
+  girlsText?: string;
+  rosterType?: string;
   rounds: RevcoBDRound[];
   setRounds: (f: ((prev: RevcoBDRound[]) => RevcoBDRound[]) | RevcoBDRound[]) => void;
   courtCount: number;
@@ -290,22 +367,30 @@ export function RevcoBDRoundManager({
     () => parseMickeyFreeGendered(freeAgentsText).map(m => toUnit([m])),
     [freeAgentsText],
   );
-  const totalPlayers = pairUnits.reduce((n, u) => n + u.size, 0) + freeUnits.length;
+  const guysCount = useMemo(() => parseNames(guysText).length, [guysText]);
+  const girlsCount = useMemo(() => parseNames(girlsText).length, [girlsText]);
+  const totalPlayers =
+    pairUnits.reduce((n, u) => n + u.size, 0) +
+    freeUnits.length +
+    guysCount +
+    girlsCount;
 
   const allPlayerNames = useMemo(
     () => uniq([
       ...parseMickeyPairsGendered(pairsText).flat().map(m => m.name),
       ...parseMickeyFreeGendered(freeAgentsText).map(m => m.name),
+      ...parseNames(guysText),
+      ...parseNames(girlsText),
     ]).filter(Boolean),
-    [pairsText, freeAgentsText],
+    [pairsText, freeAgentsText, guysText, girlsText],
   );
 
   const generateRound = () => {
-    const pairMap = buildPairMap(pairsText, freeAgentsText);
+    const pairMap = buildPairMap(pairsText, freeAgentsText, guysText, girlsText);
     const history = buildPairHistory(rounds, pairMap);
-    const result = pickBestCandidate(pairsText, freeAgentsText, rounds.length + 1, history, pairMap, useSmart);
+    const result = pickBestCandidate(pairsText, freeAgentsText, guysText, girlsText, rosterType, rounds.length + 1, history, pairMap, useSmart);
     if (!result) {
-      alert('Need at least 2 pairs to make a round.');
+      alert('Need at least 2 pairs/players to make a round.');
       return;
     }
     setRounds(prev => [...prev, {
@@ -321,12 +406,12 @@ export function RevcoBDRoundManager({
       alert('Need at least 4 players to start.');
       return;
     }
-    const pairMap = buildPairMap(pairsText, freeAgentsText);
+    const pairMap = buildPairMap(pairsText, freeAgentsText, guysText, girlsText);
     setRounds(prev => {
       const working = [...prev];
       for (let i = 0; i < count; i++) {
         const history = buildPairHistory(working, pairMap);
-        const result = pickBestCandidate(pairsText, freeAgentsText, working.length + 1, history, pairMap, useSmart);
+        const result = pickBestCandidate(pairsText, freeAgentsText, guysText, girlsText, rosterType, working.length + 1, history, pairMap, useSmart);
         if (!result) break;
         working.push({ id: rid(), number: working.length + 1, teams: result.teams, matches: result.matches });
       }
@@ -335,12 +420,12 @@ export function RevcoBDRoundManager({
   };
 
   const redrawRound = (roundId: string) => {
-    const pairMap = buildPairMap(pairsText, freeAgentsText);
+    const pairMap = buildPairMap(pairsText, freeAgentsText, guysText, girlsText);
     setRounds(prev => prev.map(r => {
       if (r.id !== roundId) return r;
       const otherRounds = prev.filter(p => p.id !== roundId);
       const history = buildPairHistory(otherRounds, pairMap);
-      const result = pickBestCandidate(pairsText, freeAgentsText, r.number, history, pairMap, useSmart);
+      const result = pickBestCandidate(pairsText, freeAgentsText, guysText, girlsText, rosterType, r.number, history, pairMap, useSmart);
       if (!result) return r;
       return { ...r, teams: result.teams, matches: result.matches };
     }));
@@ -399,8 +484,13 @@ export function RevcoBDRoundManager({
         <span>
           Roster:{' '}
           <span className="font-semibold">
-            {pairUnits.length} pair{pairUnits.length === 1 ? '' : 's'}, {freeUnits.length} free agent
-            {freeUnits.length === 1 ? '' : 's'}, {totalPlayers} player{totalPlayers === 1 ? '' : 's'}
+            {rosterType === 'freeAgents'
+              ? `${guysCount} guy${guysCount === 1 ? '' : 's'}, ${girlsCount} girl${girlsCount === 1 ? '' : 's'} — partnered each round`
+              : rosterType === 'pairs'
+                ? `${pairUnits.length} pair${pairUnits.length === 1 ? '' : 's'}`
+                : `${pairUnits.length} pair${pairUnits.length === 1 ? '' : 's'}, ${freeUnits.length} free agent${freeUnits.length === 1 ? '' : 's'}`
+            }
+            {totalPlayers > 0 && ` · ${totalPlayers} player${totalPlayers === 1 ? '' : 's'} total`}
           </span>
         </span>
         <label className="flex items-center gap-1.5">

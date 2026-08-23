@@ -91,6 +91,8 @@ type RosterType = 'mixed' | 'pairs' | 'freeAgents';
 type RevcoBDDivisionState = {
   pairsText: string;
   freeAgentsText: string;
+  guysText?: string;
+  girlsText?: string;
   rounds: RevcoBDRound[];
   brackets: BracketMatch[];
   courtCount?: number;
@@ -101,7 +103,7 @@ type RevcoBDDivisionState = {
   rosterType?: RosterType;
 };
 function emptyRevcoBDState(): RevcoBDDivisionState {
-  return { pairsText: "", freeAgentsText: "", rounds: [], brackets: [], courtCount: 1, startHour: 9, slotMinutes: 45, scorerPin: "", publicScoring: false, rosterType: 'mixed' };
+  return { pairsText: "", freeAgentsText: "", guysText: "", girlsText: "", rounds: [], brackets: [], courtCount: 1, startHour: 9, slotMinutes: 45, scorerPin: "", publicScoring: false, rosterType: 'mixed' };
 }
 
 // Short description for each format, shown at the top of its Home page.
@@ -1049,7 +1051,11 @@ export default function BlindDrawTourneyApp() {
                   ))}
                 </div>
               </div>
-              <div className={`grid gap-4 ${showPairs && showFree ? 'md:grid-cols-2' : 'md:grid-cols-1 max-w-md'}`}>
+              <div className={`grid gap-4 ${
+                rosterType === 'freeAgents' ? 'md:grid-cols-2'
+                : showPairs && showFree ? 'md:grid-cols-2'
+                : 'md:grid-cols-1 max-w-md'
+              }`}>
                 {showPairs && (
                   <LineNumberTextarea
                     id={`rbd-pairs-${activeDivision}`}
@@ -1058,10 +1064,25 @@ export default function BlindDrawTourneyApp() {
                     onChange={(e) => setCurrentRBD(p => ({ ...p, pairsText: e.target.value }))}
                   />
                 )}
-                {showFree && (
+                {rosterType === 'freeAgents' ? (
+                  <>
+                    <LineNumberTextarea
+                      id={`rbd-guys-${activeDivision}`}
+                      label="Guys (one per line)"
+                      value={currentRBD.guysText ?? ''}
+                      onChange={(e) => setCurrentRBD(p => ({ ...p, guysText: e.target.value }))}
+                    />
+                    <LineNumberTextarea
+                      id={`rbd-girls-${activeDivision}`}
+                      label="Girls (one per line)"
+                      value={currentRBD.girlsText ?? ''}
+                      onChange={(e) => setCurrentRBD(p => ({ ...p, girlsText: e.target.value }))}
+                    />
+                  </>
+                ) : showFree && (
                   <LineNumberTextarea
                     id={`rbd-free-${activeDivision}`}
-                    label={rosterType === 'freeAgents' ? 'Players (one per line)' : 'Free Agents (one per line)'}
+                    label="Free Agents — add (M) or (F) after name for partner matching"
                     value={currentRBD.freeAgentsText}
                     onChange={(e) => setCurrentRBD(p => ({ ...p, freeAgentsText: e.target.value }))}
                   />
@@ -1071,6 +1092,9 @@ export default function BlindDrawTourneyApp() {
             <RevcoBDRoundManager
               pairsText={currentRBD.pairsText}
               freeAgentsText={currentRBD.freeAgentsText}
+              guysText={currentRBD.guysText ?? ''}
+              girlsText={currentRBD.girlsText ?? ''}
+              rosterType={currentRBD.rosterType ?? 'mixed'}
               rounds={currentRBD.rounds ?? []}
               setRounds={(v: any) => setCurrentRBD(p => ({ ...p, rounds: typeof v === 'function' ? v(p.rounds ?? []) : v }))}
               courtCount={currentRBD.courtCount ?? 1}
@@ -1147,13 +1171,21 @@ export default function BlindDrawTourneyApp() {
             <RevcoBDLeaderboard
               rounds={currentRBD.rounds ?? []}
               pairsText={currentRBD.pairsText}
-              freeAgentsText={currentRBD.freeAgentsText}
+              freeAgentsText={
+                (currentRBD.rosterType ?? 'mixed') === 'freeAgents'
+                  ? [currentRBD.guysText ?? '', currentRBD.girlsText ?? ''].join('\n')
+                  : currentRBD.freeAgentsText
+              }
               scoreSettings={rbdScoreSettings}
             />
             <RevcoBDFairnessReport
               rounds={currentRBD.rounds ?? []}
               pairsText={currentRBD.pairsText}
-              freeAgentsText={currentRBD.freeAgentsText}
+              freeAgentsText={
+                (currentRBD.rosterType ?? 'mixed') === 'freeAgents'
+                  ? [currentRBD.guysText ?? '', currentRBD.girlsText ?? ''].join('\n')
+                  : currentRBD.freeAgentsText
+              }
             />
           </>
         );
