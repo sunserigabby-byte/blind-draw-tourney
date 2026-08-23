@@ -266,6 +266,8 @@ export function RevcoBDRoundManager({
   setStartHour: (h: number) => void;
   slotMinutes: number;
   setSlotMinutes: (m: number) => void;
+  scorerPin: string;
+  setScorerPin: (pin: string) => void;
 }) {
   const [confirmRemoveId, setConfirmRemoveId] = useState<string | null>(null);
   const [confirmRedrawId, setConfirmRedrawId] = useState<string | null>(null);
@@ -446,6 +448,24 @@ export function RevcoBDRoundManager({
             ))}
           </select>
         </label>
+      </div>
+
+      <div className="flex items-center gap-3 flex-wrap text-[12px] text-slate-600">
+        <label className="flex items-center gap-1.5">
+          Scorer code for players:
+          <input
+            type="text"
+            value={scorerPin}
+            onChange={e => setScorerPin(e.target.value.trim())}
+            placeholder="leave blank to disable"
+            className="border border-slate-300 rounded px-2 py-1 text-[12px] w-40 font-mono"
+          />
+        </label>
+        <span className="text-[11px] text-slate-400">
+          {scorerPin
+            ? 'Share this code so players can enter scores from their phones.'
+            : 'Set a code to let players submit their own scores.'}
+        </span>
       </div>
 
       <div className="flex items-center gap-2 flex-wrap text-[12px]">

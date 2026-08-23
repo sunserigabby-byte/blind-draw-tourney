@@ -99,9 +99,10 @@ type RevcoBDDivisionState = {
   courtCount?: number;
   startHour?: number;
   slotMinutes?: number;
+  scorerPin?: string;
 };
 function emptyRevcoBDState(): RevcoBDDivisionState {
-  return { pairsText: "", freeAgentsText: "", rounds: [], brackets: [], courtCount: 1, startHour: 9, slotMinutes: 45 };
+  return { pairsText: "", freeAgentsText: "", rounds: [], brackets: [], courtCount: 1, startHour: 9, slotMinutes: 45, scorerPin: "" };
 }
 
 // Short description for each format, shown at the top of its Home page.
@@ -248,6 +249,7 @@ export default function BlindDrawTourneyApp() {
 
   const [adminKey, setAdminKey] = useState<string>(() => { try { return sessionStorage.getItem("ADMIN_KEY") || ""; } catch { return ""; } });
   const isAdmin = !!adminKey;
+  const [scorerEntry, setScorerEntry] = useState<string>(() => { try { return sessionStorage.getItem("RBD_SCORER_PIN") || ""; } catch { return ""; } });
   const [loadingRemote, setLoadingRemote] = useState(true);
   const [remoteError, setRemoteError] = useState<string>("");
   const [adminKeyError, setAdminKeyError] = useState<string>("");
@@ -480,6 +482,8 @@ export default function BlindDrawTourneyApp() {
   const setCurrentMBD = activeDivision === "UPPER" ? setMBDUpper : setMBDLower;
   const currentRBD = activeDivision === "UPPER" ? rbdUpper : rbdLower;
   const setCurrentRBD = activeDivision === "UPPER" ? setRBDUpper : setRBDLower;
+  const isScorer = !isAdmin && !!(currentRBD.scorerPin) && scorerEntry === currentRBD.scorerPin;
+  const canScore = isAdmin || isScorer;
 
   const currentDivisionMeta = SIDEBAR_DIVISIONS.find(d => d.key === activeTab);
   const divisionLabel = currentDivisionMeta?.label ?? activeTab;
@@ -1120,6 +1124,8 @@ export default function BlindDrawTourneyApp() {
               setStartHour={(h: number) => setCurrentRBD(p => ({ ...p, startHour: h }))}
               slotMinutes={currentRBD.slotMinutes ?? 45}
               setSlotMinutes={(m: number) => setCurrentRBD(p => ({ ...p, slotMinutes: m }))}
+              scorerPin={currentRBD.scorerPin ?? ''}
+              setScorerPin={(pin: string) => setCurrentRBD(p => ({ ...p, scorerPin: pin }))}
             />
           </fieldset>
         );
@@ -1127,6 +1133,46 @@ export default function BlindDrawTourneyApp() {
       if (activeSection === 'POOLS') {
         return (
           <>
+            {!isAdmin && (currentRBD.scorerPin ?? '') !== '' && (
+              <div className="bg-white/95 backdrop-blur rounded-xl shadow ring-1 ring-slate-200 p-4">
+                {isScorer ? (
+                  <div className="flex items-center justify-between gap-2 flex-wrap">
+                    <span className="text-[13px] text-emerald-700 font-semibold">
+                      ✓ Score entry unlocked — enter match results below.
+                    </span>
+                    <button
+                      className="text-[11px] text-slate-500 hover:text-slate-700 underline"
+                      onClick={() => { setScorerEntry(''); try { sessionStorage.removeItem("RBD_SCORER_PIN"); } catch {} }}
+                    >
+                      Lock
+                    </button>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    <p className="text-[13px] font-semibold text-sky-800">Players: enter your scorer code to submit match results.</p>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <input
+                        type="text"
+                        placeholder="Scorer code"
+                        className="border border-slate-300 rounded px-2 py-1.5 text-[13px] w-40 focus:ring-1 focus:ring-sky-400 focus:border-sky-400 outline-none"
+                        value={scorerEntry}
+                        onChange={e => setScorerEntry(e.target.value)}
+                        onKeyDown={e => { if (e.key === 'Enter') { try { sessionStorage.setItem("RBD_SCORER_PIN", scorerEntry); } catch {} } }}
+                      />
+                      <button
+                        className="px-3 py-1.5 rounded bg-sky-600 text-white text-[13px] hover:bg-sky-700 font-medium"
+                        onClick={() => { try { sessionStorage.setItem("RBD_SCORER_PIN", scorerEntry); } catch {} }}
+                      >
+                        Unlock
+                      </button>
+                      {scorerEntry.trim() !== '' && scorerEntry !== currentRBD.scorerPin && (
+                        <span className="text-[12px] text-red-600 font-medium">Incorrect — check with the director.</span>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
             <RevcoBDMatchesView
               rounds={currentRBD.rounds ?? []}
               setRounds={(v: any) => setCurrentRBD(p => ({ ...p, rounds: typeof v === 'function' ? v(p.rounds ?? []) : v }))}
@@ -1134,7 +1180,7 @@ export default function BlindDrawTourneyApp() {
               courtCount={currentRBD.courtCount ?? 1}
               startHour={currentRBD.startHour ?? 9}
               slotMinutes={currentRBD.slotMinutes ?? 45}
-              isAdmin={isAdmin}
+              isAdmin={canScore}
               scoreSettings={rbdScoreSettings}
             />
             <RevcoBDLeaderboard
