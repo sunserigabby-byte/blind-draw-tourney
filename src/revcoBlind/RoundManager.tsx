@@ -7,7 +7,7 @@ import {
 import { drawTeams, toUnit, type Unit } from '../mickey/TeamBuilder';
 
 const rid = () => Math.random().toString(36).slice(2, 10);
-const SMART_CANDIDATES = 30;
+const SMART_CANDIDATES = 150;
 
 export type RevcoBDRound = {
   id: string;
@@ -16,92 +16,177 @@ export type RevcoBDRound = {
   matches: RevcoMatchRow[];
 };
 
-type RoundHistory = {
-  teammateCount: Map<string, number>;
-  opponentCount: Map<string, number>;
-  courtUsage: Map<string, Set<number>>;
-};
+// ── Pair-level identity ───────────────────────────────────────────────────────
+// Each registered pair gets a stable ID = sorted player slugs joined by "|".
+// Free agents each get their own slug as ID.
+// This way the unit of memory is the PAIR (not individual players), which is
+// more accurate for a format where pairs always stay together.
 
-function pairKey(a: string, b: string): string {
-  const [x, y] = [slug(a), slug(b)].sort();
-  return `${x}|${y}`;
+type PairId = string;
+
+function buildPairMap(pairsText: string, freeAgentsText: string): Map<string, PairId> {
+  const map = new Map<string, PairId>();
+  for (const members of parseMickeyPairsGendered(pairsText)) {
+    const slugs = members.map(m => slug(m.name)).sort();
+    const pairId = slugs.join('|');
+    for (const m of members) map.set(slug(m.name), pairId);
+  }
+  for (const m of parseMickeyFreeGendered(freeAgentsText)) {
+    const s = slug(m.name);
+    map.set(s, s);
+  }
+  return map;
 }
 
-function buildHistory(rounds: RevcoBDRound[]): RoundHistory {
+// Get the unique pair IDs present on a team (typically 2 for a full team of 4).
+function getPairIds(players: string[], pairMap: Map<string, PairId>): PairId[] {
+  const seen = new Set<PairId>();
+  const result: PairId[] = [];
+  for (const p of players) {
+    const id = pairMap.get(slug(p)) ?? slug(p);
+    if (!seen.has(id)) { seen.add(id); result.push(id); }
+  }
+  return result;
+}
+
+// Stable unordered key for a pair-of-pairs relationship.
+// Uses "::" as separator to avoid collisions with "|" inside pairIds.
+function pairKey(a: PairId, b: PairId): string {
+  return [a, b].sort().join('::');
+}
+
+// ── History ───────────────────────────────────────────────────────────────────
+
+type PairHistory = {
+  teammateCount: Map<string, number>;          // pairKey(pairId1, pairId2) → times they shared a team
+  opponentCount: Map<string, number>;          // pairKey(pairId1, pairId2) → times they faced each other
+  courtCount: Map<PairId, Map<number, number>>; // pairId → courtIdx → times on that court
+  sitOutCount: Map<PairId, number>;            // pairId → times they sat out without a match
+};
+
+function buildPairHistory(rounds: RevcoBDRound[], pairMap: Map<string, PairId>): PairHistory {
   const teammateCount = new Map<string, number>();
   const opponentCount = new Map<string, number>();
-  const courtUsage = new Map<string, Set<number>>();
-  const bump = (map: Map<string, number>, key: string) => map.set(key, (map.get(key) ?? 0) + 1);
+  const courtCount = new Map<PairId, Map<number, number>>();
+  const sitOutCount = new Map<PairId, number>();
+  const bump = (map: Map<string, number>, key: string) =>
+    map.set(key, (map.get(key) ?? 0) + 1);
 
   for (const round of rounds) {
+    const playingTeamIds = new Set(round.matches.flatMap(m => [m.teamAId, m.teamBId]));
+
+    // Teammate tracking for ALL formed teams (including sit-outs — being grouped
+    // with a pair counts even if you don't play a match that round).
     for (const team of round.teams) {
-      for (let i = 0; i < team.players.length; i++) {
-        for (let j = i + 1; j < team.players.length; j++) {
-          bump(teammateCount, pairKey(team.players[i], team.players[j]));
+      const pairIds = getPairIds(team.players, pairMap);
+      for (let i = 0; i < pairIds.length; i++) {
+        for (let j = i + 1; j < pairIds.length; j++) {
+          bump(teammateCount, pairKey(pairIds[i], pairIds[j]));
         }
       }
+      // Track sit-outs so the draw can prioritise getting them into the next match.
+      if (!playingTeamIds.has(team.id)) {
+        for (const pId of pairIds) bump(sitOutCount, pId);
+      }
     }
+
+    // Opponent + court tracking for played matches only.
     for (let courtIdx = 0; courtIdx < round.matches.length; courtIdx++) {
       const match = round.matches[courtIdx];
       const teamA = round.teams.find(t => t.id === match.teamAId);
       const teamB = round.teams.find(t => t.id === match.teamBId);
-      const aPlayers = teamA?.players ?? [];
-      const bPlayers = teamB?.players ?? [];
-      for (const a of aPlayers) {
-        for (const b of bPlayers) bump(opponentCount, pairKey(a, b));
+      const aPairIds = getPairIds(teamA?.players ?? [], pairMap);
+      const bPairIds = getPairIds(teamB?.players ?? [], pairMap);
+
+      for (const pA of aPairIds) {
+        for (const pB of bPairIds) {
+          bump(opponentCount, pairKey(pA, pB));
+        }
       }
-      for (const p of [...aPlayers, ...bPlayers]) {
-        const k = slug(p);
-        if (!courtUsage.has(k)) courtUsage.set(k, new Set());
-        courtUsage.get(k)!.add(courtIdx);
+
+      for (const pId of [...aPairIds, ...bPairIds]) {
+        if (!courtCount.has(pId)) courtCount.set(pId, new Map());
+        const m = courtCount.get(pId)!;
+        m.set(courtIdx, (m.get(courtIdx) ?? 0) + 1);
       }
     }
   }
-  return { teammateCount, opponentCount, courtUsage };
+
+  return { teammateCount, opponentCount, courtCount, sitOutCount };
 }
 
-function scoreCandidate(
+// ── Scoring ───────────────────────────────────────────────────────────────────
+// Weights are equal for teammates and opponents — we want maximum variety in
+// BOTH directions. Sit-outs are weighted highest so no pair is left out twice
+// when others haven't sat out yet.
+
+const TEAMMATE_WEIGHT = 3;
+const OPPONENT_WEIGHT = 3;
+const COURT_WEIGHT    = 1;
+const SITOUT_WEIGHT   = 5; // Strongest: being skipped a second time is unfair
+
+function scorePairCandidate(
   teams: MickeyTeam[],
   matches: RevcoMatchRow[],
-  history: RoundHistory,
+  history: PairHistory,
+  pairMap: Map<string, PairId>,
 ): number {
   let penalty = 0;
+  const playingTeamIds = new Set(matches.flatMap(m => [m.teamAId, m.teamBId]));
+
   for (const team of teams) {
-    for (let i = 0; i < team.players.length; i++) {
-      for (let j = i + 1; j < team.players.length; j++) {
-        penalty += (history.teammateCount.get(pairKey(team.players[i], team.players[j])) ?? 0) * 3;
+    const pairIds = getPairIds(team.players, pairMap);
+
+    // Teammate repeat penalty
+    for (let i = 0; i < pairIds.length; i++) {
+      for (let j = i + 1; j < pairIds.length; j++) {
+        const count = history.teammateCount.get(pairKey(pairIds[i], pairIds[j])) ?? 0;
+        penalty += count * TEAMMATE_WEIGHT;
+      }
+    }
+
+    // Sit-out repeat penalty — penalise putting a pair on the bench again
+    // when they've already sat out and others haven't.
+    if (!playingTeamIds.has(team.id)) {
+      for (const pId of pairIds) {
+        penalty += (history.sitOutCount.get(pId) ?? 0) * SITOUT_WEIGHT;
       }
     }
   }
+
   for (let courtIdx = 0; courtIdx < matches.length; courtIdx++) {
     const match = matches[courtIdx];
     const teamA = teams.find(t => t.id === match.teamAId);
     const teamB = teams.find(t => t.id === match.teamBId);
-    const aPlayers = teamA?.players ?? [];
-    const bPlayers = teamB?.players ?? [];
-    for (const a of aPlayers) {
-      for (const b of bPlayers) {
-        penalty += (history.opponentCount.get(pairKey(a, b)) ?? 0) * 2;
+    const aPairIds = getPairIds(teamA?.players ?? [], pairMap);
+    const bPairIds = getPairIds(teamB?.players ?? [], pairMap);
+
+    // Opponent repeat penalty
+    for (const pA of aPairIds) {
+      for (const pB of bPairIds) {
+        const count = history.opponentCount.get(pairKey(pA, pB)) ?? 0;
+        penalty += count * OPPONENT_WEIGHT;
       }
     }
-    for (const p of [...aPlayers, ...bPlayers]) {
-      const courts = history.courtUsage.get(slug(p));
-      if (courts && courts.has(courtIdx)) penalty += 1;
+
+    // Court repeat penalty — tracks how many times each pair has played
+    // each specific court and penalises overuse.
+    for (const pId of [...aPairIds, ...bPairIds]) {
+      const timesOnCourt = history.courtCount.get(pId)?.get(courtIdx) ?? 0;
+      penalty += timesOnCourt * COURT_WEIGHT;
     }
   }
+
   return penalty;
 }
+
+// ── Draw ──────────────────────────────────────────────────────────────────────
 
 function buildMatchesForRound(teams: MickeyTeam[], roundNumber: number): RevcoMatchRow[] {
   const shuffled = shuffle(teams);
   const out: RevcoMatchRow[] = [];
   for (let i = 0; i + 1 < shuffled.length; i += 2) {
-    out.push({
-      id: rid(),
-      pool: roundNumber,
-      teamAId: shuffled[i].id,
-      teamBId: shuffled[i + 1].id,
-    });
+    out.push({ id: rid(), pool: roundNumber, teamAId: shuffled[i].id, teamBId: shuffled[i + 1].id });
   }
   return out;
 }
@@ -111,7 +196,8 @@ function pickBestCandidate(
   freeUnits: Unit[],
   targetPoolSize: number,
   roundNumber: number,
-  history: RoundHistory,
+  history: PairHistory,
+  pairMap: Map<string, PairId>,
   useSmart: boolean,
 ): { teams: MickeyTeam[]; matches: RevcoMatchRow[] } | null {
   const tries = useSmart ? SMART_CANDIDATES : 1;
@@ -120,11 +206,13 @@ function pickBestCandidate(
     const teams = drawTeams(pairUnits, freeUnits, targetPoolSize);
     if (teams.length < 2) continue;
     const matches = buildMatchesForRound(teams, roundNumber);
-    const score = useSmart ? scoreCandidate(teams, matches, history) : 0;
+    const score = useSmart ? scorePairCandidate(teams, matches, history, pairMap) : 0;
     if (!best || score < best.score) best = { teams, matches, score };
   }
   return best ? { teams: best.teams, matches: best.matches } : null;
 }
+
+// ── Manual edit state ─────────────────────────────────────────────────────────
 
 type EditState = {
   teams: { id: string; name: string; players: string[] }[];
@@ -184,8 +272,9 @@ export function RevcoBDRoundManager({
   );
 
   const generateRound = () => {
-    const history = buildHistory(rounds);
-    const result = pickBestCandidate(pairUnits, freeUnits, targetPoolSize, rounds.length + 1, history, useSmart);
+    const pairMap = buildPairMap(pairsText, freeAgentsText);
+    const history = buildPairHistory(rounds, pairMap);
+    const result = pickBestCandidate(pairUnits, freeUnits, targetPoolSize, rounds.length + 1, history, pairMap, useSmart);
     if (!result) {
       alert('Need at least 2 teams to make a round. Add more pairs or free agents.');
       return;
@@ -203,29 +292,26 @@ export function RevcoBDRoundManager({
       alert('Need at least 4 players to start.');
       return;
     }
+    const pairMap = buildPairMap(pairsText, freeAgentsText);
     setRounds(prev => {
       const working = [...prev];
       for (let i = 0; i < count; i++) {
-        const history = buildHistory(working);
-        const result = pickBestCandidate(pairUnits, freeUnits, targetPoolSize, working.length + 1, history, useSmart);
+        const history = buildPairHistory(working, pairMap);
+        const result = pickBestCandidate(pairUnits, freeUnits, targetPoolSize, working.length + 1, history, pairMap, useSmart);
         if (!result) break;
-        working.push({
-          id: rid(),
-          number: working.length + 1,
-          teams: result.teams,
-          matches: result.matches,
-        });
+        working.push({ id: rid(), number: working.length + 1, teams: result.teams, matches: result.matches });
       }
       return working;
     });
   };
 
   const redrawRound = (roundId: string) => {
+    const pairMap = buildPairMap(pairsText, freeAgentsText);
     setRounds(prev => prev.map(r => {
       if (r.id !== roundId) return r;
       const otherRounds = prev.filter(p => p.id !== roundId);
-      const history = buildHistory(otherRounds);
-      const result = pickBestCandidate(pairUnits, freeUnits, targetPoolSize, r.number, history, useSmart);
+      const history = buildPairHistory(otherRounds, pairMap);
+      const result = pickBestCandidate(pairUnits, freeUnits, targetPoolSize, r.number, history, pairMap, useSmart);
       if (!result) return r;
       return { ...r, teams: result.teams, matches: result.matches };
     }));
@@ -238,20 +324,11 @@ export function RevcoBDRoundManager({
       return filtered.map((r, i) => ({ ...r, number: i + 1 }));
     });
     setConfirmRemoveId(null);
-    if (editingId === roundId) {
-      setEditingId(null);
-      setEditBuffer(null);
-    }
+    if (editingId === roundId) { setEditingId(null); setEditBuffer(null); }
   };
 
-  const startEditing = (round: RevcoBDRound) => {
-    setEditingId(round.id);
-    setEditBuffer(roundToEditState(round));
-  };
-  const cancelEdit = () => {
-    setEditingId(null);
-    setEditBuffer(null);
-  };
+  const startEditing = (round: RevcoBDRound) => { setEditingId(round.id); setEditBuffer(roundToEditState(round)); };
+  const cancelEdit = () => { setEditingId(null); setEditBuffer(null); };
   const saveEdit = () => {
     if (!editingId || !editBuffer) return;
     setRounds(prev => prev.map(r => {
@@ -264,11 +341,7 @@ export function RevcoBDRoundManager({
       }));
       const newMatches: RevcoMatchRow[] = editBuffer.matches.map(em => {
         const existing = r.matches.find(m => m.id === em.id);
-        return {
-          ...(existing ?? { id: em.id, pool: r.number }),
-          teamAId: em.teamAId,
-          teamBId: em.teamBId,
-        };
+        return { ...(existing ?? { id: em.id, pool: r.number }), teamAId: em.teamAId, teamBId: em.teamBId };
       });
       return { ...r, teams: newTeams, matches: newMatches };
     }));
@@ -287,8 +360,9 @@ export function RevcoBDRoundManager({
       <div>
         <h2 className="text-[16px] font-semibold text-sky-800">Rounds</h2>
         <p className="text-[11px] text-slate-500 mt-1">
-          Each round re-randomizes teams using a pair-preserving algorithm. Each round plays one Revco Quads set per match.
-          Click <span className="font-medium">Generate Next Round</span> as many times as you want.
+          Each round uses a smart draw that checks {SMART_CANDIDATES} candidate arrangements and picks the one where
+          pairs have the fewest repeat teammates, repeat opponents, repeated courts, and repeated sit-outs.
+          Click <span className="font-medium">Generate Next Round</span> when ready.
         </p>
       </div>
 
@@ -301,31 +375,14 @@ export function RevcoBDRoundManager({
           </span>
         </span>
         <label className="flex items-center gap-1.5">
-          Target pool size:
-          <input
-            type="number"
-            min={2}
-            max={20}
-            value={targetPoolSize}
-            onChange={e => setTargetPoolSize(Math.max(2, parseInt(e.target.value) || 5))}
-            className="w-14 border border-slate-300 rounded px-2 py-1 text-[12px] text-center font-semibold"
-          />
-          <span className="text-slate-400">teams/round</span>
-        </label>
-        <label className="flex items-center gap-1.5">
           Courts available:
           <input
-            type="number"
-            min={1}
-            max={50}
-            value={courtCount}
+            type="number" min={1} max={50} value={courtCount}
             onChange={e => setCourtCount(Math.max(1, parseInt(e.target.value) || 1))}
             className="w-14 border border-slate-300 rounded px-2 py-1 text-[12px] text-center font-semibold"
           />
           <span className="text-slate-400">
-            {courtCount === 1
-              ? 'matches in a round play sequentially.'
-              : `up to ${courtCount} matches per time slot.`}
+            {courtCount === 1 ? 'matches play sequentially.' : `up to ${courtCount} matches per time slot.`}
           </span>
         </label>
       </div>
@@ -333,10 +390,10 @@ export function RevcoBDRoundManager({
       <div className="flex items-center gap-2 flex-wrap text-[12px]">
         <label className="flex items-center gap-1.5">
           <input type="checkbox" checked={useSmart} onChange={e => setUseSmart(e.target.checked)} />
-          Avoid repeats (smart re-shuffle)
+          Smart draw (avoid repeats)
         </label>
         <span className="text-[11px] text-slate-400">
-          Tries {SMART_CANDIDATES} candidate draws and picks the one with the fewest repeat teammates, repeat opponents, and same-court assignments.
+          Tries {SMART_CANDIDATES} draws. Tracks teammate repeats, opponent repeats, court rotation, and sit-outs equally.
         </span>
       </div>
 
@@ -352,10 +409,7 @@ export function RevcoBDRoundManager({
         <label className="flex items-center gap-1.5 text-[12px] text-slate-600">
           Generate
           <input
-            type="number"
-            min={1}
-            max={50}
-            value={batchCount}
+            type="number" min={1} max={50} value={batchCount}
             onChange={e => setBatchCount(Math.max(1, parseInt(e.target.value) || 1))}
             className="w-12 border border-slate-300 rounded px-1 py-1 text-[12px] text-center font-semibold"
           />
@@ -384,46 +438,20 @@ export function RevcoBDRoundManager({
                   <div className="text-[13px] font-semibold text-sky-800">
                     Round {round.number}
                     <span className="ml-2 text-[11px] font-normal text-slate-500">
-                      {round.teams.length} team{round.teams.length === 1 ? '' : 's'} · {round.matches.length} match
-                      {round.matches.length === 1 ? '' : 'es'}
+                      {round.teams.length} team{round.teams.length === 1 ? '' : 's'} · {round.matches.length} match{round.matches.length === 1 ? '' : 'es'}
                     </span>
                   </div>
                   <div className="flex items-center gap-1.5">
                     {!isEditing ? (
                       <>
-                        <button
-                          className="px-2 py-1 rounded border text-slate-700 hover:bg-slate-50 text-[11px]"
-                          onClick={() => startEditing(round)}
-                        >
-                          Edit
-                        </button>
-                        <button
-                          className="px-2 py-1 rounded border text-slate-700 hover:bg-slate-50 text-[11px]"
-                          onClick={() => setConfirmRedrawId(round.id)}
-                        >
-                          Re-roll
-                        </button>
-                        <button
-                          className="px-2 py-1 rounded text-red-600 hover:bg-red-50 text-[11px]"
-                          onClick={() => setConfirmRemoveId(round.id)}
-                        >
-                          Remove
-                        </button>
+                        <button className="px-2 py-1 rounded border text-slate-700 hover:bg-slate-50 text-[11px]" onClick={() => startEditing(round)}>Edit</button>
+                        <button className="px-2 py-1 rounded border text-slate-700 hover:bg-slate-50 text-[11px]" onClick={() => setConfirmRedrawId(round.id)}>Re-roll</button>
+                        <button className="px-2 py-1 rounded text-red-600 hover:bg-red-50 text-[11px]" onClick={() => setConfirmRemoveId(round.id)}>Remove</button>
                       </>
                     ) : (
                       <>
-                        <button
-                          className="px-2 py-1 rounded bg-emerald-600 text-white text-[11px]"
-                          onClick={saveEdit}
-                        >
-                          Save
-                        </button>
-                        <button
-                          className="px-2 py-1 rounded border text-slate-700 text-[11px]"
-                          onClick={cancelEdit}
-                        >
-                          Cancel
-                        </button>
+                        <button className="px-2 py-1 rounded bg-emerald-600 text-white text-[11px]" onClick={saveEdit}>Save</button>
+                        <button className="px-2 py-1 rounded border text-slate-700 text-[11px]" onClick={cancelEdit}>Cancel</button>
                       </>
                     )}
                   </div>
@@ -431,12 +459,16 @@ export function RevcoBDRoundManager({
 
                 {!isEditing && (
                   <div className="grid md:grid-cols-2 gap-1.5 text-[12px] text-slate-600">
-                    {round.teams.map(t => (
-                      <div key={t.id} className="bg-white rounded px-2 py-1 border border-slate-200">
-                        <span className="font-medium text-slate-800">{t.name}</span>
-                        <span className="text-slate-500"> — {mickeyMemberList(t.players, pairsText) || t.players.join(', ')}</span>
-                      </div>
-                    ))}
+                    {round.teams.map(t => {
+                      const isPlaying = round.matches.some(m => m.teamAId === t.id || m.teamBId === t.id);
+                      return (
+                        <div key={t.id} className={`rounded px-2 py-1 border ${isPlaying ? 'bg-white border-slate-200' : 'bg-amber-50 border-amber-200'}`}>
+                          <span className="font-medium text-slate-800">{t.name}</span>
+                          {!isPlaying && <span className="ml-1.5 text-[10px] text-amber-600 font-semibold">sitting out</span>}
+                          <span className="text-slate-500"> — {mickeyMemberList(t.players, pairsText) || t.players.join(', ')}</span>
+                        </div>
+                      );
+                    })}
                   </div>
                 )}
 
@@ -447,20 +479,13 @@ export function RevcoBDRoundManager({
                         Duplicate players: {dupNames.join(', ')}
                       </div>
                     )}
-
                     <div className="grid md:grid-cols-2 gap-2">
                       {editBuffer.teams.map((team, tIdx) => (
                         <div key={team.id} className="bg-white border border-slate-200 rounded p-2 space-y-1.5">
                           <input
                             className="w-full border border-slate-300 rounded px-2 py-1 text-[12px] font-medium"
                             value={team.name}
-                            onChange={e => {
-                              const v = e.target.value;
-                              setEditBuffer(buf => buf && ({
-                                ...buf,
-                                teams: buf.teams.map((t, i) => i === tIdx ? { ...t, name: v } : t),
-                              }));
-                            }}
+                            onChange={e => { const v = e.target.value; setEditBuffer(buf => buf && ({ ...buf, teams: buf.teams.map((t, i) => i === tIdx ? { ...t, name: v } : t) })); }}
                           />
                           <div className="grid grid-cols-2 gap-1">
                             {team.players.map((player, pIdx) => (
@@ -468,63 +493,29 @@ export function RevcoBDRoundManager({
                                 key={pIdx}
                                 className={'border rounded px-1.5 py-1 text-[12px] bg-white ' + (player && dupNames.includes(player) ? 'border-amber-400 bg-amber-50' : 'border-slate-300')}
                                 value={player}
-                                onChange={e => {
-                                  const v = e.target.value;
-                                  setEditBuffer(buf => buf && ({
-                                    ...buf,
-                                    teams: buf.teams.map((t, i) =>
-                                      i === tIdx
-                                        ? { ...t, players: t.players.map((p, j) => j === pIdx ? v : p) }
-                                        : t),
-                                  }));
-                                }}
+                                onChange={e => { const v = e.target.value; setEditBuffer(buf => buf && ({ ...buf, teams: buf.teams.map((t, i) => i === tIdx ? { ...t, players: t.players.map((p, j) => j === pIdx ? v : p) } : t) })); }}
                               >
                                 <option value="">— player {pIdx + 1} —</option>
-                                {allPlayerNames.map(name => (
-                                  <option key={name} value={name}>{name}</option>
-                                ))}
+                                {allPlayerNames.map(name => <option key={name} value={name}>{name}</option>)}
                               </select>
                             ))}
                           </div>
                         </div>
                       ))}
                     </div>
-
                     <div className="bg-white border border-slate-200 rounded p-2 space-y-1.5">
                       <div className="text-[11px] font-semibold text-slate-700 uppercase tracking-wide">Match pairings</div>
                       {editBuffer.matches.map((m, mIdx) => (
                         <div key={m.id} className="flex items-center gap-2 text-[12px] flex-wrap">
                           <span className="text-slate-500">Match {mIdx + 1}:</span>
-                          <select
-                            className="border border-slate-300 rounded px-1.5 py-1 text-[12px] flex-1 min-w-[120px]"
-                            value={m.teamAId}
-                            onChange={e => {
-                              const v = e.target.value;
-                              setEditBuffer(buf => buf && ({
-                                ...buf,
-                                matches: buf.matches.map((mm, i) => i === mIdx ? { ...mm, teamAId: v } : mm),
-                              }));
-                            }}
-                          >
-                            {editBuffer.teams.map(t => (
-                              <option key={t.id} value={t.id}>{t.name}</option>
-                            ))}
+                          <select className="border border-slate-300 rounded px-1.5 py-1 text-[12px] flex-1 min-w-[120px]" value={m.teamAId}
+                            onChange={e => { const v = e.target.value; setEditBuffer(buf => buf && ({ ...buf, matches: buf.matches.map((mm, i) => i === mIdx ? { ...mm, teamAId: v } : mm) })); }}>
+                            {editBuffer.teams.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
                           </select>
                           <span className="text-slate-400">vs</span>
-                          <select
-                            className="border border-slate-300 rounded px-1.5 py-1 text-[12px] flex-1 min-w-[120px]"
-                            value={m.teamBId}
-                            onChange={e => {
-                              const v = e.target.value;
-                              setEditBuffer(buf => buf && ({
-                                ...buf,
-                                matches: buf.matches.map((mm, i) => i === mIdx ? { ...mm, teamBId: v } : mm),
-                              }));
-                            }}
-                          >
-                            {editBuffer.teams.map(t => (
-                              <option key={t.id} value={t.id}>{t.name}</option>
-                            ))}
+                          <select className="border border-slate-300 rounded px-1.5 py-1 text-[12px] flex-1 min-w-[120px]" value={m.teamBId}
+                            onChange={e => { const v = e.target.value; setEditBuffer(buf => buf && ({ ...buf, matches: buf.matches.map((mm, i) => i === mIdx ? { ...mm, teamBId: v } : mm) })); }}>
+                            {editBuffer.teams.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
                           </select>
                         </div>
                       ))}
@@ -534,7 +525,7 @@ export function RevcoBDRoundManager({
 
                 {confirmRedrawId === round.id && (
                   <div className="mt-2 bg-amber-50 border border-amber-200 rounded p-2 flex items-center justify-between gap-2 text-[11px]">
-                    <span className="text-amber-800">Re-roll round {round.number}? Any scores entered for this round are cleared.</span>
+                    <span className="text-amber-800">Re-roll round {round.number}? Scores for this round will be cleared.</span>
                     <div className="flex items-center gap-1.5">
                       <button className="px-2 py-1 rounded bg-amber-600 text-white" onClick={() => redrawRound(round.id)}>Re-roll</button>
                       <button className="px-2 py-1 rounded border" onClick={() => setConfirmRedrawId(null)}>Cancel</button>
