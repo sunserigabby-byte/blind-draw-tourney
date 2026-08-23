@@ -41,6 +41,10 @@ export interface BracketMatch {
   // higher seed's chosen format for the match.
   games?: string[];
   format?: 'MICKEY' | 'MINNIE';
+  // Revco Quads playoffs: whether this round is decided by one game (uses
+  // `score`) or best-of-3 match play (uses `games`). Set per round, in
+  // advance of that round starting; defaults to 'single' when unset.
+  gameFormat?: 'single' | 'bestOf3';
 }
 
 export type QuadsMatchRow = {

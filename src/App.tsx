@@ -31,6 +31,7 @@ import { RevcoBDMatchesView } from './revcoBlind/MatchesView';
 import { RevcoBDLeaderboard } from './revcoBlind/Leaderboard';
 import { RevcoBDFairnessReport } from './revcoBlind/FairnessReport';
 import { RevcoBDPlayoffBuilder } from './revcoBlind/PlayoffBuilder';
+import { RevcoBDBracketView } from './revcoBlind/BracketView';
 import { ScoreSettingsPanel } from './components/ScoreSettingsPanel';
 import { Sidebar, SIDEBAR_DIVISIONS, SIDEBAR_SECTIONS, type SidebarSection, type SidebarTabKey } from './components/Sidebar';
 import { ThemeToggle, readStoredTheme, applyTheme, persistTheme, type Theme } from './components/ThemeToggle';
@@ -1256,12 +1257,11 @@ export default function BlindDrawTourneyApp() {
                 scoreSettings={rbdScoreSettings}
               />
             </fieldset>
-            <fieldset disabled={!isAdmin} className={!isAdmin ? "opacity-95" : ""}>
-              <BracketView
-                brackets={currentRBD.brackets ?? []}
-                setBrackets={(v: any) => setCurrentRBD(p => ({ ...p, brackets: typeof v === 'function' ? v(p.brackets ?? []) : v }))}
-              />
-            </fieldset>
+            <RevcoBDBracketView
+              brackets={currentRBD.brackets ?? []}
+              setBrackets={(v: any) => setCurrentRBD(p => ({ ...p, brackets: typeof v === 'function' ? v(p.brackets ?? []) : v }))}
+              isAdmin={isAdmin}
+            />
           </>
         );
       }
