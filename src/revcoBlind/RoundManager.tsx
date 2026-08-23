@@ -286,7 +286,10 @@ function pickBestCandidate(
     if (matchPairs.length === 0) continue;
     const { teams, matches } = buildRoundFromGroups(groups, matchPairs, pairIdToPlayers, roundNumber);
     const score = useSmart ? scorePairCandidate(teams, matches, history, pairMap) : 0;
-    if (!best || score < best.score) best = { teams, matches, score };
+    // <= (not <) so that when candidates tie — always true on Round 1, since
+    // there's no history yet to score against — a later, shuffled candidate
+    // wins instead of defaulting to the very first, unshuffled, list-order one.
+    if (!best || score <= best.score) best = { teams, matches, score };
   }
 
   return best ? { teams: best.teams, matches: best.matches } : null;
