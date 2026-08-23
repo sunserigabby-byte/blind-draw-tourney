@@ -97,9 +97,11 @@ type RevcoBDDivisionState = {
   rounds: RevcoBDRound[];
   brackets: BracketMatch[];
   courtCount?: number;
+  startHour?: number;
+  slotMinutes?: number;
 };
 function emptyRevcoBDState(): RevcoBDDivisionState {
-  return { pairsText: "", freeAgentsText: "", rounds: [], brackets: [], courtCount: 1 };
+  return { pairsText: "", freeAgentsText: "", rounds: [], brackets: [], courtCount: 1, startHour: 9, slotMinutes: 45 };
 }
 
 // Short description for each format, shown at the top of its Home page.
@@ -1114,6 +1116,10 @@ export default function BlindDrawTourneyApp() {
               setRounds={(v: any) => setCurrentRBD(p => ({ ...p, rounds: typeof v === 'function' ? v(p.rounds ?? []) : v }))}
               courtCount={currentRBD.courtCount ?? 1}
               setCourtCount={(n: number) => setCurrentRBD(p => ({ ...p, courtCount: Math.max(1, Math.floor(n) || 1) }))}
+              startHour={currentRBD.startHour ?? 9}
+              setStartHour={(h: number) => setCurrentRBD(p => ({ ...p, startHour: h }))}
+              slotMinutes={currentRBD.slotMinutes ?? 45}
+              setSlotMinutes={(m: number) => setCurrentRBD(p => ({ ...p, slotMinutes: m }))}
             />
           </fieldset>
         );
@@ -1126,6 +1132,8 @@ export default function BlindDrawTourneyApp() {
               setRounds={(v: any) => setCurrentRBD(p => ({ ...p, rounds: typeof v === 'function' ? v(p.rounds ?? []) : v }))}
               pairsText={currentRBD.pairsText}
               courtCount={currentRBD.courtCount ?? 1}
+              startHour={currentRBD.startHour ?? 9}
+              slotMinutes={currentRBD.slotMinutes ?? 45}
               isAdmin={isAdmin}
               scoreSettings={rbdScoreSettings}
             />

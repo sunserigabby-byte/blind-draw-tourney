@@ -1,7 +1,6 @@
 import React, { useMemo } from 'react';
-import type { ScoreSettings } from '../types';
-import { parseScore, slug, parseMickeyPairsGendered, parseMickeyFreeGendered } from '../utils';
-import type { RevcoBDRound } from './RoundManager';
+import type { ScoreSettings, RevcoBDRound } from '../types';
+import { parseScore, isValidScore, slug, parseMickeyPairsGendered, parseMickeyFreeGendered } from '../utils';
 
 type UnitRow = {
   key: string;
@@ -68,6 +67,7 @@ export function RevcoBDLeaderboard({
 
         const p = parseScore(match.scoreText);
         if (!p || p[0] === p[1]) continue;
+        if (!isValidScore(p[0], p[1], scoreSettings)) continue;
         const diff = Math.abs(p[0] - p[1]);
         const teamAWon = p[0] > p[1];
         const won = (isTeamA && teamAWon) || (!isTeamA && !teamAWon);

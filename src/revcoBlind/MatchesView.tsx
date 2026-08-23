@@ -1,19 +1,15 @@
 import React, { useMemo } from 'react';
-import type { RevcoMatchRow, ScoreSettings } from '../types';
+import type { RevcoMatchRow, ScoreSettings, RevcoBDRound } from '../types';
 import { parseScore, isValidScore, mickeyTeamLabel } from '../utils';
-import type { RevcoBDRound } from './RoundManager';
 
-const DEFAULT_START_HOUR = 9;
-const DEFAULT_DURATION_MIN = 45;
 function formatTime(hour24: number, minute: number): string {
   const ampm = hour24 >= 12 ? 'PM' : 'AM';
   const h = hour24 % 12 === 0 ? 12 : hour24 % 12;
   return `${h}:${minute.toString().padStart(2, '0')} ${ampm}`;
 }
-function timeForSlot(slotIdx: number): string {
-  const minutes = slotIdx * DEFAULT_DURATION_MIN;
-  const hour24 = DEFAULT_START_HOUR + Math.floor(minutes / 60);
-  return formatTime(hour24, minutes % 60);
+function timeForSlot(slotIdx: number, startHour: number, slotMinutes: number): string {
+  const totalMin = slotIdx * slotMinutes;
+  return formatTime(startHour + Math.floor(totalMin / 60), totalMin % 60);
 }
 
 function getSide(score: string | undefined, side: 'a' | 'b'): string {
@@ -81,8 +77,8 @@ function MatchupCard({
   const scored = parsed && parsed[0] !== parsed[1];
   const valid = !m.scoreText || (parsed ? isValidScore(parsed[0], parsed[1], scoreSettings) : false);
   const warn = !!scored && !valid;
-  const aWin = !!scored && parsed![0] > parsed![1];
-  const bWin = !!scored && parsed![1] > parsed![0];
+  const aWin = !!scored && !!valid && parsed![0] > parsed![1];
+  const bWin = !!scored && !!valid && parsed![1] > parsed![0];
 
   const writeScore = (side: 'a' | 'b', val: string) => {
     update(m.id, { scoreText: setSide(m.scoreText, side, val) });
@@ -144,6 +140,8 @@ export function RevcoBDMatchesView({
   setRounds,
   pairsText = '',
   courtCount = 1,
+  startHour = 9,
+  slotMinutes = 45,
   isAdmin,
   scoreSettings = { playTo: 21, cap: null },
 }: {
@@ -151,6 +149,8 @@ export function RevcoBDMatchesView({
   setRounds: (f: ((prev: RevcoBDRound[]) => RevcoBDRound[]) | RevcoBDRound[]) => void;
   pairsText?: string;
   courtCount?: number;
+  startHour?: number;
+  slotMinutes?: number;
   isAdmin?: boolean;
   scoreSettings?: ScoreSettings;
 }) {
@@ -168,9 +168,33 @@ export function RevcoBDMatchesView({
       matches: r.matches.map(m => (m.id === matchId ? { ...m, ...patch } : m)),
     })));
 
+  // Count how many rounds are fully scored for the summary header
+  const totalRounds = rounds.length;
+  const scoredRounds = rounds.filter(r =>
+    r.matches.length > 0 &&
+    r.matches.every(m => {
+      const p = parseScore(m.scoreText);
+      return p && p[0] !== p[1] && isValidScore(p[0], p[1], scoreSettings);
+    })
+  ).length;
+
   return (
     <section className="bg-white backdrop-blur rounded-2xl shadow-lg ring-1 ring-sky-200 p-6 border border-sky-100">
-      <h2 className="text-[20px] font-bold text-sky-800 mb-2 tracking-tight">Round Matchups &amp; Results</h2>
+      <div className="flex items-center justify-between gap-2 flex-wrap mb-2">
+        <h2 className="text-[20px] font-bold text-sky-800 tracking-tight">Round Matchups &amp; Results</h2>
+        {totalRounds > 0 && (
+          <span className={
+            'text-[12px] font-semibold px-2.5 py-1 rounded-full ' +
+            (scoredRounds === totalRounds
+              ? 'bg-emerald-100 text-emerald-800'
+              : scoredRounds > 0
+                ? 'bg-amber-100 text-amber-800'
+                : 'bg-slate-100 text-slate-600')
+          }>
+            {scoredRounds}/{totalRounds} rounds complete
+          </span>
+        )}
+      </div>
 
       {rounds.length === 0 && (
         <p className="text-[13px] text-slate-500 max-w-lg mx-auto">
@@ -191,6 +215,15 @@ export function RevcoBDMatchesView({
             }
             const sitting = round.teams.filter(t => !playingIds.has(t.id));
 
+            // Count scored matches for this round
+            const roundScored = round.matches.filter(m => {
+              const p = parseScore(m.scoreText);
+              return p && p[0] !== p[1] && isValidScore(p[0], p[1], scoreSettings);
+            }).length;
+            const roundTotal = round.matches.length;
+            const roundComplete = roundTotal > 0 && roundScored === roundTotal;
+            const roundPartial = roundScored > 0 && roundScored < roundTotal;
+
             const cn = Math.max(1, Math.floor(courtCount) || 1);
             const subSlots: typeof round.matches[] = [];
             for (let i = 0; i < round.matches.length; i += cn) {
@@ -201,12 +234,28 @@ export function RevcoBDMatchesView({
             elements.push(
               <div key={round.id}>
                 <div className="flex items-baseline justify-between gap-2 flex-wrap mb-2">
-                  <h3 className="text-[15px] font-semibold text-sky-800">
-                    Round {round.number}
-                    {subSlots.length === 1 && (
-                      <span className="ml-2 text-[12px] font-normal text-slate-500">{timeForSlot(globalSlotIdx)}</span>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <h3 className="text-[15px] font-semibold text-sky-800">
+                      Round {round.number}
+                      {subSlots.length === 1 && (
+                        <span className="ml-2 text-[12px] font-normal text-slate-500">
+                          {timeForSlot(globalSlotIdx, startHour, slotMinutes)}
+                        </span>
+                      )}
+                    </h3>
+                    {roundTotal > 0 && (
+                      <span className={
+                        'text-[10px] font-semibold px-1.5 py-0.5 rounded-full ' +
+                        (roundComplete
+                          ? 'bg-emerald-100 text-emerald-700'
+                          : roundPartial
+                            ? 'bg-amber-100 text-amber-800'
+                            : 'bg-slate-100 text-slate-500')
+                      }>
+                        {roundComplete ? '✓ done' : `${roundScored}/${roundTotal} scored`}
+                      </span>
                     )}
-                  </h3>
+                  </div>
                   {sitting.length > 0 && (
                     <div className="text-[11px] text-slate-500">
                       Sitting this round: {sitting.map(t => mickeyTeamLabel(t, pairsText)).join(' · ')}
@@ -215,7 +264,7 @@ export function RevcoBDMatchesView({
                 </div>
                 <div className="space-y-3">
                   {subSlots.map((slotMatches, sIdx) => {
-                    const slotTime = timeForSlot(globalSlotIdx);
+                    const slotTime = timeForSlot(globalSlotIdx, startHour, slotMinutes);
                     globalSlotIdx += 1;
                     return (
                       <div key={`${round.id}-slot-${sIdx}`}>

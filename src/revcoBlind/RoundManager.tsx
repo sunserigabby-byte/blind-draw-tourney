@@ -239,6 +239,11 @@ function roundToEditState(round: RevcoBDRound): EditState {
   };
 }
 
+function to24h(h12: number, ampm: 'AM' | 'PM'): number {
+  if (ampm === 'AM') return h12 === 12 ? 0 : h12;
+  return h12 === 12 ? 12 : h12 + 12;
+}
+
 export function RevcoBDRoundManager({
   pairsText,
   freeAgentsText,
@@ -246,6 +251,10 @@ export function RevcoBDRoundManager({
   setRounds,
   courtCount,
   setCourtCount,
+  startHour,
+  setStartHour,
+  slotMinutes,
+  setSlotMinutes,
 }: {
   pairsText: string;
   freeAgentsText: string;
@@ -253,6 +262,10 @@ export function RevcoBDRoundManager({
   setRounds: (f: ((prev: RevcoBDRound[]) => RevcoBDRound[]) | RevcoBDRound[]) => void;
   courtCount: number;
   setCourtCount: (n: number) => void;
+  startHour: number;
+  setStartHour: (h: number) => void;
+  slotMinutes: number;
+  setSlotMinutes: (m: number) => void;
 }) {
   const [confirmRemoveId, setConfirmRemoveId] = useState<string | null>(null);
   const [confirmRedrawId, setConfirmRedrawId] = useState<string | null>(null);
@@ -392,6 +405,46 @@ export function RevcoBDRoundManager({
           <span className="text-slate-400">
             {courtCount === 1 ? 'matches play sequentially.' : `up to ${courtCount} matches per time slot.`}
           </span>
+        </label>
+      </div>
+
+      <div className="flex items-center gap-3 flex-wrap text-[12px] text-slate-600">
+        <label className="flex items-center gap-1.5">
+          Start time:
+          <input
+            type="number" min={1} max={12}
+            value={startHour % 12 === 0 ? 12 : startHour % 12}
+            onChange={e => {
+              const h12 = Math.max(1, Math.min(12, parseInt(e.target.value) || 1));
+              const ampm: 'AM' | 'PM' = startHour < 12 ? 'AM' : 'PM';
+              setStartHour(to24h(h12, ampm));
+            }}
+            className="w-14 border border-slate-300 rounded px-2 py-1 text-[12px] text-center font-semibold"
+          />
+          <select
+            value={startHour < 12 ? 'AM' : 'PM'}
+            onChange={e => {
+              const ampm = e.target.value as 'AM' | 'PM';
+              const h12 = startHour % 12 === 0 ? 12 : startHour % 12;
+              setStartHour(to24h(h12, ampm));
+            }}
+            className="border border-slate-300 rounded px-2 py-1 text-[12px] bg-white"
+          >
+            <option>AM</option>
+            <option>PM</option>
+          </select>
+        </label>
+        <label className="flex items-center gap-1.5">
+          Round length:
+          <select
+            value={slotMinutes}
+            onChange={e => setSlotMinutes(parseInt(e.target.value))}
+            className="border border-slate-300 rounded px-2 py-1 text-[12px] bg-white"
+          >
+            {[30, 45, 60, 75, 90].map(m => (
+              <option key={m} value={m}>{m} min</option>
+            ))}
+          </select>
         </label>
       </div>
 
