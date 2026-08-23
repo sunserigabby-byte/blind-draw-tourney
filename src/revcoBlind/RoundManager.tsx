@@ -268,6 +268,8 @@ export function RevcoBDRoundManager({
   setSlotMinutes: (m: number) => void;
   scorerPin: string;
   setScorerPin: (pin: string) => void;
+  publicScoring: boolean;
+  setPublicScoring: (v: boolean) => void;
 }) {
   const [confirmRemoveId, setConfirmRemoveId] = useState<string | null>(null);
   const [confirmRedrawId, setConfirmRedrawId] = useState<string | null>(null);
@@ -451,22 +453,35 @@ export function RevcoBDRoundManager({
       </div>
 
       <div className="flex items-center gap-3 flex-wrap text-[12px] text-slate-600">
-        <label className="flex items-center gap-1.5">
-          Scorer code for players:
+        <label className="flex items-center gap-2 cursor-pointer select-none">
           <input
-            type="text"
-            value={scorerPin}
-            onChange={e => setScorerPin(e.target.value.trim())}
-            placeholder="leave blank to disable"
-            className="border border-slate-300 rounded px-2 py-1 text-[12px] w-40 font-mono"
+            type="checkbox"
+            checked={publicScoring}
+            onChange={e => setPublicScoring(e.target.checked)}
+            className="w-4 h-4 accent-sky-600"
           />
+          <span className="font-medium">Open score entry</span>
+          <span className="text-[11px] text-slate-400">— anyone with the link can enter scores, no code needed.</span>
         </label>
-        <span className="text-[11px] text-slate-400">
-          {scorerPin
-            ? 'Share this code so players can enter scores from their phones.'
-            : 'Set a code to let players submit their own scores.'}
-        </span>
       </div>
+
+      {!publicScoring && (
+        <div className="flex items-center gap-3 flex-wrap text-[12px] text-slate-600">
+          <label className="flex items-center gap-1.5">
+            Or use a scorer code:
+            <input
+              type="text"
+              value={scorerPin}
+              onChange={e => setScorerPin(e.target.value.trim())}
+              placeholder="leave blank to disable"
+              className="border border-slate-300 rounded px-2 py-1 text-[12px] w-40 font-mono"
+            />
+          </label>
+          <span className="text-[11px] text-slate-400">
+            {scorerPin ? 'Share this with players so they can unlock score entry.' : 'Set a code if you want to limit who can score.'}
+          </span>
+        </div>
+      )}
 
       <div className="flex items-center gap-2 flex-wrap text-[12px]">
         <label className="flex items-center gap-1.5">

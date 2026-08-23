@@ -100,9 +100,10 @@ type RevcoBDDivisionState = {
   startHour?: number;
   slotMinutes?: number;
   scorerPin?: string;
+  publicScoring?: boolean;
 };
 function emptyRevcoBDState(): RevcoBDDivisionState {
-  return { pairsText: "", freeAgentsText: "", rounds: [], brackets: [], courtCount: 1, startHour: 9, slotMinutes: 45, scorerPin: "" };
+  return { pairsText: "", freeAgentsText: "", rounds: [], brackets: [], courtCount: 1, startHour: 9, slotMinutes: 45, scorerPin: "", publicScoring: false };
 }
 
 // Short description for each format, shown at the top of its Home page.
@@ -483,7 +484,7 @@ export default function BlindDrawTourneyApp() {
   const currentRBD = activeDivision === "UPPER" ? rbdUpper : rbdLower;
   const setCurrentRBD = activeDivision === "UPPER" ? setRBDUpper : setRBDLower;
   const isScorer = !isAdmin && !!(currentRBD.scorerPin) && scorerEntry === currentRBD.scorerPin;
-  const canScore = isAdmin || isScorer;
+  const canScore = isAdmin || isScorer || !!(currentRBD.publicScoring);
 
   const currentDivisionMeta = SIDEBAR_DIVISIONS.find(d => d.key === activeTab);
   const divisionLabel = currentDivisionMeta?.label ?? activeTab;
@@ -1126,6 +1127,8 @@ export default function BlindDrawTourneyApp() {
               setSlotMinutes={(m: number) => setCurrentRBD(p => ({ ...p, slotMinutes: m }))}
               scorerPin={currentRBD.scorerPin ?? ''}
               setScorerPin={(pin: string) => setCurrentRBD(p => ({ ...p, scorerPin: pin }))}
+              publicScoring={currentRBD.publicScoring ?? false}
+              setPublicScoring={(v: boolean) => setCurrentRBD(p => ({ ...p, publicScoring: v }))}
             />
           </fieldset>
         );
@@ -1133,9 +1136,13 @@ export default function BlindDrawTourneyApp() {
       if (activeSection === 'POOLS') {
         return (
           <>
-            {!isAdmin && (currentRBD.scorerPin ?? '') !== '' && (
+            {!isAdmin && (currentRBD.publicScoring || (currentRBD.scorerPin ?? '') !== '') && (
               <div className="bg-white/95 backdrop-blur rounded-xl shadow ring-1 ring-slate-200 p-4">
-                {isScorer ? (
+                {currentRBD.publicScoring ? (
+                  <span className="text-[13px] text-emerald-700 font-semibold">
+                    Score entry is open — tap any score field to enter results.
+                  </span>
+                ) : isScorer ? (
                   <div className="flex items-center justify-between gap-2 flex-wrap">
                     <span className="text-[13px] text-emerald-700 font-semibold">
                       ✓ Score entry unlocked — enter match results below.
