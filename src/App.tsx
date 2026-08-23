@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import type { MatchRow, TriplesMatchRow, BracketMatch, KobGameRow, ScoreSettings, MickeyTeam, MickeyMatchRow, RevcoMatchRow, RevcoBDRound } from './types';
-import { apiGetState, apiSaveState } from './api';
+import { apiGetState, apiSaveState, apiSaveRevcoScore } from './api';
 import { SunnyLogo } from './components/SunnyLogo';
 import { LineNumberTextarea } from './components/LinedTextarea';
 import { BracketView } from './components/BracketView';
@@ -247,6 +247,8 @@ export default function BlindDrawTourneyApp() {
   const [adminKeyError, setAdminKeyError] = useState<string>("");
   const [otherAdminActive, setOtherAdminActive] = useState(false);
   const saveTimer = useRef<number | null>(null);
+  const scoreCommitTimers = useRef<Map<string, number>>(new Map());
+  const lastRevcoEditRef = useRef(0);
   const [sessionId] = useState<string>(() => { try { let id = sessionStorage.getItem("SESSION_ID"); if (!id) { id = Math.random().toString(36).slice(2); sessionStorage.setItem("SESSION_ID", id); } return id; } catch { return Math.random().toString(36).slice(2); } });
 
   const [dUpper, setDUpper] = useState<DivisionState<MatchRow>>(emptyDivisionState<MatchRow>());
@@ -405,8 +407,14 @@ export default function BlindDrawTourneyApp() {
         if (remote.mickey?.LOWER) setMLower(remote.mickey.LOWER);
         if (remote.mickeyBD?.UPPER) setMBDUpper({ ...emptyMickeyBDState(), ...remote.mickeyBD.UPPER });
         if (remote.mickeyBD?.LOWER) setMBDLower({ ...emptyMickeyBDState(), ...remote.mickeyBD.LOWER });
-        if (remote.revcobd?.UPPER) setRBDUpper({ ...emptyRevcoBDState(), ...remote.revcobd.UPPER });
-        if (remote.revcobd?.LOWER) setRBDLower({ ...emptyRevcoBDState(), ...remote.revcobd.LOWER });
+        // Skip right after a local score edit — otherwise a poll landing
+        // mid-keystroke (or just before our debounced save reaches the
+        // server) would visibly revert what was just typed.
+        const REVCO_EDIT_GRACE_MS = 1500;
+        if (Date.now() - lastRevcoEditRef.current >= REVCO_EDIT_GRACE_MS) {
+          if (remote.revcobd?.UPPER) setRBDUpper({ ...emptyRevcoBDState(), ...remote.revcobd.UPPER });
+          if (remote.revcobd?.LOWER) setRBDLower({ ...emptyRevcoBDState(), ...remote.revcobd.LOWER });
+        }
         if (remote.dScoreSettings) setDScoreSettings(remote.dScoreSettings);
         if (remote.tScoreSettings) setTScoreSettings(remote.tScoreSettings);
         if (remote.kobScoreSettings) setKobScoreSettings(remote.kobScoreSettings);
@@ -464,6 +472,31 @@ export default function BlindDrawTourneyApp() {
   const setCurrentRBD = activeDivision === "UPPER" ? setRBDUpper : setRBDLower;
   const isScorer = !isAdmin && !!(currentRBD.scorerPin) && scorerEntry === currentRBD.scorerPin;
   const canScore = isAdmin || isScorer || !!(currentRBD.publicScoring);
+
+  // Non-admin scorers (PIN or public scoring) can edit scores in the UI via
+  // canScore, but the main autosave effect only ever saves for isAdmin — so
+  // without this, their edits never reach the server and get wiped by the
+  // next 5-second viewer poll. This saves just the one match they changed,
+  // debounced per-match so simultaneous scorers on different courts don't
+  // clobber each other.
+  const handleScoreCommit = (matchId: string, scoreText: string) => {
+    if (isAdmin) return;
+    lastRevcoEditRef.current = Date.now();
+    const division = activeDivision;
+    const timers = scoreCommitTimers.current;
+    const existing = timers.get(matchId);
+    if (existing) window.clearTimeout(existing);
+    const t = window.setTimeout(async () => {
+      timers.delete(matchId);
+      try {
+        await apiSaveRevcoScore(division, matchId, scoreText, scorerEntry);
+        setRemoteError("");
+      } catch (e: any) {
+        setRemoteError(e?.message || "Failed to save score");
+      }
+    }, 500);
+    timers.set(matchId, t);
+  };
 
   const currentDivisionMeta = SIDEBAR_DIVISIONS.find(d => d.key === activeTab);
   const divisionLabel = currentDivisionMeta?.label ?? activeTab;
@@ -1180,6 +1213,7 @@ export default function BlindDrawTourneyApp() {
               slotMinutes={currentRBD.slotMinutes ?? 45}
               isAdmin={canScore}
               scoreSettings={rbdScoreSettings}
+              onScoreCommit={handleScoreCommit}
             />
             <RevcoBDLeaderboard
               rounds={currentRBD.rounds ?? []}

@@ -144,6 +144,7 @@ export function RevcoBDMatchesView({
   slotMinutes = 45,
   isAdmin,
   scoreSettings = { playTo: 21, cap: null },
+  onScoreCommit,
 }: {
   rounds: RevcoBDRound[];
   setRounds: (f: ((prev: RevcoBDRound[]) => RevcoBDRound[]) | RevcoBDRound[]) => void;
@@ -153,6 +154,10 @@ export function RevcoBDMatchesView({
   slotMinutes?: number;
   isAdmin?: boolean;
   scoreSettings?: ScoreSettings;
+  // Called with the final scoreText whenever a score changes — used by
+  // non-admin scorers to save just that match, since their edits otherwise
+  // never leave their own browser (see App.tsx's handleScoreCommit).
+  onScoreCommit?: (matchId: string, scoreText: string) => void;
 }) {
   const nameOf = useMemo(() => {
     const m = new Map<string, string>();
@@ -162,11 +167,13 @@ export function RevcoBDMatchesView({
     return (id: string) => m.get(id) ?? '(deleted team)';
   }, [rounds, pairsText]);
 
-  const update = (matchId: string, patch: Partial<RevcoMatchRow>) =>
+  const update = (matchId: string, patch: Partial<RevcoMatchRow>) => {
     setRounds(prev => prev.map(r => ({
       ...r,
       matches: r.matches.map(m => (m.id === matchId ? { ...m, ...patch } : m)),
     })));
+    if (patch.scoreText !== undefined) onScoreCommit?.(matchId, patch.scoreText);
+  };
 
   // Count how many rounds are fully scored for the summary header
   const totalRounds = rounds.length;
