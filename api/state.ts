@@ -1,5 +1,5 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { redis, redisEnvDebug } from "./_redis.js";
+import { redis } from "./_redis.js";
 
 export const config = {
   runtime: "nodejs",
@@ -43,12 +43,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(405).json({ ok: false, error: "Method not allowed" });
 
   } catch (err: any) {
-    console.error("api/state error:", err, "env keys found:", redisEnvDebug);
-    return res.status(500).json({
-      ok: false,
-      error: err?.message || "Server error",
-      cause: err?.cause?.message,
-      redisEnvDebug,
-    });
+    console.error("api/state error:", err);
+    return res.status(500).json({ ok: false, error: err?.message || "Server error" });
   }
 }

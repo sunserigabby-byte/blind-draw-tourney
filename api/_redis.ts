@@ -16,10 +16,6 @@ const tokenKey =
   findEnvKey("_KV_REST_API_TOKEN") || findEnvKey("_UPSTASH_REDIS_REST_TOKEN") ||
   (process.env.KV_REST_API_TOKEN ? "KV_REST_API_TOKEN" : undefined);
 
-// Not secret — env var *names* only, used to confirm the right variables
-// were found when debugging a connection failure.
-export const redisEnvDebug = { urlKey, tokenKey };
-
 const url = (urlKey && process.env[urlKey]) || "";
 const token = (tokenKey && process.env[tokenKey]) || "";
 
