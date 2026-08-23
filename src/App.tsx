@@ -341,35 +341,43 @@ export default function BlindDrawTourneyApp() {
     tGuysText: tUpper.guysText, tGirlsText: tUpper.girlsText, tMatches: tUpper.matches, tBrackets: tUpper.brackets,
   } as any), [activeTab, activeDivision, dUpper, dLower, tUpper, tLower, kobUpper, kobLower, mUpper, mLower, mbdUpper, mbdLower, rbdUpper, rbdLower, dScoreSettings, tScoreSettings, kobScoreSettings, mScoreSettings, mbdScoreSettings, rbdScoreSettings]);
 
+  // Applies a fetched state blob to this tab's local state. Used both on
+  // initial page load AND right when a device unlocks Admin Mode — the
+  // latter matters because a device can sit open for a while with stale
+  // data in memory; without re-hydrating first, unlocking it would autosave
+  // that stale snapshot and overwrite everyone else's newer data.
+  function applyRemoteData(data: any) {
+    if (!data) return;
+    if (data.doubles?.UPPER) setDUpper(data.doubles.UPPER); else setDUpper({ guysText: data.guysText || "", girlsText: data.girlsText || "", matches: Array.isArray(data.matches) ? data.matches : [], brackets: Array.isArray(data.brackets) ? data.brackets : [] });
+    if (data.doubles?.LOWER) setDLower(data.doubles.LOWER);
+    if (data.triples?.UPPER) setTUpper(data.triples.UPPER); else setTUpper({ guysText: data.tGuysText || "", girlsText: data.tGirlsText || "", matches: Array.isArray(data.tMatches) ? data.tMatches : [], brackets: Array.isArray(data.tBrackets) ? data.tBrackets : [] });
+    if (data.triples?.LOWER) setTLower(data.triples.LOWER);
+    if (data.kob?.UPPER) setKobUpper(data.kob.UPPER);
+    if (data.kob?.LOWER) setKobLower(data.kob.LOWER);
+    if (data.mickey?.UPPER) setMUpper(data.mickey.UPPER);
+    if (data.mickey?.LOWER) setMLower(data.mickey.LOWER);
+    // Merge with empty state so older saves (which may not have all
+    // fields like `brackets`) don't crash on .length / .some().
+    if (data.mickeyBD?.UPPER) setMBDUpper({ ...emptyMickeyBDState(), ...data.mickeyBD.UPPER });
+    if (data.mickeyBD?.LOWER) setMBDLower({ ...emptyMickeyBDState(), ...data.mickeyBD.LOWER });
+    if (data.revcobd?.UPPER) setRBDUpper({ ...emptyRevcoBDState(), ...data.revcobd.UPPER });
+    if (data.revcobd?.LOWER) setRBDLower({ ...emptyRevcoBDState(), ...data.revcobd.LOWER });
+    if (data.dScoreSettings) setDScoreSettings(data.dScoreSettings);
+    if (data.tScoreSettings) setTScoreSettings(data.tScoreSettings);
+    if (data.kobScoreSettings) setKobScoreSettings(data.kobScoreSettings);
+    if (data.mScoreSettings) setMScoreSettings(data.mScoreSettings);
+    if (data.mbdScoreSettings) setMBDScoreSettings(data.mbdScoreSettings);
+    if (data.rbdScoreSettings) setRBDScoreSettings(data.rbdScoreSettings);
+    if (data.activeTab === "DOUBLES" || data.activeTab === "TRIPLES" || data.activeTab === "KOB" || data.activeTab === "MICKEY" || data.activeTab === "MICKEYBD" || data.activeTab === "REVCOBD") setActiveTab(data.activeTab);
+    if (data.activeDivision === "UPPER" || data.activeDivision === "LOWER") setActiveDivision(data.activeDivision);
+  }
+
   useEffect(() => {
     (async () => {
       try {
         const remote: any = await apiGetState();
         const data: any = remote || (()=> { try { const raw = localStorage.getItem("sunnysports.autosave"); return raw ? JSON.parse(raw) : null; } catch { return null; } })();
-        if (data) {
-          if (data.doubles?.UPPER) setDUpper(data.doubles.UPPER); else setDUpper({ guysText: data.guysText || "", girlsText: data.girlsText || "", matches: Array.isArray(data.matches) ? data.matches : [], brackets: Array.isArray(data.brackets) ? data.brackets : [] });
-          if (data.doubles?.LOWER) setDLower(data.doubles.LOWER);
-          if (data.triples?.UPPER) setTUpper(data.triples.UPPER); else setTUpper({ guysText: data.tGuysText || "", girlsText: data.tGirlsText || "", matches: Array.isArray(data.tMatches) ? data.tMatches : [], brackets: Array.isArray(data.tBrackets) ? data.tBrackets : [] });
-          if (data.triples?.LOWER) setTLower(data.triples.LOWER);
-          if (data.kob?.UPPER) setKobUpper(data.kob.UPPER);
-          if (data.kob?.LOWER) setKobLower(data.kob.LOWER);
-          if (data.mickey?.UPPER) setMUpper(data.mickey.UPPER);
-          if (data.mickey?.LOWER) setMLower(data.mickey.LOWER);
-          // Merge with empty state so older saves (which may not have all
-          // fields like `brackets`) don't crash on .length / .some().
-          if (data.mickeyBD?.UPPER) setMBDUpper({ ...emptyMickeyBDState(), ...data.mickeyBD.UPPER });
-          if (data.mickeyBD?.LOWER) setMBDLower({ ...emptyMickeyBDState(), ...data.mickeyBD.LOWER });
-          if (data.revcobd?.UPPER) setRBDUpper({ ...emptyRevcoBDState(), ...data.revcobd.UPPER });
-          if (data.revcobd?.LOWER) setRBDLower({ ...emptyRevcoBDState(), ...data.revcobd.LOWER });
-          if (data.dScoreSettings) setDScoreSettings(data.dScoreSettings);
-          if (data.tScoreSettings) setTScoreSettings(data.tScoreSettings);
-          if (data.kobScoreSettings) setKobScoreSettings(data.kobScoreSettings);
-          if (data.mScoreSettings) setMScoreSettings(data.mScoreSettings);
-          if (data.mbdScoreSettings) setMBDScoreSettings(data.mbdScoreSettings);
-          if (data.rbdScoreSettings) setRBDScoreSettings(data.rbdScoreSettings);
-          if (data.activeTab === "DOUBLES" || data.activeTab === "TRIPLES" || data.activeTab === "KOB" || data.activeTab === "MICKEY" || data.activeTab === "MICKEYBD" || data.activeTab === "REVCOBD") setActiveTab(data.activeTab);
-          if (data.activeDivision === "UPPER" || data.activeDivision === "LOWER") setActiveDivision(data.activeDivision);
-        }
+        applyRemoteData(data);
         setLoadingRemote(false);
       } catch (e: any) { setRemoteError(e?.message || "Failed to load shared data"); setLoadingRemote(false); }
     })();
@@ -495,6 +503,11 @@ export default function BlindDrawTourneyApp() {
                     setAdminKeyError("Incorrect admin key. Please try again.");
                     return;
                   }
+                  // Re-sync this tab to the latest saved data before it goes
+                  // into Admin Mode — otherwise, if this tab had been open
+                  // for a while, it would autosave its own stale data and
+                  // overwrite newer changes made elsewhere.
+                  applyRemoteData(currentState);
                 } catch {
                   // Offline use — accept the key
                 }
