@@ -324,13 +324,14 @@ export function RoundGenerator({
     roleStats: ReturnType<typeof buildRoleStats>,
     roundIdx: number
   ) {
+    // `players` arrives pre-shuffled (see buildRound). Array.sort is stable,
+    // so returning 0 on a tie keeps that shuffled order instead of imposing
+    // alphabetical order — which on Round 1 (everyone tied at penalty 0)
+    // would otherwise make mixed-team pairing fully alphabetical every time.
     return [...players].sort((a, b) => {
       const penaltyA = sameGenderPenalty(a, roleStats, roundIdx);
       const penaltyB = sameGenderPenalty(b, roleStats, roundIdx);
-
-      if (penaltyB !== penaltyA) return penaltyB - penaltyA;
-
-      return a.localeCompare(b);
+      return penaltyB - penaltyA;
     });
   }
 
