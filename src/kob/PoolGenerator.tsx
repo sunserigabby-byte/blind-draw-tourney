@@ -230,9 +230,22 @@ export function KobPoolGenerator({
     [playersText],
   );
 
+  // Used by round-robin mode, where leaving this unshuffled is intentional:
+  // "Seeded mode" there treats roster order as skill rank (line 1 =
+  // strongest), so an admin who typed their roster in skill order needs
+  // that order preserved exactly. Only shuffles when a reproducible seed
+  // number is explicitly provided.
   const seededPlayers = useMemo(() => {
     const seed = seedStr ? Number(seedStr) : undefined;
     return seed !== undefined ? shuffle(players, seed) : players;
+  }, [players, seedStr]);
+
+  // Used by pool mode, which has no such "roster order = skill rank"
+  // concept — pool assignment should always be randomized by default, with
+  // the seed field only there for reproducing the same random draw again.
+  const randomizedPoolPlayers = useMemo(() => {
+    const seed = seedStr ? Number(seedStr) : undefined;
+    return shuffle(players, seed);
   }, [players, seedStr]);
 
   const genderPools = useMemo(
@@ -249,13 +262,13 @@ export function KobPoolGenerator({
   // ── Pool mode preview ──
   const { pools: previewPools, leftover } = useMemo(() => {
     if (!supported || mode !== 'pools') return { pools: [], leftover: [] as string[] };
-    const base = formFlexiblePools(seededPlayers, poolSize);
+    const base = formFlexiblePools(randomizedPoolPlayers, poolSize);
     if (!poolSeeded || base.pools.length <= 1) return base;
     // Snake-draft: redistribute players across the same pool sizes for even seeding
     const sizes = base.pools.map(p => p.length);
-    const allPlayers = seededPlayers.slice(0, sizes.reduce((a, b) => a + b, 0));
+    const allPlayers = randomizedPoolPlayers.slice(0, sizes.reduce((a, b) => a + b, 0));
     return { pools: snakeDraftPools(allPlayers, sizes), leftover: base.leftover };
-  }, [seededPlayers, poolSize, supported, mode, poolSeeded]);
+  }, [randomizedPoolPlayers, poolSize, supported, mode, poolSeeded]);
 
   const canGeneratePools = mode === 'pools' && supported && previewPools.length > 0;
 
