@@ -3,6 +3,17 @@ import type { MatchRow } from '../types';
 import { slug, uniq, clampN, shuffle } from '../utils';
 import { HoldPanel } from '../components/HoldPanel';
 
+// ─── Repeat-avoidance weights (matches Revco Quads' scoring approach) ─────────
+// Teammate and opponent repeats are equally bad; court repeats are minor;
+// sit-outs are weighted highest so nobody sits twice while others haven't.
+const TEAMMATE_WEIGHT = 3;
+const OPPONENT_WEIGHT = 3;
+const COURT_WEIGHT = 1;
+const SITOUT_WEIGHT = 5;
+// How many randomized attempts to try per round when "strict" is on and no
+// manual seed is set, keeping whichever attempt has the fewest total repeats.
+const SMART_CANDIDATES = 150;
+
 // ─── Same-gender history helpers (used for display + scheduling) ──────────────
 
 type SgEntry = { count: number; lastRound: number };
@@ -71,18 +82,23 @@ export function RoundGenerator({
     tag: MatchRow["tag"];
   };
 
-  const addPairToMap = (mp: Map<string, Set<string>>, a?: string, b?: string) => {
+  // Partner/opponent history now counts repeats instead of just tracking
+  // yes/no — matching Revco Quads, so scoring can prefer "repeated once"
+  // over "repeated three times" when a repeat is unavoidable.
+  const addPairToMap = (mp: Map<string, Map<string, number>>, a?: string, b?: string) => {
     if (!a || !b) return;
     const A = slug(a);
     const B = slug(b);
-    if (!mp.has(A)) mp.set(A, new Set());
-    if (!mp.has(B)) mp.set(B, new Set());
-    mp.get(A)!.add(B);
-    mp.get(B)!.add(A);
+    if (!mp.has(A)) mp.set(A, new Map());
+    if (!mp.has(B)) mp.set(B, new Map());
+    const ma = mp.get(A)!;
+    const mb = mp.get(B)!;
+    ma.set(B, (ma.get(B) ?? 0) + 1);
+    mb.set(A, (mb.get(A) ?? 0) + 1);
   };
 
   const buildPartnerMap = (history: MatchRow[]) => {
-    const mp = new Map<string, Set<string>>();
+    const mp = new Map<string, Map<string, number>>();
     for (const m of history) {
       addPairToMap(mp, m.t1p1, m.t1p2);
       addPairToMap(mp, m.t2p1, m.t2p2);
@@ -91,14 +107,15 @@ export function RoundGenerator({
   };
 
   const buildOpponentMap = (history: MatchRow[]) => {
-    const mp = new Map<string, Set<string>>();
+    const mp = new Map<string, Map<string, number>>();
 
     const addOpp = (a?: string, b?: string) => {
       if (!a || !b) return;
       const A = slug(a);
       const B = slug(b);
-      if (!mp.has(A)) mp.set(A, new Set());
-      mp.get(A)!.add(B);
+      if (!mp.has(A)) mp.set(A, new Map());
+      const ma = mp.get(A)!;
+      ma.set(B, (ma.get(B) ?? 0) + 1);
     };
 
     for (const m of history) {
@@ -133,24 +150,23 @@ export function RoundGenerator({
     return mp;
   };
 
-  const hasPartneredBefore = (partnerMap: Map<string, Set<string>>, a: string, b: string) =>
-    !!partnerMap.get(slug(a))?.has(slug(b));
+  const partnerCountOf = (partnerMap: Map<string, Map<string, number>>, a: string, b: string) =>
+    partnerMap.get(slug(a))?.get(slug(b)) ?? 0;
 
-  const hasOpposedBefore = (opponentMap: Map<string, Set<string>>, a: string, b: string) =>
-    !!opponentMap.get(slug(a))?.has(slug(b));
+  const opponentCountOf = (opponentMap: Map<string, Map<string, number>>, a: string, b: string) =>
+    opponentMap.get(slug(a))?.get(slug(b)) ?? 0;
 
   function scoreCandidateTeam(
-    partnerMap: Map<string, Set<string>>,
+    partnerMap: Map<string, Map<string, number>>,
     a: string,
     b: string
   ) {
-    let penalty = 0;
-    if (strict && hasPartneredBefore(partnerMap, a, b)) penalty += 1000;
-    return penalty;
+    if (!strict) return 0;
+    return partnerCountOf(partnerMap, a, b) * TEAMMATE_WEIGHT;
   }
 
   function scoreMatchup(
-    opponentMap: Map<string, Set<string>>,
+    opponentMap: Map<string, Map<string, number>>,
     teamA: [string, string],
     teamB: [string, string],
     tagA: MatchRow["tag"],
@@ -176,8 +192,8 @@ export function RoundGenerator({
       penalty += 500;
     }
 
-    for (const [a, b] of pairs) {
-      if (strict && hasOpposedBefore(opponentMap, a, b)) penalty += 100;
+    if (strict) {
+      for (const [a, b] of pairs) penalty += opponentCountOf(opponentMap, a, b) * OPPONENT_WEIGHT;
     }
 
     return penalty;
@@ -192,7 +208,7 @@ export function RoundGenerator({
     for (const p of players) {
       const perCourt = courtMap.get(slug(p));
       const count = perCourt?.get(court) || 0;
-      penalty += count * 25;
+      penalty += count * COURT_WEIGHT;
     }
     return penalty;
   }
@@ -213,7 +229,7 @@ export function RoundGenerator({
   function makeMixedTeams(
     guysPool: string[],
     girlsPool: string[],
-    partnerMap: Map<string, Set<string>>
+    partnerMap: Map<string, Map<string, number>>
   ) {
     const mixed: TeamBuild[] = [];
     const remainingGirls = [...girlsPool];
@@ -338,7 +354,7 @@ export function RoundGenerator({
   function makeSameGenderTeams(
     players: string[],
     tag: MatchRow["tag"],
-    partnerMap: Map<string, Set<string>>,
+    partnerMap: Map<string, Map<string, number>>,
     roleStats: ReturnType<typeof buildRoleStats>,
     roundIdx: number
   ) {
@@ -480,8 +496,11 @@ export function RoundGenerator({
     return bestIdx;
   }
 
-  function buildRound(roundIdx: number, history: MatchRow[]) {
-    const seedNum = seedStr ? Number(seedStr) : undefined;
+  // Builds one candidate round. `seedNum` controls shuffling: pass a number
+  // for a reproducible layout, or undefined to let each call be freshly
+  // randomized — buildRound() below calls this many times with no seed to
+  // explore different candidates when running the smart search.
+  function buildRoundOnce(roundIdx: number, history: MatchRow[], seedNum: number | undefined) {
     const stats = buildPlayerUsageStats(history);
     const sitOuts: string[] = [];
 
@@ -642,11 +661,13 @@ export function RoundGenerator({
           const SA = slug(A);
           const SB = slug(B);
 
-          if (!opponentMap.has(SA)) opponentMap.set(SA, new Set());
-          if (!opponentMap.has(SB)) opponentMap.set(SB, new Set());
+          if (!opponentMap.has(SA)) opponentMap.set(SA, new Map());
+          if (!opponentMap.has(SB)) opponentMap.set(SB, new Map());
 
-          opponentMap.get(SA)!.add(SB);
-          opponentMap.get(SB)!.add(SA);
+          const mA = opponentMap.get(SA)!;
+          const mB = opponentMap.get(SB)!;
+          mA.set(SB, (mA.get(SB) ?? 0) + 1);
+          mB.set(SA, (mB.get(SA) ?? 0) + 1);
         }
       }
 
@@ -715,6 +736,64 @@ export function RoundGenerator({
     }
 
     return assigned;
+  }
+
+  // Total repeat-penalty for a fully-built candidate round, scored against
+  // history from before this round only. Lower is better. Matches Revco
+  // Quads' approach: sum weighted teammate, opponent, court, and sit-out
+  // repeats so the search below can compare whole rounds, not just
+  // individual pairing decisions.
+  function scoreRoundCandidate(assigned: MatchRow[], history: MatchRow[]): number {
+    const partnerMap = buildPartnerMap(history);
+    const opponentMap = buildOpponentMap(history);
+    const courtMap = buildCourtMap(history);
+    const stats = buildPlayerUsageStats(history);
+    let penalty = 0;
+
+    for (const m of assigned) {
+      penalty += partnerCountOf(partnerMap, m.t1p1, m.t1p2) * TEAMMATE_WEIGHT;
+      penalty += partnerCountOf(partnerMap, m.t2p1, m.t2p2) * TEAMMATE_WEIGHT;
+
+      const t1 = [m.t1p1, m.t1p2];
+      const t2 = [m.t2p1, m.t2p2];
+      for (const a of t1) for (const b of t2) penalty += opponentCountOf(opponentMap, a, b) * OPPONENT_WEIGHT;
+
+      for (const p of [m.t1p1, m.t1p2, m.t2p1, m.t2p2]) {
+        penalty += (courtMap.get(slug(p))?.get(m.court) ?? 0) * COURT_WEIGHT;
+      }
+    }
+
+    const sitOuts = assigned[0]?.sitOuts ?? [];
+    for (const p of sitOuts) {
+      penalty += (stats.sitCounts.get(slug(p)) ?? 0) * SITOUT_WEIGHT;
+    }
+
+    return penalty;
+  }
+
+  // Smart search: try many randomized candidates and keep the one with the
+  // fewest total repeats — same principle as Revco Quads. Falls back to a
+  // single deterministic pass when repeat-avoidance is off ("strict"
+  // unchecked) or a manual seed is set, since a seed exists specifically
+  // for a reproducible layout, which a randomized search would defeat.
+  function buildRound(roundIdx: number, history: MatchRow[]): MatchRow[] {
+    const seedNum = seedStr ? Number(seedStr) : undefined;
+
+    if (!strict || seedNum !== undefined) {
+      return buildRoundOnce(roundIdx, history, seedNum);
+    }
+
+    let best: { assigned: MatchRow[]; score: number } | null = null;
+    for (let i = 0; i < SMART_CANDIDATES; i++) {
+      const assigned = buildRoundOnce(roundIdx, history, undefined);
+      const score = scoreRoundCandidate(assigned, history);
+      // <= (not <) so a later, differently-shuffled candidate wins ties —
+      // always true early on when there's little/no history to score
+      // against, which otherwise would silently keep the first (least
+      // varied) attempt every time.
+      if (!best || score <= best.score) best = { assigned, score };
+    }
+    return best!.assigned;
   }
 
   function onGenerate() {
