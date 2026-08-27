@@ -6,8 +6,9 @@ import { LineNumberTextarea } from './components/LinedTextarea';
 import { BracketView } from './components/BracketView';
 import { MatchesView } from './doubles/MatchesView';
 import { RoundGenerator } from './doubles/RoundGenerator';
-import { Leaderboard } from './doubles/Leaderboard';
+import { Leaderboard, StandingsCompact } from './doubles/Leaderboard';
 import { PlayoffBuilder } from './doubles/PlayoffBuilder';
+import { DoublesBracketView } from './doubles/BracketView';
 import { TriplesMatchesView } from './triples/MatchesView';
 import { TriplesRoundGenerator } from './triples/RoundGenerator';
 import { TriplesLeaderboard } from './triples/Leaderboard';
@@ -760,11 +761,17 @@ export default function BlindDrawTourneyApp() {
       if (activeSection === 'PLAYOFFS') {
         return (
           <>
+            <StandingsCompact
+              matches={currentD.matches}
+              guysText={currentD.guysText}
+              girlsText={currentD.girlsText}
+            />
             <fieldset disabled={!isAdmin} className={!isAdmin ? "opacity-95" : ""}>
               <PlayoffBuilder
                 matches={currentD.matches}
                 guysText={currentD.guysText}
                 girlsText={currentD.girlsText}
+                brackets={currentD.brackets}
                 setBrackets={(f) => setCurrentD(prev => ({
                   ...prev,
                   brackets: typeof f === "function" ? (f as any)(prev.brackets) : f
@@ -772,9 +779,10 @@ export default function BlindDrawTourneyApp() {
                 baseDivision={activeDivision}
               />
             </fieldset>
-            <BracketView
+            <DoublesBracketView
               brackets={currentD.brackets}
               setBrackets={(v: any) => setCurrentD(p => ({ ...p, brackets: typeof v === 'function' ? v(p.brackets) : v }))}
+              isAdmin={isAdmin}
             />
           </>
         );

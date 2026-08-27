@@ -34,6 +34,50 @@ export function computeStandings(matches: MatchRow[], guysText: string, girlsTex
   return { guysRows: sortRows(Array.from(g.values())), girlsRows: sortRows(Array.from(h.values())) };
 }
 
+// Condensed, two-column-per-gender standings for reference on the Playoffs
+// tab — same ranking as the full table, just one line per player.
+export function StandingsCompact({
+  matches,
+  guysText,
+  girlsText,
+}: {
+  matches: MatchRow[];
+  guysText: string;
+  girlsText: string;
+}) {
+  const { guysRows, girlsRows } = useMemo(
+    () => computeStandings(matches, guysText, girlsText),
+    [matches, guysText, girlsText],
+  );
+
+  if (guysRows.length === 0 && girlsRows.length === 0) return null;
+
+  const Column = ({ title, rows }: { title: string; rows: Bucket[] }) => (
+    <div>
+      <div className="text-[12px] font-semibold text-slate-700 mb-1">{title}</div>
+      {rows.map((r, i) => (
+        <div key={r.name} className="flex items-baseline gap-1.5 text-[12px] py-0.5 border-b border-slate-100 last:border-0">
+          <span className="tabular-nums font-semibold text-sky-800 w-4 shrink-0">{i + 1}.</span>
+          <span className="truncate">{r.name}</span>
+          <span className="ml-auto tabular-nums text-slate-500 shrink-0">
+            {r.W}-{r.L} ({r.PD > 0 ? `+${r.PD}` : r.PD})
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+
+  return (
+    <section className="bg-white/95 backdrop-blur rounded-xl shadow ring-1 ring-slate-200 p-4">
+      <h3 className="text-[14px] font-semibold text-sky-800 mb-2">Standings (reference)</h3>
+      <div className="grid sm:grid-cols-2 gap-x-6 gap-y-3">
+        <Column title="Guys" rows={guysRows} />
+        <Column title="Girls" rows={girlsRows} />
+      </div>
+    </section>
+  );
+}
+
 export function Leaderboard({
   matches,
   guysText,
