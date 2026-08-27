@@ -9,6 +9,7 @@ import { RoundGenerator } from './doubles/RoundGenerator';
 import { Leaderboard, StandingsCompact } from './doubles/Leaderboard';
 import { PlayoffBuilder } from './doubles/PlayoffBuilder';
 import { DoublesBracketView } from './doubles/BracketView';
+import { DoublesFairnessReport } from './doubles/FairnessReport';
 import { TriplesMatchesView } from './triples/MatchesView';
 import { TriplesRoundGenerator } from './triples/RoundGenerator';
 import { TriplesLeaderboard } from './triples/Leaderboard';
@@ -754,6 +755,11 @@ export default function BlindDrawTourneyApp() {
               guysText={currentD.guysText}
               girlsText={currentD.girlsText}
               scoreSettings={dScoreSettings}
+            />
+            <DoublesFairnessReport
+              matches={currentD.matches}
+              guysText={currentD.guysText}
+              girlsText={currentD.girlsText}
             />
           </>
         );

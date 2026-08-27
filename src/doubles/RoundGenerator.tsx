@@ -14,6 +14,109 @@ const SITOUT_WEIGHT = 5;
 // manual seed is set, keeping whichever attempt has the fewest total repeats.
 const SMART_CANDIDATES = 150;
 
+// ─── Partner/opponent/court/usage history (shared with FairnessReport) ────────
+// Pure functions of `history` — no component state — so they're exported for
+// reuse rather than duplicated.
+
+export const addPairToMap = (mp: Map<string, Map<string, number>>, a?: string, b?: string) => {
+  if (!a || !b) return;
+  const A = slug(a);
+  const B = slug(b);
+  if (!mp.has(A)) mp.set(A, new Map());
+  if (!mp.has(B)) mp.set(B, new Map());
+  const ma = mp.get(A)!;
+  const mb = mp.get(B)!;
+  ma.set(B, (ma.get(B) ?? 0) + 1);
+  mb.set(A, (mb.get(A) ?? 0) + 1);
+};
+
+export const buildPartnerMap = (history: MatchRow[]) => {
+  const mp = new Map<string, Map<string, number>>();
+  for (const m of history) {
+    addPairToMap(mp, m.t1p1, m.t1p2);
+    addPairToMap(mp, m.t2p1, m.t2p2);
+  }
+  return mp;
+};
+
+export const buildOpponentMap = (history: MatchRow[]) => {
+  const mp = new Map<string, Map<string, number>>();
+
+  const addOpp = (a?: string, b?: string) => {
+    if (!a || !b) return;
+    const A = slug(a);
+    const B = slug(b);
+    if (!mp.has(A)) mp.set(A, new Map());
+    const ma = mp.get(A)!;
+    ma.set(B, (ma.get(B) ?? 0) + 1);
+  };
+
+  for (const m of history) {
+    const t1 = [m.t1p1, m.t1p2];
+    const t2 = [m.t2p1, m.t2p2];
+
+    for (const a of t1) for (const b of t2) addOpp(a, b);
+    for (const a of t2) for (const b of t1) addOpp(a, b);
+  }
+
+  return mp;
+};
+
+export const buildCourtMap = (history: MatchRow[]) => {
+  const mp = new Map<string, Map<number, number>>();
+
+  const addCourt = (player?: string, court?: number) => {
+    if (!player || !court) return;
+    const key = slug(player);
+    if (!mp.has(key)) mp.set(key, new Map());
+    const inner = mp.get(key)!;
+    inner.set(court, (inner.get(court) || 0) + 1);
+  };
+
+  for (const m of history) {
+    addCourt(m.t1p1, m.court);
+    addCourt(m.t1p2, m.court);
+    addCourt(m.t2p1, m.court);
+    addCourt(m.t2p2, m.court);
+  }
+
+  return mp;
+};
+
+export const partnerCountOf = (partnerMap: Map<string, Map<string, number>>, a: string, b: string) =>
+  partnerMap.get(slug(a))?.get(slug(b)) ?? 0;
+
+export const opponentCountOf = (opponentMap: Map<string, Map<string, number>>, a: string, b: string) =>
+  opponentMap.get(slug(a))?.get(slug(b)) ?? 0;
+
+export function buildPlayerUsageStats(history: MatchRow[]) {
+  const playCounts = new Map<string, number>();
+  const sitCounts = new Map<string, number>();
+  const lastSitRound = new Map<string, number>();
+
+  for (const m of history) {
+    [m.t1p1, m.t1p2, m.t2p1, m.t2p2].forEach((p) => {
+      if (!p) return;
+      const key = slug(p);
+      playCounts.set(key, (playCounts.get(key) || 0) + 1);
+    });
+  }
+
+  const processedRounds = new Set<number>();
+  for (const m of history) {
+    if (processedRounds.has(m.round)) continue;
+    processedRounds.add(m.round);
+
+    for (const p of m.sitOuts || []) {
+      const key = slug(p);
+      sitCounts.set(key, (sitCounts.get(key) || 0) + 1);
+      lastSitRound.set(key, m.round);
+    }
+  }
+
+  return { playCounts, sitCounts, lastSitRound };
+}
+
 // ─── Same-gender history helpers (used for display + scheduling) ──────────────
 
 type SgEntry = { count: number; lastRound: number };
@@ -81,80 +184,6 @@ export function RoundGenerator({
     team: [string, string];
     tag: MatchRow["tag"];
   };
-
-  // Partner/opponent history now counts repeats instead of just tracking
-  // yes/no — matching Revco Quads, so scoring can prefer "repeated once"
-  // over "repeated three times" when a repeat is unavoidable.
-  const addPairToMap = (mp: Map<string, Map<string, number>>, a?: string, b?: string) => {
-    if (!a || !b) return;
-    const A = slug(a);
-    const B = slug(b);
-    if (!mp.has(A)) mp.set(A, new Map());
-    if (!mp.has(B)) mp.set(B, new Map());
-    const ma = mp.get(A)!;
-    const mb = mp.get(B)!;
-    ma.set(B, (ma.get(B) ?? 0) + 1);
-    mb.set(A, (mb.get(A) ?? 0) + 1);
-  };
-
-  const buildPartnerMap = (history: MatchRow[]) => {
-    const mp = new Map<string, Map<string, number>>();
-    for (const m of history) {
-      addPairToMap(mp, m.t1p1, m.t1p2);
-      addPairToMap(mp, m.t2p1, m.t2p2);
-    }
-    return mp;
-  };
-
-  const buildOpponentMap = (history: MatchRow[]) => {
-    const mp = new Map<string, Map<string, number>>();
-
-    const addOpp = (a?: string, b?: string) => {
-      if (!a || !b) return;
-      const A = slug(a);
-      const B = slug(b);
-      if (!mp.has(A)) mp.set(A, new Map());
-      const ma = mp.get(A)!;
-      ma.set(B, (ma.get(B) ?? 0) + 1);
-    };
-
-    for (const m of history) {
-      const t1 = [m.t1p1, m.t1p2];
-      const t2 = [m.t2p1, m.t2p2];
-
-      for (const a of t1) for (const b of t2) addOpp(a, b);
-      for (const a of t2) for (const b of t1) addOpp(a, b);
-    }
-
-    return mp;
-  };
-
-  const buildCourtMap = (history: MatchRow[]) => {
-    const mp = new Map<string, Map<number, number>>();
-
-    const addCourt = (player?: string, court?: number) => {
-      if (!player || !court) return;
-      const key = slug(player);
-      if (!mp.has(key)) mp.set(key, new Map());
-      const inner = mp.get(key)!;
-      inner.set(court, (inner.get(court) || 0) + 1);
-    };
-
-    for (const m of history) {
-      addCourt(m.t1p1, m.court);
-      addCourt(m.t1p2, m.court);
-      addCourt(m.t2p1, m.court);
-      addCourt(m.t2p2, m.court);
-    }
-
-    return mp;
-  };
-
-  const partnerCountOf = (partnerMap: Map<string, Map<string, number>>, a: string, b: string) =>
-    partnerMap.get(slug(a))?.get(slug(b)) ?? 0;
-
-  const opponentCountOf = (opponentMap: Map<string, Map<string, number>>, a: string, b: string) =>
-    opponentMap.get(slug(a))?.get(slug(b)) ?? 0;
 
   function scoreCandidateTeam(
     partnerMap: Map<string, Map<string, number>>,
@@ -406,34 +435,6 @@ export function RoundGenerator({
       teams: out,
       leftovers: pool,
     };
-  }
-
-  function buildPlayerUsageStats(history: MatchRow[]) {
-    const playCounts = new Map<string, number>();
-    const sitCounts = new Map<string, number>();
-    const lastSitRound = new Map<string, number>();
-
-    for (const m of history) {
-      [m.t1p1, m.t1p2, m.t2p1, m.t2p2].forEach((p) => {
-        if (!p) return;
-        const key = slug(p);
-        playCounts.set(key, (playCounts.get(key) || 0) + 1);
-      });
-    }
-
-    const processedRounds = new Set<number>();
-    for (const m of history) {
-      if (processedRounds.has(m.round)) continue;
-      processedRounds.add(m.round);
-
-      for (const p of m.sitOuts || []) {
-        const key = slug(p);
-        sitCounts.set(key, (sitCounts.get(key) || 0) + 1);
-        lastSitRound.set(key, m.round);
-      }
-    }
-
-    return { playCounts, sitCounts, lastSitRound };
   }
 
   function sitPriorityScore(
