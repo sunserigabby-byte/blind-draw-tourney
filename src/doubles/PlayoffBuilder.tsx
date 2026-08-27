@@ -31,14 +31,16 @@ export function PlayoffBuilder({
   const [seedRandom, setSeedRandom] = useState<boolean>(true);
   const [groupSize, setGroupSize] = useState<number>(5);
   const [rrRandomize, setRrRandomize] = useState<boolean>(false);
-  const [confirmBuild, setConfirmBuild] = useState<boolean>(false);
+  const [confirmMode, setConfirmMode] = useState<'main' | 'rr' | null>(null);
   const [editTeams, setEditTeams] = useState<EditTeam[]>([]);
+  const [editMode, setEditMode] = useState<'main' | 'rr' | null>(null);
 
   const allPlayerNames = useMemo(
     () => uniq([...guysRows.map(r => r.name), ...girlsRows.map(r => r.name)]),
     [guysRows, girlsRows],
   );
   const hasMain = brackets.some(b => b.division !== 'RR');
+  const hasRR = brackets.some(b => b.division === 'RR');
 
   useEffect(() => {
     setUpperK(Math.ceil(Math.max(1, Math.min(guysRows.length, girlsRows.length)) / 2));
@@ -143,12 +145,13 @@ export function PlayoffBuilder({
   function onBuild() {
     if (splitBracket) buildSplitMain();
     else buildSingleDivisionMain();
-    setConfirmBuild(false);
+    setConfirmMode(null);
     setEditTeams([]);
+    setEditMode(null);
   }
 
   function onClickBuild() {
-    if (hasMain) setConfirmBuild(true);
+    if (hasMain) setConfirmMode('main');
     else onBuild();
   }
 
@@ -166,6 +169,7 @@ export function PlayoffBuilder({
       name: t.name,
       players: [t.members[0] || '', t.members[1] || ''] as [string, string],
     })));
+    setEditMode('main');
   }
 
   function buildFromEdit() {
@@ -173,16 +177,22 @@ export function PlayoffBuilder({
       .map(t => ({ ...t, players: t.players.filter(Boolean) }))
       .filter(t => t.players.length >= 1)
       .map((t, i) => ({
-        id: `${baseDivision}-${i + 1}-${slug(t.name)}`,
+        id: `${editMode}-${i + 1}-${slug(t.name)}`,
         name: t.name,
         members: t.players,
         seed: i + 1,
-        division: baseDivision as PlayDiv,
+        division: (editMode === 'rr' ? 'RR' : baseDivision) as PlayDiv,
       }));
     if (objs.length < 2) { alert('Need at least 2 teams (with players) to build a bracket.'); return; }
-    setBrackets(() => buildBracket(baseDivision, objs));
+    if (editMode === 'rr') {
+      const rrBracket = buildBracket('RR', objs);
+      setBrackets(prev => [...prev.filter(b => b.division !== 'RR'), ...rrBracket]);
+    } else {
+      setBrackets(() => buildBracket(baseDivision, objs));
+    }
     setEditTeams([]);
-    setConfirmBuild(false);
+    setEditMode(null);
+    setConfirmMode(null);
   }
 
   const setTeamName = (tIdx: number, value: string) =>
@@ -316,6 +326,35 @@ export function PlayoffBuilder({
       const rrBracket = buildBracket('RR', rrTeams);
       return [...nonRr, ...rrBracket];
     });
+    setConfirmMode(null);
+    setEditTeams([]);
+    setEditMode(null);
+  }
+
+  function onClickBuildRedemptionRally() {
+    if (hasRR) setConfirmMode('rr');
+    else buildRedemptionRally();
+  }
+
+  function prepareRRToEdit() {
+    const mainOnly = brackets.filter(b => b.division !== 'RR');
+    const includeDivs: PlayDiv[] = splitBracket ? ['UPPER', 'LOWER'] : [baseDivision];
+    const losers = collectLosersForRR(mainOnly, includeDivs);
+    if (losers.length < 2) {
+      alert("Not enough completed Round 1 / Round 2 matches yet to build Redemption Rally.");
+      return;
+    }
+    const rrTeams = rerandomizeRrTeams(losers);
+    if (rrTeams.length < 2) {
+      alert("Not enough valid RR teams could be formed.");
+      return;
+    }
+    setEditTeams(rrTeams.map(t => ({
+      id: t.id,
+      name: t.name,
+      players: [t.members[0] || '', t.members[1] || ''] as [string, string],
+    })));
+    setEditMode('rr');
   }
 
   return (
@@ -396,18 +435,34 @@ export function PlayoffBuilder({
 
         <button
           className="px-3 py-1.5 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 shadow-sm text-[13px]"
-          onClick={buildRedemptionRally}
+          onClick={onClickBuildRedemptionRally}
         >
           Build Redemption Rally
         </button>
+
+        <button
+          className="px-2.5 py-1.5 rounded-lg border border-slate-300 text-slate-700 hover:bg-slate-50 text-[12px]"
+          onClick={prepareRRToEdit}
+        >
+          Prepare RR Teams to Edit…
+        </button>
       </div>
 
-      {confirmBuild && (
+      {confirmMode && (
         <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 mt-3 flex items-center justify-between gap-3 text-[12px]">
-          <span className="text-amber-800">Rebuild the bracket? This clears the current bracket and any scores in it.</span>
+          <span className="text-amber-800">
+            {confirmMode === 'rr'
+              ? 'Rebuild the Redemption Rally? This clears the current RR bracket and any scores in it.'
+              : 'Rebuild the bracket? This clears the current bracket and any scores in it.'}
+          </span>
           <div className="flex items-center gap-2">
-            <button className="px-2 py-1 rounded bg-amber-600 text-white text-[11px]" onClick={onBuild}>Rebuild</button>
-            <button className="px-2 py-1 rounded border text-[11px]" onClick={() => setConfirmBuild(false)}>Cancel</button>
+            <button
+              className="px-2 py-1 rounded bg-amber-600 text-white text-[11px]"
+              onClick={confirmMode === 'rr' ? buildRedemptionRally : onBuild}
+            >
+              Rebuild
+            </button>
+            <button className="px-2 py-1 rounded border text-[11px]" onClick={() => setConfirmMode(null)}>Cancel</button>
           </div>
         </div>
       )}
@@ -422,10 +477,13 @@ export function PlayoffBuilder({
         <div className="border-t pt-4 mt-4 space-y-3">
           <div className="flex items-center justify-between gap-2 flex-wrap">
             <div className="text-[13px] font-semibold text-slate-800">
-              Adjust Teams &amp; Seeds ({editTeams.length} team{editTeams.length === 1 ? '' : 's'})
+              {editMode === 'rr' ? 'Adjust Redemption Rally Teams' : 'Adjust Teams'} &amp; Seeds ({editTeams.length} team{editTeams.length === 1 ? '' : 's'})
             </div>
             <div className="flex items-center gap-2 flex-wrap">
-              <button className="px-2.5 py-1.5 rounded-lg border text-slate-600 hover:bg-slate-50 text-[12px]" onClick={prepareToEdit}>
+              <button
+                className="px-2.5 py-1.5 rounded-lg border text-slate-600 hover:bg-slate-50 text-[12px]"
+                onClick={editMode === 'rr' ? prepareRRToEdit : prepareToEdit}
+              >
                 Re-shuffle
               </button>
               <button className="px-3 py-1.5 rounded-lg bg-sky-600 text-white hover:bg-sky-700 text-[12px]" onClick={buildFromEdit}>
@@ -434,7 +492,7 @@ export function PlayoffBuilder({
               <button className="px-2.5 py-1.5 rounded-lg border text-slate-600 hover:bg-slate-50 text-[12px]" onClick={addTeam}>
                 + Add Team
               </button>
-              <button className="px-2.5 py-1.5 rounded-lg border text-slate-600 hover:bg-slate-50 text-[12px]" onClick={() => setEditTeams([])}>
+              <button className="px-2.5 py-1.5 rounded-lg border text-slate-600 hover:bg-slate-50 text-[12px]" onClick={() => { setEditTeams([]); setEditMode(null); }}>
                 Cancel
               </button>
             </div>
