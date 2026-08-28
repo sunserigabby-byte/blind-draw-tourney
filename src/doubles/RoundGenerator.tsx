@@ -458,20 +458,30 @@ export function RoundGenerator({
   function chooseSingleSitOut(
     candidates: string[],
     stats: ReturnType<typeof buildPlayerUsageStats>,
-    roundIdx: number
+    roundIdx: number,
+    guysPool: string[],
+    girlsPool: string[]
   ) {
-    let best = candidates[0];
     let bestScore = Number.NEGATIVE_INFINITY;
-
     for (const p of candidates) {
       const score = sitPriorityScore(p, stats, roundIdx);
-      if (score > bestScore) {
-        bestScore = score;
-        best = p;
-      }
+      if (score > bestScore) bestScore = score;
     }
+    const tied = candidates.filter(p => sitPriorityScore(p, stats, roundIdx) === bestScore);
 
-    return best;
+    // Among equally-good candidates, prefer sitting someone from whichever
+    // gender pool currently has more available players. Sitting someone
+    // from the smaller pool would shrink it further and reduce mixedCount
+    // (min of the two pools) — forcing more of the larger pool into
+    // same-gender teams than necessary. Randomize within that preferred
+    // group so it's not always the same fixed roster-order player.
+    const guysTied = tied.filter(p => guysPool.includes(p));
+    const girlsTied = tied.filter(p => girlsPool.includes(p));
+    const preferred = guysPool.length >= girlsPool.length
+      ? (guysTied.length > 0 ? guysTied : tied)
+      : (girlsTied.length > 0 ? girlsTied : tied);
+
+    return shuffle(preferred)[0];
   }
 
   function chooseByeTeamIndex(
@@ -514,7 +524,9 @@ export function RoundGenerator({
       const singleSit = chooseSingleSitOut(
         [...availableGuys, ...availableGirls],
         stats,
-        roundIdx
+        roundIdx,
+        availableGuys,
+        availableGirls
       );
       sitOuts.push(singleSit);
 
