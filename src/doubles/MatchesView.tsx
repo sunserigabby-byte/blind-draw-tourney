@@ -31,10 +31,7 @@ export function MatchesView({
     [girlsText],
   );
   const rounds = useMemo(() => uniq(matches.map(m => m.round)).sort((a, b) => a - b), [matches]);
-  const [open, setOpen] = useState(() => new Set<number>(rounds.length ? [rounds[rounds.length - 1]] : []));
   const [confirmR, setConfirmR] = useState<number | null>(null);
-
-  useEffect(() => { if (rounds.length) setOpen(new Set([rounds[rounds.length - 1]])); }, [matches.length]);
 
   // Per-round completion stats
   const roundStats = useMemo(() => {
@@ -47,13 +44,23 @@ export function MatchesView({
     return map;
   }, [matches, rounds]);
 
-  // The "live" round: latest round that still has pending scores
+  // The "live" round: EARLIEST round that still has pending scores — the one
+  // you should be playing right now. When a full batch of rounds is
+  // generated up front with nothing scored yet, this is Round 1 (not the
+  // last-generated round), matching how pool play is actually played
+  // through in order.
   const liveRound = useMemo(() => {
-    return [...rounds].reverse().find(r => {
+    return rounds.find(r => {
       const s = roundStats.get(r);
       return s && s.scored < s.total;
     }) ?? null;
   }, [rounds, roundStats]);
+
+  const [open, setOpen] = useState(() => new Set<number>(rounds.length ? [liveRound ?? rounds[0]] : []));
+
+  useEffect(() => {
+    if (rounds.length) setOpen(new Set([liveRound ?? rounds[rounds.length - 1]]));
+  }, [matches.length]);
 
   const update = (id: string, patch: Partial<MatchRow>) => setMatches(prev => prev.map(m => m.id === id ? { ...m, ...patch } : m));
   const requestDelete = (round: number) => { setConfirmR(round); };
