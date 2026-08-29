@@ -826,7 +826,8 @@ export default function BlindDrawTourneyApp() {
             <MatchesView
               matches={currentD.matches}
               setMatches={(v: any) => setCurrentD(p => ({ ...p, matches: typeof v === 'function' ? v(p.matches) : v }))}
-              isAdmin={canScoreD}
+              isAdmin={isAdmin}
+              canScore={canScoreD}
               scoreSettings={dScoreSettings}
               guysText={currentD.guysText}
               girlsText={currentD.girlsText}

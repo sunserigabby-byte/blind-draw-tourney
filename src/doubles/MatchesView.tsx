@@ -6,6 +6,7 @@ export function MatchesView({
   matches,
   setMatches,
   isAdmin,
+  canScore,
   scoreSettings = { playTo: 21, cap: null },
   guysText = '',
   girlsText = '',
@@ -13,7 +14,15 @@ export function MatchesView({
 }: {
   matches: MatchRow[];
   setMatches: (f: (prev: MatchRow[]) => MatchRow[] | MatchRow[]) => void;
+  // The real admin only — gates destructive/structural actions (deleting a
+  // round, editing who's on a team). Deliberately separate from `canScore`:
+  // a public-scoring viewer or PIN-holding player should be able to enter
+  // scores without also being able to delete a round or swap players.
   isAdmin: boolean;
+  // Who can type into the score field — admin, PIN-holder, or public
+  // scoring. Defaults to `isAdmin` so existing callers that don't pass it
+  // keep working unchanged.
+  canScore?: boolean;
   scoreSettings?: ScoreSettings;
   guysText?: string;
   girlsText?: string;
@@ -22,6 +31,7 @@ export function MatchesView({
   // never leave their own browser (the main autosave only runs for admins).
   onScoreCommit?: (matchId: string, scoreText: string) => void;
 }) {
+  const canScoreResolved = canScore ?? isAdmin;
   // A match's own tag ("a.tag || b.tag || null") can't tell you WHICH team
   // is actually same-gender — a mixed team simply matched against an
   // Ultimate Revco/Power Puff team also carries that tag. Determine each
@@ -35,8 +45,17 @@ export function MatchesView({
     () => new Set(uniq((girlsText || '').split(/\r?\n/).map(s => s.trim()).filter(Boolean)).map(slug)),
     [girlsText],
   );
+  const rosterNames = useMemo(
+    () => uniq([
+      ...(guysText || '').split(/\r?\n/).map(s => s.trim()).filter(Boolean),
+      ...(girlsText || '').split(/\r?\n/).map(s => s.trim()).filter(Boolean),
+    ]),
+    [guysText, girlsText],
+  );
   const rounds = useMemo(() => uniq(matches.map(m => m.round)).sort((a, b) => a - b), [matches]);
   const [confirmR, setConfirmR] = useState<number | null>(null);
+  const [editingMatchId, setEditingMatchId] = useState<string | null>(null);
+  const [editBuffer, setEditBuffer] = useState<{ t1p1: string; t1p2: string; t2p1: string; t2p2: string } | null>(null);
 
   // Per-round completion stats
   const roundStats = useMemo(() => {
@@ -73,6 +92,36 @@ export function MatchesView({
   };
   const requestDelete = (round: number) => { setConfirmR(round); };
   const doDelete = (round: number) => { setMatches(prev => prev.filter(m => m.round !== round)); setConfirmR(null); };
+
+  const startEditingTeams = (m: MatchRow) => {
+    setEditingMatchId(m.id);
+    setEditBuffer({ t1p1: m.t1p1, t1p2: m.t1p2, t2p1: m.t2p1, t2p2: m.t2p2 });
+  };
+  const cancelEditingTeams = () => { setEditingMatchId(null); setEditBuffer(null); };
+  const saveEditingTeams = () => {
+    if (!editingMatchId || !editBuffer) return;
+    const names = [editBuffer.t1p1, editBuffer.t1p2, editBuffer.t2p1, editBuffer.t2p2];
+    if (names.some(n => !n.trim())) { alert('All four players must be selected.'); return; }
+    if (uniq(names).length !== 4) { alert('The same player is selected more than once in this match.'); return; }
+    update(editingMatchId, { t1p1: editBuffer.t1p1, t1p2: editBuffer.t1p2, t2p1: editBuffer.t2p1, t2p2: editBuffer.t2p2 });
+    setEditingMatchId(null);
+    setEditBuffer(null);
+  };
+  // Warn (non-blocking) if any player in the edit buffer is already playing
+  // elsewhere in the same round — most likely an accidental double-booking,
+  // but the admin may still have a deliberate reason to override it.
+  const editDupWarning = useMemo(() => {
+    if (!editingMatchId || !editBuffer) return null;
+    const round = matches.find(m => m.id === editingMatchId)?.round;
+    if (round == null) return null;
+    const elsewhere = new Set(
+      matches
+        .filter(m => m.round === round && m.id !== editingMatchId)
+        .flatMap(m => [m.t1p1, m.t1p2, m.t2p1, m.t2p2]),
+    );
+    const dups = uniq([editBuffer.t1p1, editBuffer.t1p2, editBuffer.t2p1, editBuffer.t2p2].filter(n => elsewhere.has(n)));
+    return dups.length ? `Already playing elsewhere this round: ${dups.join(', ')}` : null;
+  }, [editingMatchId, editBuffer, matches]);
 
   return (
     <section className="bg-white backdrop-blur rounded-2xl shadow-lg ring-1 ring-sky-200 p-6 border border-sky-100">
@@ -170,6 +219,7 @@ export function MatchesView({
                         <th className="py-1 px-2">Team 1</th>
                         <th className="py-1 px-2">Team 2</th>
                         <th className="py-1 px-2">Score</th>
+                        {isAdmin && <th className="py-1 px-2">Teams</th>}
                       </tr>
                     </thead>
                     <tbody>
@@ -185,6 +235,18 @@ export function MatchesView({
                         const t1IsPP = girlsSet.has(slug(m.t1p1)) && girlsSet.has(slug(m.t1p2));
                         const t2IsUR = guysSet.has(slug(m.t2p1)) && guysSet.has(slug(m.t2p2));
                         const t2IsPP = girlsSet.has(slug(m.t2p1)) && girlsSet.has(slug(m.t2p2));
+                        const isEditingRow = editingMatchId === m.id;
+
+                        const playerSelect = (slot: 't1p1' | 't1p2' | 't2p1' | 't2p2') => (
+                          <select
+                            className="border border-slate-300 rounded px-1 py-1 text-[12px] bg-white"
+                            value={editBuffer?.[slot] ?? ''}
+                            onChange={(e) => setEditBuffer(prev => prev ? { ...prev, [slot]: e.target.value } : prev)}
+                          >
+                            <option value="">—</option>
+                            {rosterNames.map(n => <option key={n} value={n}>{n}</option>)}
+                          </select>
+                        );
 
                         return (
                           <tr
@@ -199,35 +261,49 @@ export function MatchesView({
                             <td className="py-1 px-2 tabular-nums">{m.court}</td>
 
                             <td className={`py-1 px-2 ${t1Win === true ? 'bg-emerald-50' : ''}`}>
-                              <div className="flex items-center gap-2">
-                                {t1IsUR && (
-                                  <span className="inline-block text-[10px] px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 ring-1 ring-blue-200">
-                                    Ultimate Revco
-                                  </span>
-                                )}
-                                {t1IsPP && (
-                                  <span className="inline-block text-[10px] px-2 py-0.5 rounded-full bg-pink-100 text-pink-700 ring-1 ring-pink-200">
-                                    Power Puff
-                                  </span>
-                                )}
-                                <span>{m.t1p1} &amp; {m.t1p2}</span>
-                              </div>
+                              {isEditingRow ? (
+                                <div className="flex items-center gap-1">
+                                  {playerSelect('t1p1')}
+                                  {playerSelect('t1p2')}
+                                </div>
+                              ) : (
+                                <div className="flex items-center gap-2">
+                                  {t1IsUR && (
+                                    <span className="inline-block text-[10px] px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 ring-1 ring-blue-200">
+                                      Ultimate Revco
+                                    </span>
+                                  )}
+                                  {t1IsPP && (
+                                    <span className="inline-block text-[10px] px-2 py-0.5 rounded-full bg-pink-100 text-pink-700 ring-1 ring-pink-200">
+                                      Power Puff
+                                    </span>
+                                  )}
+                                  <span>{m.t1p1} &amp; {m.t1p2}</span>
+                                </div>
+                              )}
                             </td>
 
                             <td className={`py-1 px-2 ${t1Win === false ? 'bg-emerald-50' : ''}`}>
-                              <div className="flex items-center gap-2">
-                                {t2IsUR && (
-                                  <span className="inline-block text-[10px] px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 ring-1 ring-blue-200">
-                                    Ultimate Revco
-                                  </span>
-                                )}
-                                {t2IsPP && (
-                                  <span className="inline-block text-[10px] px-2 py-0.5 rounded-full bg-pink-100 text-pink-700 ring-1 ring-pink-200">
-                                    Power Puff
-                                  </span>
-                                )}
-                                <span>{m.t2p1} &amp; {m.t2p2}</span>
-                              </div>
+                              {isEditingRow ? (
+                                <div className="flex items-center gap-1">
+                                  {playerSelect('t2p1')}
+                                  {playerSelect('t2p2')}
+                                </div>
+                              ) : (
+                                <div className="flex items-center gap-2">
+                                  {t2IsUR && (
+                                    <span className="inline-block text-[10px] px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 ring-1 ring-blue-200">
+                                      Ultimate Revco
+                                    </span>
+                                  )}
+                                  {t2IsPP && (
+                                    <span className="inline-block text-[10px] px-2 py-0.5 rounded-full bg-pink-100 text-pink-700 ring-1 ring-pink-200">
+                                      Power Puff
+                                    </span>
+                                  )}
+                                  <span>{m.t2p1} &amp; {m.t2p2}</span>
+                                </div>
+                              )}
                             </td>
 
                             <td className="py-1 px-2">
@@ -240,9 +316,42 @@ export function MatchesView({
                                 onChange={(e) => update(m.id, { scoreText: e.target.value })}
                                 placeholder={`to ${scoreSettings.playTo}${scoreSettings.cap ? ', cap ' + scoreSettings.cap : ''}`}
                                 title={warning ? `Score doesn't match current rules (play to ${scoreSettings.playTo}${scoreSettings.cap ? ', cap ' + scoreSettings.cap : ', no cap'})` : ''}
-                                disabled={!isAdmin}
+                                disabled={!canScoreResolved}
                               />
                             </td>
+
+                            {isAdmin && (
+                              <td className="py-1 px-2">
+                                {isEditingRow ? (
+                                  <div className="flex flex-col gap-1">
+                                    <div className="flex items-center gap-1">
+                                      <button
+                                        className="px-2 py-1 rounded bg-emerald-600 text-white text-[11px] hover:bg-emerald-700"
+                                        onClick={saveEditingTeams}
+                                      >
+                                        Save
+                                      </button>
+                                      <button
+                                        className="px-2 py-1 rounded border text-[11px]"
+                                        onClick={cancelEditingTeams}
+                                      >
+                                        Cancel
+                                      </button>
+                                    </div>
+                                    {editDupWarning && (
+                                      <span className="text-[10px] text-amber-700">{editDupWarning}</span>
+                                    )}
+                                  </div>
+                                ) : (
+                                  <button
+                                    className="px-2 py-1 rounded border text-slate-700 hover:bg-slate-50 text-[11px]"
+                                    onClick={() => startEditingTeams(m)}
+                                  >
+                                    Edit
+                                  </button>
+                                )}
+                              </td>
+                            )}
                           </tr>
                         );
                       })}
