@@ -10,6 +10,12 @@ const TEAMMATE_WEIGHT = 3;
 const OPPONENT_WEIGHT = 3;
 const COURT_WEIGHT = 1;
 const SITOUT_WEIGHT = 5;
+// When an Ultimate Revco (all-guy) team can't be avoided facing a mixed
+// team (happens whenever the mixed-team count is odd), that all-guy team
+// is at a real disadvantage — they can't block the girl on the other side.
+// Weighted well above teammate/opponent/court so repeats of THIS specific
+// team are spread out even when it costs a bit on those other dimensions.
+const MISMATCH_WEIGHT = 200;
 // How many randomized attempts to try per round when "strict" is on and no
 // manual seed is set, keeping whichever attempt has the fewest total repeats.
 const SMART_CANDIDATES = 150;
@@ -194,12 +200,32 @@ export function RoundGenerator({
     return partnerCountOf(partnerMap, a, b) * TEAMMATE_WEIGHT;
   }
 
+  // How many times each guy has already been on the Ultimate Revco side of
+  // a mismatched matchup (all-guy team vs. a mixed team) — that team can't
+  // block the girl, so it's a real disadvantage. Determined from actual
+  // player composition, not the match's combined tag field, since one
+  // MatchRow's tag can't distinguish "both teams same-gender" from
+  // "only one side is."
+  function buildMismatchStats(history: MatchRow[]) {
+    const guysSet = new Set(guys.map(slug));
+    const mismatchCount = new Map<string, number>();
+    const bump = (p: string) => mismatchCount.set(slug(p), (mismatchCount.get(slug(p)) ?? 0) + 1);
+    for (const m of history) {
+      const t1IsUR = guysSet.has(slug(m.t1p1)) && guysSet.has(slug(m.t1p2));
+      const t2IsUR = guysSet.has(slug(m.t2p1)) && guysSet.has(slug(m.t2p2));
+      if (t1IsUR && !t2IsUR) { bump(m.t1p1); bump(m.t1p2); }
+      else if (t2IsUR && !t1IsUR) { bump(m.t2p1); bump(m.t2p2); }
+    }
+    return mismatchCount;
+  }
+
   function scoreMatchup(
     opponentMap: Map<string, Map<string, number>>,
     teamA: [string, string],
     teamB: [string, string],
     tagA: MatchRow["tag"],
-    tagB: MatchRow["tag"]
+    tagB: MatchRow["tag"],
+    mismatchStats: Map<string, number>
   ) {
     const pairs: [string, string][] = [
       [teamA[0], teamB[0]],
@@ -219,6 +245,10 @@ export function RoundGenerator({
       penalty += 100;
     } else {
       penalty += 500;
+      const urTeam = typeA === "ULTIMATE_REVCO" ? teamA : typeB === "ULTIMATE_REVCO" ? teamB : null;
+      if (urTeam) {
+        for (const p of urTeam) penalty += (mismatchStats.get(slug(p)) ?? 0) * MISMATCH_WEIGHT;
+      }
     }
 
     if (strict) {
@@ -544,6 +574,7 @@ export function RoundGenerator({
     const opponentMap = buildOpponentMap(history);
     const courtMap = buildCourtMap(history);
     const roleStats = buildRoleStats(history);
+    const mismatchStats = buildMismatchStats(history);
 
     const prioritizedGuys = preferMixedAssignment(shuffledGuys, roleStats, roundIdx);
     const prioritizedGirls = preferMixedAssignment(shuffledGirls, roleStats, roundIdx);
@@ -659,7 +690,7 @@ export function RoundGenerator({
 
       for (let i = 0; i < teamList.length; i++) {
         const b = teamList[i];
-        const score = scoreMatchup(opponentMap, a.team, b.team, a.tag, b.tag);
+        const score = scoreMatchup(opponentMap, a.team, b.team, a.tag, b.tag, mismatchStats);
         if (score < bestScore) {
           bestScore = score;
           bestIdx = i;
@@ -761,6 +792,8 @@ export function RoundGenerator({
     const opponentMap = buildOpponentMap(history);
     const courtMap = buildCourtMap(history);
     const stats = buildPlayerUsageStats(history);
+    const mismatchStats = buildMismatchStats(history);
+    const guysSet = new Set(guys.map(slug));
     let penalty = 0;
 
     for (const m of assigned) {
@@ -773,6 +806,17 @@ export function RoundGenerator({
 
       for (const p of [m.t1p1, m.t1p2, m.t2p1, m.t2p2]) {
         penalty += (courtMap.get(slug(p))?.get(m.court) ?? 0) * COURT_WEIGHT;
+      }
+
+      // Mismatched matchup (all-guy team vs. a mixed team) — bias the
+      // overall round choice away from repeatedly landing this on the
+      // same guys, same as the live scoreMatchup check.
+      const t1IsUR = guysSet.has(slug(m.t1p1)) && guysSet.has(slug(m.t1p2));
+      const t2IsUR = guysSet.has(slug(m.t2p1)) && guysSet.has(slug(m.t2p2));
+      if (t1IsUR && !t2IsUR) {
+        for (const p of t1) penalty += (mismatchStats.get(slug(p)) ?? 0) * MISMATCH_WEIGHT;
+      } else if (t2IsUR && !t1IsUR) {
+        for (const p of t2) penalty += (mismatchStats.get(slug(p)) ?? 0) * MISMATCH_WEIGHT;
       }
     }
 
