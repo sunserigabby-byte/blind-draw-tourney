@@ -1,18 +1,22 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import type { MatchRow, ScoreSettings } from '../types';
 import { slug, parseScore, isValidScore } from '../utils';
 
 type Bucket = { name: string; W: number; L: number; PD: number };
 export type StandingsBonus = { w: number; pd: number };
+export type StandingsOverride = { W: number; L: number; PD: number };
 
 // `bonuses` lets an admin credit a player who'll miss rounds (e.g. arriving
 // late) with grace wins/point differential, so standings and playoff
-// seeding both reflect it — not just the on-screen leaderboard.
+// seeding both reflect it — not just the on-screen leaderboard. `overrides`
+// replaces a player's row outright with admin-typed numbers (bonus ignored
+// for that player) — for directly correcting/setting their final W/L/PD.
 export function computeStandings(
   matches: MatchRow[],
   guysText: string,
   girlsText: string,
   bonuses: Record<string, StandingsBonus> = {},
+  overrides: Record<string, StandingsOverride> = {},
 ) {
   const guysList = Array.from(new Set((guysText || '').split(/\r?\n/).map(s => s.trim()).filter(Boolean)));
   const girlsList = Array.from(new Set((girlsText || '').split(/\r?\n/).map(s => s.trim()).filter(Boolean)));
@@ -46,6 +50,11 @@ export function computeStandings(
     row.W += bonus.w || 0;
     row.PD += bonus.pd || 0;
   }
+  for (const [name, o] of Object.entries(overrides)) {
+    const map = guysSet.has(slug(name)) ? g : h;
+    if (!map.has(name)) continue;
+    map.set(name, { name, W: o.W, L: o.L, PD: o.PD });
+  }
   const sortRows = (arr: Bucket[]) => arr.sort((x, y) => y.W - x.W || y.PD - x.PD || x.name.localeCompare(y.name));
   return { guysRows: sortRows(Array.from(g.values())), girlsRows: sortRows(Array.from(h.values())) };
 }
@@ -57,15 +66,17 @@ export function StandingsCompact({
   guysText,
   girlsText,
   bonuses = {},
+  overrides = {},
 }: {
   matches: MatchRow[];
   guysText: string;
   girlsText: string;
   bonuses?: Record<string, StandingsBonus>;
+  overrides?: Record<string, StandingsOverride>;
 }) {
   const { guysRows, girlsRows } = useMemo(
-    () => computeStandings(matches, guysText, girlsText, bonuses),
-    [matches, guysText, girlsText, bonuses],
+    () => computeStandings(matches, guysText, girlsText, bonuses, overrides),
+    [matches, guysText, girlsText, bonuses, overrides],
   );
 
   if (guysRows.length === 0 && girlsRows.length === 0) return null;
@@ -103,6 +114,8 @@ export function Leaderboard({
   scoreSettings = { playTo: 21, cap: null },
   bonuses = {},
   setBonuses,
+  overrides = {},
+  setOverrides,
   isAdmin = false,
 }: {
   matches: MatchRow[];
@@ -113,11 +126,15 @@ export function Leaderboard({
   // arriving late) — admin-editable via the Grace W/Grace PD columns below.
   bonuses?: Record<string, StandingsBonus>;
   setBonuses?: (f: (prev: Record<string, StandingsBonus>) => Record<string, StandingsBonus>) => void;
+  // Directly-typed final W/L/PD for a player, replacing the computed value
+  // (and any bonus) outright — for correcting or fully hand-setting a row.
+  overrides?: Record<string, StandingsOverride>;
+  setOverrides?: (f: (prev: Record<string, StandingsOverride>) => Record<string, StandingsOverride>) => void;
   isAdmin?: boolean;
 }) {
   const { guysRows, girlsRows } = useMemo(
-    () => computeStandings(matches, guysText, girlsText, bonuses),
-    [matches, guysText, girlsText, bonuses],
+    () => computeStandings(matches, guysText, girlsText, bonuses, overrides),
+    [matches, guysText, girlsText, bonuses, overrides],
   );
 
   const setBonus = (name: string, patch: Partial<StandingsBonus>) => {
@@ -127,6 +144,23 @@ export function Leaderboard({
       const { [name]: _drop, ...rest } = prev;
       return (next.w === 0 && next.pd === 0) ? rest : { ...rest, [name]: next };
     });
+  };
+
+  const [editingName, setEditingName] = useState<string | null>(null);
+  const [editBuffer, setEditBuffer] = useState<StandingsOverride>({ W: 0, L: 0, PD: 0 });
+  const startEditRow = (r: Bucket) => {
+    setEditingName(r.name);
+    setEditBuffer(overrides[r.name] ?? { W: r.W, L: r.L, PD: r.PD });
+  };
+  const cancelEditRow = () => setEditingName(null);
+  const saveEditRow = () => {
+    if (!editingName) return;
+    setOverrides?.(prev => ({ ...prev, [editingName]: editBuffer }));
+    setEditingName(null);
+  };
+  const clearOverride = (name: string) => {
+    setOverrides?.(prev => { const { [name]: _drop, ...rest } = prev; return rest; });
+    if (editingName === name) setEditingName(null);
   };
 
   const Table = ({ title, rows }: { title: string; rows: Bucket[] }) => (
@@ -143,38 +177,88 @@ export function Leaderboard({
               <th className="py-1 px-2">PD</th>
               {isAdmin && <th className="py-1 px-2" title="Grace wins — credit added for rounds a player will miss">Grace W</th>}
               {isAdmin && <th className="py-1 px-2" title="Grace point differential — credit added for rounds a player will miss">Grace PD</th>}
+              {isAdmin && <th className="py-1 px-2">Manual</th>}
             </tr>
           </thead>
           <tbody>
-            {rows.map((r, i) => (
-              <tr key={r.name} className="border-t">
-                <td className="py-1 px-2 tabular-nums">{i + 1}</td>
-                <td className="py-1 px-2">{r.name}</td>
-                <td className="py-1 px-2 tabular-nums">{r.W}</td>
-                <td className="py-1 px-2 tabular-nums">{r.L}</td>
-                <td className="py-1 px-2 tabular-nums">{r.PD}</td>
-                {isAdmin && (
+            {rows.map((r, i) => {
+              const isEditing = editingName === r.name;
+              const isOverridden = !!overrides[r.name];
+              return (
+                <tr key={r.name} className={`border-t ${isOverridden ? 'bg-violet-50/60' : ''}`}>
+                  <td className="py-1 px-2 tabular-nums">{i + 1}</td>
                   <td className="py-1 px-2">
-                    <input
-                      type="number"
-                      className="w-14 border border-slate-300 rounded px-1 py-0.5 text-[12px] text-center"
-                      value={bonuses[r.name]?.w ?? 0}
-                      onChange={(e) => setBonus(r.name, { w: parseInt(e.target.value) || 0 })}
-                    />
+                    {r.name}
+                    {isOverridden && !isEditing && (
+                      <span className="ml-1 text-[9px] px-1.5 py-0.5 rounded-full bg-violet-100 text-violet-700 align-middle">manual</span>
+                    )}
                   </td>
-                )}
-                {isAdmin && (
-                  <td className="py-1 px-2">
-                    <input
-                      type="number"
-                      className="w-14 border border-slate-300 rounded px-1 py-0.5 text-[12px] text-center"
-                      value={bonuses[r.name]?.pd ?? 0}
-                      onChange={(e) => setBonus(r.name, { pd: parseInt(e.target.value) || 0 })}
-                    />
-                  </td>
-                )}
-              </tr>
-            ))}
+                  {isEditing ? (
+                    <>
+                      <td className="py-1 px-2">
+                        <input type="number" className="w-12 border border-slate-300 rounded px-1 py-0.5 text-[12px] text-center"
+                          value={editBuffer.W} onChange={(e) => setEditBuffer(b => ({ ...b, W: parseInt(e.target.value) || 0 }))} />
+                      </td>
+                      <td className="py-1 px-2">
+                        <input type="number" className="w-12 border border-slate-300 rounded px-1 py-0.5 text-[12px] text-center"
+                          value={editBuffer.L} onChange={(e) => setEditBuffer(b => ({ ...b, L: parseInt(e.target.value) || 0 }))} />
+                      </td>
+                      <td className="py-1 px-2">
+                        <input type="number" className="w-14 border border-slate-300 rounded px-1 py-0.5 text-[12px] text-center"
+                          value={editBuffer.PD} onChange={(e) => setEditBuffer(b => ({ ...b, PD: parseInt(e.target.value) || 0 }))} />
+                      </td>
+                    </>
+                  ) : (
+                    <>
+                      <td className="py-1 px-2 tabular-nums">{r.W}</td>
+                      <td className="py-1 px-2 tabular-nums">{r.L}</td>
+                      <td className="py-1 px-2 tabular-nums">{r.PD}</td>
+                    </>
+                  )}
+                  {isAdmin && (
+                    <td className="py-1 px-2">
+                      <input
+                        type="number"
+                        className="w-14 border border-slate-300 rounded px-1 py-0.5 text-[12px] text-center disabled:bg-slate-100 disabled:text-slate-400"
+                        value={bonuses[r.name]?.w ?? 0}
+                        onChange={(e) => setBonus(r.name, { w: parseInt(e.target.value) || 0 })}
+                        disabled={isOverridden}
+                        title={isOverridden ? 'Ignored while this player has a manual override' : ''}
+                      />
+                    </td>
+                  )}
+                  {isAdmin && (
+                    <td className="py-1 px-2">
+                      <input
+                        type="number"
+                        className="w-14 border border-slate-300 rounded px-1 py-0.5 text-[12px] text-center disabled:bg-slate-100 disabled:text-slate-400"
+                        value={bonuses[r.name]?.pd ?? 0}
+                        onChange={(e) => setBonus(r.name, { pd: parseInt(e.target.value) || 0 })}
+                        disabled={isOverridden}
+                        title={isOverridden ? 'Ignored while this player has a manual override' : ''}
+                      />
+                    </td>
+                  )}
+                  {isAdmin && (
+                    <td className="py-1 px-2">
+                      {isEditing ? (
+                        <div className="flex items-center gap-1">
+                          <button className="px-2 py-0.5 rounded bg-emerald-600 text-white text-[11px] hover:bg-emerald-700" onClick={saveEditRow}>Save</button>
+                          <button className="px-2 py-0.5 rounded border text-[11px]" onClick={cancelEditRow}>Cancel</button>
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-1">
+                          <button className="px-2 py-0.5 rounded border text-slate-700 hover:bg-slate-50 text-[11px]" onClick={() => startEditRow(r)}>Edit</button>
+                          {isOverridden && (
+                            <button className="px-2 py-0.5 rounded border text-slate-500 hover:bg-slate-50 text-[11px]" onClick={() => clearOverride(r.name)}>Clear</button>
+                          )}
+                        </div>
+                      )}
+                    </td>
+                  )}
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>

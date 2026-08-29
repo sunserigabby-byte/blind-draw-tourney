@@ -14,6 +14,7 @@ export function PlayoffBuilder({
   setBrackets,
   baseDivision,
   bonuses = {},
+  overrides = {},
 }: {
   matches: MatchRow[];
   guysText: string;
@@ -21,13 +22,15 @@ export function PlayoffBuilder({
   brackets: BracketMatch[];
   setBrackets: (f: (prev: BracketMatch[]) => BracketMatch[] | BracketMatch[]) => void;
   baseDivision: 'UPPER' | 'LOWER';
-  // Same grace-points adjustments as the Leaderboard, so playoff seeding by
-  // rank matches what's actually shown there instead of drifting from it.
+  // Same grace-points/override adjustments as the Leaderboard, so playoff
+  // seeding by rank matches what's actually shown there instead of
+  // drifting from it.
   bonuses?: Record<string, { w: number; pd: number }>;
+  overrides?: Record<string, { W: number; L: number; PD: number }>;
 }) {
   const { guysRows, girlsRows } = useMemo(
-    () => computeStandings(matches, guysText, girlsText, bonuses),
-    [matches, guysText, girlsText, bonuses],
+    () => computeStandings(matches, guysText, girlsText, bonuses, overrides),
+    [matches, guysText, girlsText, bonuses, overrides],
   );
 
   const [splitBracket, setSplitBracket] = useState<boolean>(false);

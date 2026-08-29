@@ -44,10 +44,11 @@ type DivisionKey = "UPPER" | "LOWER";
 type SectionKey = SidebarSection;
 
 type StandingsBonus = { w: number; pd: number };
-type DivisionState<TMatch> = { guysText: string; girlsText: string; matches: TMatch[]; brackets: BracketMatch[]; scorerPin: string; publicScoring: boolean; bonuses: Record<string, StandingsBonus> };
+type StandingsOverride = { W: number; L: number; PD: number };
+type DivisionState<TMatch> = { guysText: string; girlsText: string; matches: TMatch[]; brackets: BracketMatch[]; scorerPin: string; publicScoring: boolean; bonuses: Record<string, StandingsBonus>; standingsOverrides: Record<string, StandingsOverride> };
 
 function emptyDivisionState<TMatch>(): DivisionState<TMatch> {
-  return { guysText: "", girlsText: "", matches: [], brackets: [], scorerPin: "", publicScoring: false, bonuses: {} };
+  return { guysText: "", girlsText: "", matches: [], brackets: [], scorerPin: "", publicScoring: false, bonuses: {}, standingsOverrides: {} };
 }
 
 type MickeyDivisionState = {
@@ -841,6 +842,8 @@ export default function BlindDrawTourneyApp() {
               scoreSettings={dScoreSettings}
               bonuses={currentD.bonuses ?? {}}
               setBonuses={(f) => setCurrentD(p => ({ ...p, bonuses: f(p.bonuses ?? {}) }))}
+              overrides={currentD.standingsOverrides ?? {}}
+              setOverrides={(f) => setCurrentD(p => ({ ...p, standingsOverrides: f(p.standingsOverrides ?? {}) }))}
               isAdmin={isAdmin}
             />
             <DoublesFairnessReport
@@ -859,6 +862,7 @@ export default function BlindDrawTourneyApp() {
               guysText={currentD.guysText}
               girlsText={currentD.girlsText}
               bonuses={currentD.bonuses ?? {}}
+              overrides={currentD.standingsOverrides ?? {}}
             />
             <fieldset disabled={!isAdmin} className={!isAdmin ? "opacity-95" : ""}>
               <PlayoffBuilder
@@ -872,6 +876,7 @@ export default function BlindDrawTourneyApp() {
                 }))}
                 baseDivision={activeDivision}
                 bonuses={currentD.bonuses ?? {}}
+                overrides={currentD.standingsOverrides ?? {}}
               />
             </fieldset>
             <DoublesBracketView
