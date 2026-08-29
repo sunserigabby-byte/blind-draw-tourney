@@ -36,7 +36,7 @@ export function PlayoffBuilder({
   const [splitBracket, setSplitBracket] = useState<boolean>(false);
   const [upperK, setUpperK] = useState<number>(Math.ceil(Math.max(1, guysRows.length) / 2));
   const [seedRandom, setSeedRandom] = useState<boolean>(true);
-  const [groupSize, setGroupSize] = useState<number>(5);
+  const [groupSize, setGroupSize] = useState<number>(2);
   const [rrRandomize, setRrRandomize] = useState<boolean>(false);
   const [confirmMode, setConfirmMode] = useState<'main' | 'rr' | null>(null);
   const [editTeams, setEditTeams] = useState<EditTeam[]>([]);
@@ -73,9 +73,10 @@ export function PlayoffBuilder({
   function pairSameGenderWindowed(
     rows: { name: string }[],
     div: PlayDiv,
+    windowSizeOverride?: number,
   ): { teams: Team[]; unpaired: { name: string }[] } {
     const teams: Team[] = [];
-    const windowSize = Math.max(2, groupSize);
+    const windowSize = Math.max(2, windowSizeOverride ?? groupSize);
     let carry: { name: string }[] = [];
 
     for (let base = 0; base < rows.length; base += windowSize) {
@@ -112,40 +113,60 @@ export function PlayoffBuilder({
     const hStats = new Map(girlsRows.map(r => [r.name, r] as const));
 
     const teams: Team[] = [];
-    const K = Math.min(g.length, h.length);
-    const windowSize = Math.max(2, groupSize);
 
-    for (let base = 0; base < K; base += windowSize) {
-      const end = Math.min(base + windowSize, K);
+    // "Pairing window" sets the girls-side window; the guys-side window is
+    // scaled to match the actual guy:girl ratio in this slice (e.g. 16
+    // guys : 8 girls -> a window of 2 girls pulls in 4 guys), so each
+    // window mirrors the roster proportionally instead of pairing 1-for-1
+    // and dumping every excess guy into one leftover pool at the end.
+    // Within a window, ALL of that window's guys are shuffled together and
+    // the first N (girls-window-size) are randomly paired with the
+    // (also-shuffled) girls; whichever guys are left over form an Ultimate
+    // Revco team from that same window — so which specific guys get a
+    // mixed slot vs. an Ultimate Revco slot is randomized every time, not
+    // just who partners whom.
+    const girlsWindowSize = Math.max(1, groupSize);
+    const ratio = h.length > 0 ? g.length / h.length : 1;
+    const guysWindowSize = Math.max(girlsWindowSize, Math.round(girlsWindowSize * ratio));
+    const leftoverWindowSize = Math.max(2, Math.abs(guysWindowSize - girlsWindowSize));
 
-      const guysWindow = g.slice(base, end);
-      const girlsWindow = h.slice(base, end);
+    let guyBase = 0, girlBase = 0;
+    const leftoverGuys: { name: string }[] = [];
+    const leftoverGirls: { name: string }[] = [];
 
-      const guysWindowOrder = seedRandom ? shuffle(guysWindow) : guysWindow;
-      const girlsWindowOrder = seedRandom ? shuffle(girlsWindow) : girlsWindow;
+    while (guyBase < g.length || girlBase < h.length) {
+      const girlsWindow = h.slice(girlBase, girlBase + girlsWindowSize);
+      const guysWindow = g.slice(guyBase, guyBase + guysWindowSize);
+      if (girlsWindow.length === 0 && guysWindow.length === 0) break;
 
-      for (let j = 0; j < Math.min(guysWindowOrder.length, girlsWindowOrder.length); j++) {
-        const guy = guysWindowOrder[j];
-        const girl = girlsWindowOrder[j];
-        const name = `${guy?.name || '—'} & ${girl?.name || '—'}`;
+      const girlsOrder = seedRandom ? shuffle(girlsWindow) : girlsWindow;
+      const guysOrder = seedRandom ? shuffle(guysWindow) : guysWindow;
 
+      const pairCount = Math.min(girlsOrder.length, guysOrder.length);
+      for (let j = 0; j < pairCount; j++) {
+        const guy = guysOrder[j];
+        const girl = girlsOrder[j];
+        const name = `${guy.name} & ${girl.name}`;
         teams.push({
           id: `${div}-tmp-${teams.length + 1}-${slug(name)}`,
           name,
-          members: [guy?.name || '', girl?.name || ''],
+          members: [guy.name, girl.name],
           seed: teams.length + 1,
           division: div,
         });
       }
+      leftoverGuys.push(...guysOrder.slice(pairCount));
+      leftoverGirls.push(...girlsOrder.slice(pairCount));
+
+      guyBase += guysWindowSize;
+      girlBase += girlsWindowSize;
     }
 
     // Leftover guys/girls beyond what the other gender's count can absorb
     // into mixed teams — pair them into same-gender (Ultimate Revco /
     // Power Puff) teams instead of silently dropping them from the bracket.
-    const leftoverGuys = g.slice(K);
-    const leftoverGirls = h.slice(K);
-    const guyPairs = pairSameGenderWindowed(leftoverGuys, div);
-    const girlPairs = pairSameGenderWindowed(leftoverGirls, div);
+    const guyPairs = pairSameGenderWindowed(leftoverGuys, div, leftoverWindowSize);
+    const girlPairs = pairSameGenderWindowed(leftoverGirls, div, leftoverWindowSize);
     teams.push(...guyPairs.teams, ...girlPairs.teams);
 
     const unpaired = [...guyPairs.unpaired, ...girlPairs.unpaired];
@@ -440,15 +461,19 @@ export function PlayoffBuilder({
         </label>
 
         <label className="flex items-center gap-2">
-          Pairing window
+          Girls per pairing window
           <input
             className="w-16 border rounded px-2 py-1"
             type="number"
-            min={2}
+            min={1}
             value={groupSize}
-            onChange={(e) => setGroupSize(clampN(+e.target.value || 2, 2))}
+            onChange={(e) => setGroupSize(clampN(+e.target.value || 1, 1))}
           />
         </label>
+        <span className="text-[11px] text-slate-500">
+          → {Math.max(groupSize, Math.round(groupSize * (girlsRows.length > 0 ? guysRows.length / girlsRows.length : 1)))} guys per window
+          (matches your {guysRows.length}:{girlsRows.length} roster ratio), randomly split into mixed teams + an Ultimate Revco team from the leftover guys
+        </span>
 
         {splitBracket && (
           <label className="flex items-center gap-2">
