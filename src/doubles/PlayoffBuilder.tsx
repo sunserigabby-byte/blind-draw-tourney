@@ -57,6 +57,42 @@ export function PlayoffBuilder({
     return { W, PD };
   }
 
+  // Pairs a same-gender leftover pool into teams, windowed by standing like
+  // the mixed teams above. Carries an odd window's leftover into the next
+  // window instead of dropping it, so an overall-even pool always pairs
+  // completely even though the window size itself may be odd. Returns
+  // anyone who couldn't be paired at all (only possible if the pool's total
+  // count is odd) so the caller can warn about it.
+  function pairSameGenderWindowed(
+    rows: { name: string }[],
+    div: PlayDiv,
+  ): { teams: Team[]; unpaired: { name: string }[] } {
+    const teams: Team[] = [];
+    const windowSize = Math.max(2, groupSize);
+    let carry: { name: string }[] = [];
+
+    for (let base = 0; base < rows.length; base += windowSize) {
+      const window = [...carry, ...rows.slice(base, base + windowSize)];
+      carry = [];
+      const order = seedRandom ? shuffle(window) : window;
+      for (let j = 0; j + 1 < order.length; j += 2) {
+        const a = order[j];
+        const b = order[j + 1];
+        const name = `${a.name} & ${b.name}`;
+        teams.push({
+          id: `${div}-tmp-sg-${teams.length + 1}-${slug(name)}`,
+          name,
+          members: [a.name, b.name],
+          seed: teams.length + 1,
+          division: div,
+        });
+      }
+      if (order.length % 2 === 1) carry = [order[order.length - 1]];
+    }
+
+    return { teams, unpaired: carry };
+  }
+
   function randomTeamsFromSlices(
     div: PlayDiv,
     guySlice: { start: number, end: number },
@@ -94,6 +130,20 @@ export function PlayoffBuilder({
           division: div,
         });
       }
+    }
+
+    // Leftover guys/girls beyond what the other gender's count can absorb
+    // into mixed teams — pair them into same-gender (Ultimate Revco /
+    // Power Puff) teams instead of silently dropping them from the bracket.
+    const leftoverGuys = g.slice(K);
+    const leftoverGirls = h.slice(K);
+    const guyPairs = pairSameGenderWindowed(leftoverGuys, div);
+    const girlPairs = pairSameGenderWindowed(leftoverGirls, div);
+    teams.push(...guyPairs.teams, ...girlPairs.teams);
+
+    const unpaired = [...guyPairs.unpaired, ...girlPairs.unpaired];
+    if (unpaired.length > 0) {
+      alert(`Heads up: ${unpaired.map(p => p.name).join(', ')} couldn't be paired into a team and won't be in the ${div} bracket. Add them manually via "Prepare Teams to Edit..." if you want them included.`);
     }
 
     teams.sort((A, B) => {
