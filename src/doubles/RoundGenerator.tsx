@@ -529,26 +529,20 @@ export function RoundGenerator({
     guysPool: string[],
     girlsPool: string[]
   ) {
+    // Girls never sit out if there's any guy available to sit instead —
+    // only fall back to the full candidate pool (which could include girls)
+    // if no guy is available this round.
+    const guysCandidates = candidates.filter(p => guysPool.includes(p));
+    const pool = guysCandidates.length > 0 ? guysCandidates : candidates;
+
     let bestScore = Number.NEGATIVE_INFINITY;
-    for (const p of candidates) {
+    for (const p of pool) {
       const score = sitPriorityScore(p, stats, roundIdx);
       if (score > bestScore) bestScore = score;
     }
-    const tied = candidates.filter(p => sitPriorityScore(p, stats, roundIdx) === bestScore);
+    const tied = pool.filter(p => sitPriorityScore(p, stats, roundIdx) === bestScore);
 
-    // Among equally-good candidates, prefer sitting someone from whichever
-    // gender pool currently has more available players. Sitting someone
-    // from the smaller pool would shrink it further and reduce mixedCount
-    // (min of the two pools) — forcing more of the larger pool into
-    // same-gender teams than necessary. Randomize within that preferred
-    // group so it's not always the same fixed roster-order player.
-    const guysTied = tied.filter(p => guysPool.includes(p));
-    const girlsTied = tied.filter(p => girlsPool.includes(p));
-    const preferred = guysPool.length >= girlsPool.length
-      ? (guysTied.length > 0 ? guysTied : tied)
-      : (girlsTied.length > 0 ? girlsTied : tied);
-
-    return shuffle(preferred)[0];
+    return shuffle(tied)[0];
   }
 
   function chooseByeTeamIndex(
@@ -556,10 +550,20 @@ export function RoundGenerator({
     stats: ReturnType<typeof buildPlayerUsageStats>,
     roundIdx: number
   ) {
-    let bestIdx = 0;
+    // Only an all-guy (Ultimate Revco) team can sit out the whole round —
+    // a mixed or Power Puff team includes a girl, and girls must never sit.
+    // Only fall back to every team if there isn't a single UR team this
+    // round (e.g. girls outnumber guys).
+    const urIndices = teams.reduce<number[]>((acc, t, i) => {
+      if (t.tag === "ULTIMATE_REVCO") acc.push(i);
+      return acc;
+    }, []);
+    const pool = urIndices.length > 0 ? urIndices : teams.map((_, i) => i);
+
+    let bestIdx = pool[0];
     let bestScore = Number.NEGATIVE_INFINITY;
 
-    for (let i = 0; i < teams.length; i++) {
+    for (const i of pool) {
       const [a, b] = teams[i].team;
       const score =
         sitPriorityScore(a, stats, roundIdx) +
