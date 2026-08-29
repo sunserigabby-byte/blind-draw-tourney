@@ -1,18 +1,35 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import type { MatchRow, ScoreSettings } from '../types';
-import { uniq, parseScore, isValidScore, isScoredGame } from '../utils';
+import { uniq, slug, parseScore, isValidScore, isScoredGame } from '../utils';
 
 export function MatchesView({
   matches,
   setMatches,
   isAdmin,
   scoreSettings = { playTo: 21, cap: null },
+  guysText = '',
+  girlsText = '',
 }: {
   matches: MatchRow[];
   setMatches: (f: (prev: MatchRow[]) => MatchRow[] | MatchRow[]) => void;
   isAdmin: boolean;
   scoreSettings?: ScoreSettings;
+  guysText?: string;
+  girlsText?: string;
 }) {
+  // A match's own tag ("a.tag || b.tag || null") can't tell you WHICH team
+  // is actually same-gender — a mixed team simply matched against an
+  // Ultimate Revco/Power Puff team also carries that tag. Determine each
+  // team's real composition from the roster instead, so the badge lands on
+  // the team that's actually all-guy/all-girl, not whichever is Team 1.
+  const guysSet = useMemo(
+    () => new Set(uniq((guysText || '').split(/\r?\n/).map(s => s.trim()).filter(Boolean)).map(slug)),
+    [guysText],
+  );
+  const girlsSet = useMemo(
+    () => new Set(uniq((girlsText || '').split(/\r?\n/).map(s => s.trim()).filter(Boolean)).map(slug)),
+    [girlsText],
+  );
   const rounds = useMemo(() => uniq(matches.map(m => m.round)).sort((a, b) => a - b), [matches]);
   const [open, setOpen] = useState(() => new Set<number>(rounds.length ? [rounds[rounds.length - 1]] : []));
   const [confirmR, setConfirmR] = useState<number | null>(null);
@@ -149,6 +166,11 @@ export function MatchesView({
                         const warning = scored && !matchesRules;
                         const t1Win = scored ? parsed![0] > parsed![1] : null;
 
+                        const t1IsUR = guysSet.has(slug(m.t1p1)) && guysSet.has(slug(m.t1p2));
+                        const t1IsPP = girlsSet.has(slug(m.t1p1)) && girlsSet.has(slug(m.t1p2));
+                        const t2IsUR = guysSet.has(slug(m.t2p1)) && guysSet.has(slug(m.t2p2));
+                        const t2IsPP = girlsSet.has(slug(m.t2p1)) && girlsSet.has(slug(m.t2p2));
+
                         return (
                           <tr
                             key={m.id}
@@ -163,12 +185,12 @@ export function MatchesView({
 
                             <td className={`py-1 px-2 ${t1Win === true ? 'bg-emerald-50' : ''}`}>
                               <div className="flex items-center gap-2">
-                                {m.tag === 'ULTIMATE_REVCO' && (
+                                {t1IsUR && (
                                   <span className="inline-block text-[10px] px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 ring-1 ring-blue-200">
                                     Ultimate Revco
                                   </span>
                                 )}
-                                {m.tag === 'POWER_PUFF' && (
+                                {t1IsPP && (
                                   <span className="inline-block text-[10px] px-2 py-0.5 rounded-full bg-pink-100 text-pink-700 ring-1 ring-pink-200">
                                     Power Puff
                                   </span>
@@ -178,7 +200,19 @@ export function MatchesView({
                             </td>
 
                             <td className={`py-1 px-2 ${t1Win === false ? 'bg-emerald-50' : ''}`}>
-                              {m.t2p1} &amp; {m.t2p2}
+                              <div className="flex items-center gap-2">
+                                {t2IsUR && (
+                                  <span className="inline-block text-[10px] px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 ring-1 ring-blue-200">
+                                    Ultimate Revco
+                                  </span>
+                                )}
+                                {t2IsPP && (
+                                  <span className="inline-block text-[10px] px-2 py-0.5 rounded-full bg-pink-100 text-pink-700 ring-1 ring-pink-200">
+                                    Power Puff
+                                  </span>
+                                )}
+                                <span>{m.t2p1} &amp; {m.t2p2}</span>
+                              </div>
                             </td>
 
                             <td className="py-1 px-2">

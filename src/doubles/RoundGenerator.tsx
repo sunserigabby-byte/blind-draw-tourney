@@ -127,16 +127,28 @@ export function buildPlayerUsageStats(history: MatchRow[]) {
 
 type SgEntry = { count: number; lastRound: number };
 
-function buildSgMap(matches: MatchRow[]): Map<string, SgEntry> {
+// `m.tag` is a single field for the whole MATCH ("a.tag || b.tag || null"),
+// so it can't tell you which side is actually same-gender — a match where
+// an Ultimate Revco team faces a mixed team also carries the
+// 'ULTIMATE_REVCO' tag, even though only one of the two teams is one.
+// Crediting all four players (the old behavior) wrongly counted the mixed
+// team's players — including any girl — as having played same-gender
+// themselves, just for facing one as an opponent. Determine each team's
+// actual composition from the roster instead.
+function buildSgMap(matches: MatchRow[], guysSet: Set<string>, girlsSet: Set<string>): Map<string, SgEntry> {
   const map = new Map<string, SgEntry>();
+  const bump = (p: string, round: number) => {
+    const key = slug(p);
+    const cur = map.get(key) ?? { count: 0, lastRound: 0 };
+    map.set(key, { count: cur.count + 1, lastRound: Math.max(cur.lastRound, round) });
+  };
   for (const m of matches) {
-    if (!m.tag) continue;
-    for (const p of [m.t1p1, m.t1p2, m.t2p1, m.t2p2]) {
-      if (!p) continue;
-      const key = slug(p);
-      const cur = map.get(key) ?? { count: 0, lastRound: 0 };
-      map.set(key, { count: cur.count + 1, lastRound: Math.max(cur.lastRound, m.round) });
-    }
+    const t1SameGender = (guysSet.has(slug(m.t1p1)) && guysSet.has(slug(m.t1p2))) ||
+      (girlsSet.has(slug(m.t1p1)) && girlsSet.has(slug(m.t1p2)));
+    const t2SameGender = (guysSet.has(slug(m.t2p1)) && guysSet.has(slug(m.t2p2))) ||
+      (girlsSet.has(slug(m.t2p1)) && girlsSet.has(slug(m.t2p2)));
+    if (t1SameGender) { bump(m.t1p1, m.round); bump(m.t1p2, m.round); }
+    if (t2SameGender) { bump(m.t2p1, m.round); bump(m.t2p2, m.round); }
   }
   return map;
 }
@@ -175,7 +187,9 @@ export function RoundGenerator({
 
   // Per-player same-gender counts for display (Ultimate Revco / Power Puff)
   const sgStats = useMemo(() => {
-    const sgMap = buildSgMap(matches);
+    const guysSet = new Set(guys.map(slug));
+    const girlsSet = new Set(girls.map(slug));
+    const sgMap = buildSgMap(matches, guysSet, girlsSet);
     const currentRound = matches.reduce((mx, m) => Math.max(mx, m.round), 0);
     const toRow = (name: string) => {
       const e = sgMap.get(slug(name)) ?? { count: 0, lastRound: 0 };
@@ -329,6 +343,8 @@ export function RoundGenerator({
     const sameGenderCount = new Map<string, number>();
     const lastSameGenderRound = new Map<string, number>();
     const sameGenderStreak = new Map<string, number>();
+    const guysSet = new Set(guys.map(slug));
+    const girlsSet = new Set(girls.map(slug));
 
     const rounds = uniq(history.map(m => m.round)).sort((a, b) => a - b);
 
@@ -338,15 +354,18 @@ export function RoundGenerator({
       const sameGenderPlayersThisRound = new Set<string>();
 
       for (const m of roundMatches) {
-        const isSameGenderTag =
-          m.tag === "ULTIMATE_REVCO" || m.tag === "POWER_PUFF";
+        // Check each team's actual composition independently — m.tag is one
+        // field for the whole match, so it can't tell you which side is
+        // same-gender. A mixed team that's simply matched AGAINST an
+        // Ultimate Revco/Power Puff team must not get credited as if its
+        // own players had a same-gender round themselves.
+        const t1SameGender = (guysSet.has(slug(m.t1p1)) && guysSet.has(slug(m.t1p2))) ||
+          (girlsSet.has(slug(m.t1p1)) && girlsSet.has(slug(m.t1p2)));
+        const t2SameGender = (guysSet.has(slug(m.t2p1)) && guysSet.has(slug(m.t2p2))) ||
+          (girlsSet.has(slug(m.t2p1)) && girlsSet.has(slug(m.t2p2)));
 
-        if (!isSameGenderTag) continue;
-
-        [m.t1p1, m.t1p2, m.t2p1, m.t2p2].forEach((p) => {
-          if (!p) return;
-          sameGenderPlayersThisRound.add(slug(p));
-        });
+        if (t1SameGender) { sameGenderPlayersThisRound.add(slug(m.t1p1)); sameGenderPlayersThisRound.add(slug(m.t1p2)); }
+        if (t2SameGender) { sameGenderPlayersThisRound.add(slug(m.t2p1)); sameGenderPlayersThisRound.add(slug(m.t2p2)); }
       }
 
       for (const key of sameGenderPlayersThisRound) {
