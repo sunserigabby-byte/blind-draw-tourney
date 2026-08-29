@@ -16,6 +16,16 @@ const SITOUT_WEIGHT = 5;
 // Weighted well above teammate/opponent/court so repeats of THIS specific
 // team are spread out even when it costs a bit on those other dimensions.
 const MISMATCH_WEIGHT = 200;
+// Used only inside makeSameGenderTeams, where repeat-partner avoidance has
+// to compete against sameGenderPenalty (scale: ~1,000 per prior UR/PP round,
+// up to 1,000,000 for back-to-back). TEAMMATE_WEIGHT=3 is calibrated for a
+// different scoring system (whole-round candidate comparison) and is far
+// too small to matter here — repeats of the same pair went unpenalized in
+// practice because any UR-count difference between candidates (almost
+// always present) swamped it. This weight is set on the same order of
+// magnitude as sameGenderPenalty so avoiding a repeat partner is actually
+// weighed against the fairness goal instead of being invisible next to it.
+const SAME_GENDER_TEAMMATE_WEIGHT = 20_000;
 // How many randomized attempts to try per round when "strict" is on and no
 // manual seed is set, keeping whichever attempt has the fewest total repeats.
 const SMART_CANDIDATES = 150;
@@ -448,7 +458,7 @@ export function RoundGenerator({
           const a = pool[i];
           const b = pool[j];
 
-          const partnerPenalty = scoreCandidateTeam(partnerMap, a, b);
+          const partnerPenalty = partnerCountOf(partnerMap, a, b) * SAME_GENDER_TEAMMATE_WEIGHT;
           const rolePenalty =
             sameGenderPenalty(a, roleStats, roundIdx) +
             sameGenderPenalty(b, roleStats, roundIdx);
