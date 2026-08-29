@@ -3,8 +3,17 @@ import type { MatchRow, ScoreSettings } from '../types';
 import { slug, parseScore, isValidScore } from '../utils';
 
 type Bucket = { name: string; W: number; L: number; PD: number };
+export type StandingsBonus = { w: number; pd: number };
 
-export function computeStandings(matches: MatchRow[], guysText: string, girlsText: string) {
+// `bonuses` lets an admin credit a player who'll miss rounds (e.g. arriving
+// late) with grace wins/point differential, so standings and playoff
+// seeding both reflect it — not just the on-screen leaderboard.
+export function computeStandings(
+  matches: MatchRow[],
+  guysText: string,
+  girlsText: string,
+  bonuses: Record<string, StandingsBonus> = {},
+) {
   const guysList = Array.from(new Set((guysText || '').split(/\r?\n/).map(s => s.trim()).filter(Boolean)));
   const girlsList = Array.from(new Set((girlsText || '').split(/\r?\n/).map(s => s.trim()).filter(Boolean)));
   const guysSet = new Set(guysList.map(slug));
@@ -30,6 +39,13 @@ export function computeStandings(matches: MatchRow[], guysText: string, girlsTex
     for (const p of t1) apply(p, t1Won);
     for (const p of t2) apply(p, !t1Won);
   }
+  for (const [name, bonus] of Object.entries(bonuses)) {
+    const map = guysSet.has(slug(name)) ? g : h;
+    if (!map.has(name)) continue;
+    const row = map.get(name)!;
+    row.W += bonus.w || 0;
+    row.PD += bonus.pd || 0;
+  }
   const sortRows = (arr: Bucket[]) => arr.sort((x, y) => y.W - x.W || y.PD - x.PD || x.name.localeCompare(y.name));
   return { guysRows: sortRows(Array.from(g.values())), girlsRows: sortRows(Array.from(h.values())) };
 }
@@ -40,14 +56,16 @@ export function StandingsCompact({
   matches,
   guysText,
   girlsText,
+  bonuses = {},
 }: {
   matches: MatchRow[];
   guysText: string;
   girlsText: string;
+  bonuses?: Record<string, StandingsBonus>;
 }) {
   const { guysRows, girlsRows } = useMemo(
-    () => computeStandings(matches, guysText, girlsText),
-    [matches, guysText, girlsText],
+    () => computeStandings(matches, guysText, girlsText, bonuses),
+    [matches, guysText, girlsText, bonuses],
   );
 
   if (guysRows.length === 0 && girlsRows.length === 0) return null;
@@ -83,59 +101,33 @@ export function Leaderboard({
   guysText,
   girlsText,
   scoreSettings = { playTo: 21, cap: null },
+  bonuses = {},
+  setBonuses,
+  isAdmin = false,
 }: {
   matches: MatchRow[];
   guysText: string;
   girlsText: string;
   scoreSettings?: ScoreSettings;
+  // Grace wins/point-differential credited to a player missing rounds (e.g.
+  // arriving late) — admin-editable via the Grace W/Grace PD columns below.
+  bonuses?: Record<string, StandingsBonus>;
+  setBonuses?: (f: (prev: Record<string, StandingsBonus>) => Record<string, StandingsBonus>) => void;
+  isAdmin?: boolean;
 }) {
-  const guysList = useMemo(
-    () => Array.from(new Set((guysText || '').split(/\r?\n/).map(s => s.trim()).filter(Boolean))),
-    [guysText],
+  const { guysRows, girlsRows } = useMemo(
+    () => computeStandings(matches, guysText, girlsText, bonuses),
+    [matches, guysText, girlsText, bonuses],
   );
-  const girlsList = useMemo(
-    () => Array.from(new Set((girlsText || '').split(/\r?\n/).map(s => s.trim()).filter(Boolean))),
-    [girlsText],
-  );
-  const guysSet = useMemo(() => new Set(guysList.map(slug)), [guysList]);
-  const girlsSet = useMemo(() => new Set(girlsList.map(slug)), [girlsList]);
 
-  const baseStats = () => new Map<string, Bucket>();
-  const ensure = (map: Map<string, Bucket>, n: string) => {
-    if (!map.has(n)) map.set(n, { name: n, W: 0, L: 0, PD: 0 });
-    return map.get(n)!;
+  const setBonus = (name: string, patch: Partial<StandingsBonus>) => {
+    setBonuses?.(prev => {
+      const cur = prev[name] ?? { w: 0, pd: 0 };
+      const next = { ...cur, ...patch };
+      const { [name]: _drop, ...rest } = prev;
+      return (next.w === 0 && next.pd === 0) ? rest : { ...rest, [name]: next };
+    });
   };
-
-  const { guysRows, girlsRows } = useMemo(() => {
-    const g = baseStats(); const h = baseStats();
-    for (const n of guysList) ensure(g, n);
-    for (const n of girlsList) ensure(h, n);
-
-    for (const m of matches) {
-      const s = parseScore(m.scoreText); if (!s) continue;
-      const [a, b] = s;
-      if (a === b) continue;
-      const t1 = [m.t1p1, m.t1p2], t2 = [m.t2p1, m.t2p2];
-      const diff = Math.abs(a - b); const t1Won = a > b;
-      const apply = (name: string, won: boolean) => {
-        const key = name;
-        const isGuy = guysSet.has(slug(name));
-        const isGirl = girlsSet.has(slug(name));
-        const map = isGuy ? g : isGirl ? h : g;
-        const row = ensure(map, key);
-        if (won) { row.W++; row.PD += diff; } else { row.L++; row.PD -= diff; }
-      };
-      for (const p of t1) apply(p, t1Won);
-      for (const p of t2) apply(p, !t1Won);
-    }
-
-    const sortRows = (arr: Bucket[]) =>
-      arr.sort((x, y) => y.W - x.W || y.PD - x.PD || x.name.localeCompare(y.name));
-    return {
-      guysRows: sortRows(Array.from(g.values())),
-      girlsRows: sortRows(Array.from(h.values())),
-    };
-  }, [matches, guysList, girlsList, guysSet, girlsSet]);
 
   const Table = ({ title, rows }: { title: string; rows: Bucket[] }) => (
     <section className="bg-white/95 backdrop-blur rounded-xl shadow ring-1 ring-slate-200 p-4">
@@ -149,6 +141,8 @@ export function Leaderboard({
               <th className="py-1 px-2">W</th>
               <th className="py-1 px-2">L</th>
               <th className="py-1 px-2">PD</th>
+              {isAdmin && <th className="py-1 px-2" title="Grace wins — credit added for rounds a player will miss">Grace W</th>}
+              {isAdmin && <th className="py-1 px-2" title="Grace point differential — credit added for rounds a player will miss">Grace PD</th>}
             </tr>
           </thead>
           <tbody>
@@ -159,6 +153,26 @@ export function Leaderboard({
                 <td className="py-1 px-2 tabular-nums">{r.W}</td>
                 <td className="py-1 px-2 tabular-nums">{r.L}</td>
                 <td className="py-1 px-2 tabular-nums">{r.PD}</td>
+                {isAdmin && (
+                  <td className="py-1 px-2">
+                    <input
+                      type="number"
+                      className="w-14 border border-slate-300 rounded px-1 py-0.5 text-[12px] text-center"
+                      value={bonuses[r.name]?.w ?? 0}
+                      onChange={(e) => setBonus(r.name, { w: parseInt(e.target.value) || 0 })}
+                    />
+                  </td>
+                )}
+                {isAdmin && (
+                  <td className="py-1 px-2">
+                    <input
+                      type="number"
+                      className="w-14 border border-slate-300 rounded px-1 py-0.5 text-[12px] text-center"
+                      value={bonuses[r.name]?.pd ?? 0}
+                      onChange={(e) => setBonus(r.name, { pd: parseInt(e.target.value) || 0 })}
+                    />
+                  </td>
+                )}
               </tr>
             ))}
           </tbody>

@@ -43,10 +43,11 @@ type TabKey = SidebarTabKey;
 type DivisionKey = "UPPER" | "LOWER";
 type SectionKey = SidebarSection;
 
-type DivisionState<TMatch> = { guysText: string; girlsText: string; matches: TMatch[]; brackets: BracketMatch[]; scorerPin: string; publicScoring: boolean };
+type StandingsBonus = { w: number; pd: number };
+type DivisionState<TMatch> = { guysText: string; girlsText: string; matches: TMatch[]; brackets: BracketMatch[]; scorerPin: string; publicScoring: boolean; bonuses: Record<string, StandingsBonus> };
 
 function emptyDivisionState<TMatch>(): DivisionState<TMatch> {
-  return { guysText: "", girlsText: "", matches: [], brackets: [], scorerPin: "", publicScoring: false };
+  return { guysText: "", girlsText: "", matches: [], brackets: [], scorerPin: "", publicScoring: false, bonuses: {} };
 }
 
 type MickeyDivisionState = {
@@ -838,6 +839,9 @@ export default function BlindDrawTourneyApp() {
               guysText={currentD.guysText}
               girlsText={currentD.girlsText}
               scoreSettings={dScoreSettings}
+              bonuses={currentD.bonuses ?? {}}
+              setBonuses={(f) => setCurrentD(p => ({ ...p, bonuses: f(p.bonuses ?? {}) }))}
+              isAdmin={isAdmin}
             />
             <DoublesFairnessReport
               matches={currentD.matches}
@@ -854,6 +858,7 @@ export default function BlindDrawTourneyApp() {
               matches={currentD.matches}
               guysText={currentD.guysText}
               girlsText={currentD.girlsText}
+              bonuses={currentD.bonuses ?? {}}
             />
             <fieldset disabled={!isAdmin} className={!isAdmin ? "opacity-95" : ""}>
               <PlayoffBuilder
@@ -866,6 +871,7 @@ export default function BlindDrawTourneyApp() {
                   brackets: typeof f === "function" ? (f as any)(prev.brackets) : f
                 }))}
                 baseDivision={activeDivision}
+                bonuses={currentD.bonuses ?? {}}
               />
             </fieldset>
             <DoublesBracketView
