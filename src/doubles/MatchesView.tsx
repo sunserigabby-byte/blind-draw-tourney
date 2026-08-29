@@ -56,6 +56,8 @@ export function MatchesView({
   const [confirmR, setConfirmR] = useState<number | null>(null);
   const [editingMatchId, setEditingMatchId] = useState<string | null>(null);
   const [editBuffer, setEditBuffer] = useState<{ t1p1: string; t1p2: string; t2p1: string; t2p2: string } | null>(null);
+  const [showAddMatch, setShowAddMatch] = useState(false);
+  const [addBuffer, setAddBuffer] = useState({ round: '', court: '', t1p1: '', t1p2: '', t2p1: '', t2p2: '', scoreText: '' });
 
   // Per-round completion stats
   const roundStats = useMemo(() => {
@@ -123,10 +125,129 @@ export function MatchesView({
     return dups.length ? `Already playing elsewhere this round: ${dups.join(', ')}` : null;
   }, [editingMatchId, editBuffer, matches]);
 
+  // Lets an admin record a real match for a round that already happened —
+  // e.g. crediting a player who arrived late with a make-up result — so it
+  // shows up in the round's own match list (and flows into Leaderboard/
+  // fairness tracking) instead of being an invisible bonus number.
+  const openAddMatch = () => {
+    const defaultRound = rounds[0] ?? 1;
+    const courtsInRound = matches.filter(m => m.round === defaultRound).map(m => m.court);
+    const defaultCourt = courtsInRound.length ? Math.max(...courtsInRound) + 1 : 1;
+    setAddBuffer({ round: String(defaultRound), court: String(defaultCourt), t1p1: '', t1p2: '', t2p1: '', t2p2: '', scoreText: '' });
+    setShowAddMatch(true);
+  };
+  const cancelAddMatch = () => setShowAddMatch(false);
+  const saveAddMatch = () => {
+    const round = parseInt(addBuffer.round);
+    const court = parseInt(addBuffer.court);
+    if (!round || round < 1) { alert('Enter a valid round number.'); return; }
+    if (!court || court < 1) { alert('Enter a valid court number.'); return; }
+    const names = [addBuffer.t1p1, addBuffer.t1p2, addBuffer.t2p1, addBuffer.t2p2];
+    if (names.some(n => !n.trim())) { alert('All four players must be selected.'); return; }
+    if (uniq(names).length !== 4) { alert('The same player is selected more than once in this match.'); return; }
+    const id = `${round}-manual-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+    setMatches(prev => [...prev, {
+      id, round, court,
+      t1p1: addBuffer.t1p1, t1p2: addBuffer.t1p2, t2p1: addBuffer.t2p1, t2p2: addBuffer.t2p2,
+      tag: null, scoreText: addBuffer.scoreText,
+    }]);
+    setOpen(prev => new Set(prev).add(round));
+    setShowAddMatch(false);
+  };
+  const addDupWarning = useMemo(() => {
+    const round = parseInt(addBuffer.round);
+    if (!round) return null;
+    const elsewhere = new Set(matches.filter(m => m.round === round).flatMap(m => [m.t1p1, m.t1p2, m.t2p1, m.t2p2]));
+    const dups = uniq([addBuffer.t1p1, addBuffer.t1p2, addBuffer.t2p1, addBuffer.t2p2].filter(n => n && elsewhere.has(n)));
+    return dups.length ? `Already playing elsewhere this round: ${dups.join(', ')}` : null;
+  }, [addBuffer, matches]);
+
   return (
     <section className="bg-white backdrop-blur rounded-2xl shadow-lg ring-1 ring-sky-200 p-6 border border-sky-100">
       <h2 className="text-[20px] font-bold text-sky-800 mb-2 tracking-tight">Matches & Results (Doubles)</h2>
       <div className="w-24 h-1 bg-sky-500 mx-auto rounded-full mb-4" />
+
+      {isAdmin && (
+        <div className="mb-4">
+          {!showAddMatch ? (
+            <button
+              className="px-3 py-1.5 rounded-lg border border-sky-300 text-sky-700 hover:bg-sky-50 text-[12px] font-medium"
+              onClick={openAddMatch}
+            >
+              + Add Match
+            </button>
+          ) : (
+            <div className="border border-sky-200 rounded-xl p-3 bg-sky-50/60 space-y-2">
+              <p className="text-[12px] font-semibold text-sky-800">
+                Record a match for a round that already happened — e.g. a make-up result for a player who arrived late.
+              </p>
+              <div className="flex flex-wrap items-center gap-2 text-[12px]">
+                <label className="flex items-center gap-1">
+                  Round
+                  <input
+                    type="number" min={1}
+                    className="w-16 border rounded px-2 py-1"
+                    value={addBuffer.round}
+                    onChange={(e) => setAddBuffer(prev => ({ ...prev, round: e.target.value }))}
+                  />
+                </label>
+                <label className="flex items-center gap-1">
+                  Court
+                  <input
+                    type="number" min={1}
+                    className="w-16 border rounded px-2 py-1"
+                    value={addBuffer.court}
+                    onChange={(e) => setAddBuffer(prev => ({ ...prev, court: e.target.value }))}
+                  />
+                </label>
+                <label className="flex items-center gap-1">
+                  Score
+                  <input
+                    type="text"
+                    placeholder={`to ${scoreSettings.playTo}`}
+                    className="w-24 border rounded px-2 py-1"
+                    value={addBuffer.scoreText}
+                    onChange={(e) => setAddBuffer(prev => ({ ...prev, scoreText: e.target.value }))}
+                  />
+                </label>
+              </div>
+              <div className="flex flex-wrap items-center gap-3 text-[12px]">
+                <div className="flex items-center gap-1">
+                  <span className="text-slate-500">Team 1:</span>
+                  <select className="border rounded px-1 py-1" value={addBuffer.t1p1} onChange={(e) => setAddBuffer(prev => ({ ...prev, t1p1: e.target.value }))}>
+                    <option value="">—</option>
+                    {rosterNames.map(n => <option key={n} value={n}>{n}</option>)}
+                  </select>
+                  <select className="border rounded px-1 py-1" value={addBuffer.t1p2} onChange={(e) => setAddBuffer(prev => ({ ...prev, t1p2: e.target.value }))}>
+                    <option value="">—</option>
+                    {rosterNames.map(n => <option key={n} value={n}>{n}</option>)}
+                  </select>
+                </div>
+                <div className="flex items-center gap-1">
+                  <span className="text-slate-500">Team 2:</span>
+                  <select className="border rounded px-1 py-1" value={addBuffer.t2p1} onChange={(e) => setAddBuffer(prev => ({ ...prev, t2p1: e.target.value }))}>
+                    <option value="">—</option>
+                    {rosterNames.map(n => <option key={n} value={n}>{n}</option>)}
+                  </select>
+                  <select className="border rounded px-1 py-1" value={addBuffer.t2p2} onChange={(e) => setAddBuffer(prev => ({ ...prev, t2p2: e.target.value }))}>
+                    <option value="">—</option>
+                    {rosterNames.map(n => <option key={n} value={n}>{n}</option>)}
+                  </select>
+                </div>
+              </div>
+              {addDupWarning && <p className="text-[11px] text-amber-700">{addDupWarning}</p>}
+              <div className="flex items-center gap-2">
+                <button className="px-3 py-1.5 rounded bg-emerald-600 text-white text-[12px] hover:bg-emerald-700" onClick={saveAddMatch}>
+                  Add Match
+                </button>
+                <button className="px-3 py-1.5 rounded border text-[12px]" onClick={cancelAddMatch}>
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       {rounds.length === 0 && (
         <p className="text-[13px] text-gray-600 max-w-lg mx-auto">
