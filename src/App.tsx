@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import type { MatchRow, TriplesMatchRow, BracketMatch, KobGameRow, ScoreSettings, MickeyTeam, MickeyMatchRow, RevcoMatchRow, RevcoBDRound } from './types';
-import { apiGetState, apiSaveState, apiSaveRevcoScore } from './api';
+import { apiGetState, apiSaveState, apiSaveRevcoScore, apiSaveDoublesScore } from './api';
 import { SunnyLogo } from './components/SunnyLogo';
 import { LineNumberTextarea } from './components/LinedTextarea';
 import { BracketView } from './components/BracketView';
@@ -43,10 +43,10 @@ type TabKey = SidebarTabKey;
 type DivisionKey = "UPPER" | "LOWER";
 type SectionKey = SidebarSection;
 
-type DivisionState<TMatch> = { guysText: string; girlsText: string; matches: TMatch[]; brackets: BracketMatch[] };
+type DivisionState<TMatch> = { guysText: string; girlsText: string; matches: TMatch[]; brackets: BracketMatch[]; scorerPin: string; publicScoring: boolean };
 
 function emptyDivisionState<TMatch>(): DivisionState<TMatch> {
-  return { guysText: "", girlsText: "", matches: [], brackets: [] };
+  return { guysText: "", girlsText: "", matches: [], brackets: [], scorerPin: "", publicScoring: false };
 }
 
 type MickeyDivisionState = {
@@ -246,6 +246,7 @@ export default function BlindDrawTourneyApp() {
   const [adminKey, setAdminKey] = useState<string>(() => { try { return sessionStorage.getItem("ADMIN_KEY") || ""; } catch { return ""; } });
   const isAdmin = !!adminKey;
   const [scorerEntry, setScorerEntry] = useState<string>(() => { try { return sessionStorage.getItem("RBD_SCORER_PIN") || ""; } catch { return ""; } });
+  const [dScorerEntry, setDScorerEntry] = useState<string>(() => { try { return sessionStorage.getItem("D_SCORER_PIN") || ""; } catch { return ""; } });
   const [loadingRemote, setLoadingRemote] = useState(true);
   const [remoteError, setRemoteError] = useState<string>("");
   const [adminKeyError, setAdminKeyError] = useState<string>("");
@@ -253,6 +254,8 @@ export default function BlindDrawTourneyApp() {
   const saveTimer = useRef<number | null>(null);
   const scoreCommitTimers = useRef<Map<string, number>>(new Map());
   const lastRevcoEditRef = useRef(0);
+  const scoreCommitTimersD = useRef<Map<string, number>>(new Map());
+  const lastDoublesEditRef = useRef(0);
   const [sessionId] = useState<string>(() => { try { let id = sessionStorage.getItem("SESSION_ID"); if (!id) { id = Math.random().toString(36).slice(2); sessionStorage.setItem("SESSION_ID", id); } return id; } catch { return Math.random().toString(36).slice(2); } });
 
   const [dUpper, setDUpper] = useState<DivisionState<MatchRow>>(emptyDivisionState<MatchRow>());
@@ -354,9 +357,9 @@ export default function BlindDrawTourneyApp() {
   // that stale snapshot and overwrite everyone else's newer data.
   function applyRemoteData(data: any) {
     if (!data) return;
-    if (data.doubles?.UPPER) setDUpper(data.doubles.UPPER); else setDUpper({ guysText: data.guysText || "", girlsText: data.girlsText || "", matches: Array.isArray(data.matches) ? data.matches : [], brackets: Array.isArray(data.brackets) ? data.brackets : [] });
-    if (data.doubles?.LOWER) setDLower(data.doubles.LOWER);
-    if (data.triples?.UPPER) setTUpper(data.triples.UPPER); else setTUpper({ guysText: data.tGuysText || "", girlsText: data.tGirlsText || "", matches: Array.isArray(data.tMatches) ? data.tMatches : [], brackets: Array.isArray(data.tBrackets) ? data.tBrackets : [] });
+    if (data.doubles?.UPPER) setDUpper({ ...emptyDivisionState<MatchRow>(), ...data.doubles.UPPER }); else setDUpper({ ...emptyDivisionState<MatchRow>(), guysText: data.guysText || "", girlsText: data.girlsText || "", matches: Array.isArray(data.matches) ? data.matches : [], brackets: Array.isArray(data.brackets) ? data.brackets : [] });
+    if (data.doubles?.LOWER) setDLower({ ...emptyDivisionState<MatchRow>(), ...data.doubles.LOWER });
+    if (data.triples?.UPPER) setTUpper(data.triples.UPPER); else setTUpper({ ...emptyDivisionState<TriplesMatchRow>(), guysText: data.tGuysText || "", girlsText: data.tGirlsText || "", matches: Array.isArray(data.tMatches) ? data.tMatches : [], brackets: Array.isArray(data.tBrackets) ? data.tBrackets : [] });
     if (data.triples?.LOWER) setTLower(data.triples.LOWER);
     if (data.kob?.UPPER) setKobUpper(data.kob.UPPER);
     if (data.kob?.LOWER) setKobLower(data.kob.LOWER);
@@ -401,8 +404,14 @@ export default function BlindDrawTourneyApp() {
       try {
         const remote: any = await apiGetState();
         if (!remote) return;
-        if (remote.doubles?.UPPER) setDUpper(remote.doubles.UPPER);
-        if (remote.doubles?.LOWER) setDLower(remote.doubles.LOWER);
+        // Skip right after a local score edit — otherwise a poll landing
+        // mid-keystroke (or just before our debounced save reaches the
+        // server) would visibly revert what was just typed.
+        const DOUBLES_EDIT_GRACE_MS = 1500;
+        if (Date.now() - lastDoublesEditRef.current >= DOUBLES_EDIT_GRACE_MS) {
+          if (remote.doubles?.UPPER) setDUpper({ ...emptyDivisionState<MatchRow>(), ...remote.doubles.UPPER });
+          if (remote.doubles?.LOWER) setDLower({ ...emptyDivisionState<MatchRow>(), ...remote.doubles.LOWER });
+        }
         if (remote.triples?.UPPER) setTUpper(remote.triples.UPPER);
         if (remote.triples?.LOWER) setTLower(remote.triples.LOWER);
         if (remote.kob?.UPPER) setKobUpper(remote.kob.UPPER);
@@ -476,6 +485,8 @@ export default function BlindDrawTourneyApp() {
   const setCurrentRBD = activeDivision === "UPPER" ? setRBDUpper : setRBDLower;
   const isScorer = !isAdmin && !!(currentRBD.scorerPin) && scorerEntry === currentRBD.scorerPin;
   const canScore = isAdmin || isScorer || !!(currentRBD.publicScoring);
+  const isDScorer = !isAdmin && !!(currentD.scorerPin) && dScorerEntry === currentD.scorerPin;
+  const canScoreD = isAdmin || isDScorer || !!(currentD.publicScoring);
 
   // Non-admin scorers (PIN or public scoring) can edit scores in the UI via
   // canScore, but the main autosave effect only ever saves for isAdmin — so
@@ -494,6 +505,26 @@ export default function BlindDrawTourneyApp() {
       timers.delete(matchId);
       try {
         await apiSaveRevcoScore(division, matchId, scoreText, scorerEntry);
+        setRemoteError("");
+      } catch (e: any) {
+        setRemoteError(e?.message || "Failed to save score");
+      }
+    }, 500);
+    timers.set(matchId, t);
+  };
+
+  // Same as handleScoreCommit, for the Doubles format.
+  const handleDoublesScoreCommit = (matchId: string, scoreText: string) => {
+    if (isAdmin) return;
+    lastDoublesEditRef.current = Date.now();
+    const division = activeDivision;
+    const timers = scoreCommitTimersD.current;
+    const existing = timers.get(matchId);
+    if (existing) window.clearTimeout(existing);
+    const t = window.setTimeout(async () => {
+      timers.delete(matchId);
+      try {
+        await apiSaveDoublesScore(division, matchId, scoreText, dScorerEntry);
         setRemoteError("");
       } catch (e: any) {
         setRemoteError(e?.message || "Failed to save score");
@@ -736,6 +767,10 @@ export default function BlindDrawTourneyApp() {
                 girlsText={currentD.girlsText}
                 matches={currentD.matches}
                 setMatches={(v: any) => setCurrentD(p => ({ ...p, matches: typeof v === 'function' ? v(p.matches) : v }))}
+                scorerPin={currentD.scorerPin ?? ''}
+                setScorerPin={(pin: string) => setCurrentD(p => ({ ...p, scorerPin: pin }))}
+                publicScoring={currentD.publicScoring ?? false}
+                setPublicScoring={(v: boolean) => setCurrentD(p => ({ ...p, publicScoring: v }))}
               />
             </fieldset>
           </>
@@ -744,13 +779,58 @@ export default function BlindDrawTourneyApp() {
       if (activeSection === 'POOLS') {
         return (
           <>
+            {!isAdmin && (currentD.publicScoring || (currentD.scorerPin ?? '') !== '') && (
+              <div className="bg-white/95 backdrop-blur rounded-xl shadow ring-1 ring-slate-200 p-4">
+                {currentD.publicScoring ? (
+                  <span className="text-[13px] text-emerald-700 font-semibold">
+                    Score entry is open — tap any score field to enter results.
+                  </span>
+                ) : isDScorer ? (
+                  <div className="flex items-center justify-between gap-2 flex-wrap">
+                    <span className="text-[13px] text-emerald-700 font-semibold">
+                      ✓ Score entry unlocked — enter match results below.
+                    </span>
+                    <button
+                      className="text-[11px] text-slate-500 hover:text-slate-700 underline"
+                      onClick={() => { setDScorerEntry(''); try { sessionStorage.removeItem("D_SCORER_PIN"); } catch {} }}
+                    >
+                      Lock
+                    </button>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    <p className="text-[13px] font-semibold text-sky-800">Players: enter your scorer code to submit match results.</p>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <input
+                        type="text"
+                        placeholder="Scorer code"
+                        className="border border-slate-300 rounded px-2 py-1.5 text-[13px] w-40 focus:ring-1 focus:ring-sky-400 focus:border-sky-400 outline-none"
+                        value={dScorerEntry}
+                        onChange={e => setDScorerEntry(e.target.value)}
+                        onKeyDown={e => { if (e.key === 'Enter') { try { sessionStorage.setItem("D_SCORER_PIN", dScorerEntry); } catch {} } }}
+                      />
+                      <button
+                        className="px-3 py-1.5 rounded bg-sky-600 text-white text-[13px] hover:bg-sky-700 font-medium"
+                        onClick={() => { try { sessionStorage.setItem("D_SCORER_PIN", dScorerEntry); } catch {} }}
+                      >
+                        Unlock
+                      </button>
+                      {dScorerEntry.trim() !== '' && dScorerEntry !== currentD.scorerPin && (
+                        <span className="text-[12px] text-red-600 font-medium">Incorrect — check with the director.</span>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
             <MatchesView
               matches={currentD.matches}
               setMatches={(v: any) => setCurrentD(p => ({ ...p, matches: typeof v === 'function' ? v(p.matches) : v }))}
-              isAdmin={isAdmin}
+              isAdmin={canScoreD}
               scoreSettings={dScoreSettings}
               guysText={currentD.guysText}
               girlsText={currentD.girlsText}
+              onScoreCommit={handleDoublesScoreCommit}
             />
             <Leaderboard
               matches={currentD.matches}

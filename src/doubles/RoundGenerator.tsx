@@ -168,11 +168,19 @@ export function RoundGenerator({
   girlsText,
   matches,
   setMatches,
+  scorerPin,
+  setScorerPin,
+  publicScoring,
+  setPublicScoring,
 }: {
   guysText: string;
   girlsText: string;
   matches: MatchRow[];
   setMatches: (f: (prev: MatchRow[]) => MatchRow[] | MatchRow[]) => void;
+  scorerPin: string;
+  setScorerPin: (pin: string) => void;
+  publicScoring: boolean;
+  setPublicScoring: (v: boolean) => void;
 }) {
   const [strict, setStrict] = useState(true);
   const [roundsToGen, setRoundsToGen] = useState(1);
@@ -961,6 +969,37 @@ export function RoundGenerator({
         opponents, and repeated court assignments when possible.
         Back-to-back same-gender rounds are strongly avoided and counts are balanced across all players.
       </p>
+
+      <div className="flex items-center gap-3 flex-wrap text-[12px] text-slate-600 mt-3 pt-3 border-t border-slate-200">
+        <label className="flex items-center gap-2 cursor-pointer select-none">
+          <input
+            type="checkbox"
+            checked={publicScoring}
+            onChange={(e) => setPublicScoring(e.target.checked)}
+            className="w-4 h-4 accent-sky-600"
+          />
+          <span className="font-medium">Open score entry</span>
+          <span className="text-[11px] text-slate-400">— anyone with the link can enter scores, no code needed.</span>
+        </label>
+      </div>
+
+      {!publicScoring && (
+        <div className="flex items-center gap-3 flex-wrap text-[12px] text-slate-600 mt-2">
+          <label className="flex items-center gap-1.5">
+            Or use a scorer code:
+            <input
+              type="text"
+              value={scorerPin}
+              onChange={(e) => setScorerPin(e.target.value.trim())}
+              placeholder="leave blank to disable"
+              className="border border-slate-300 rounded px-2 py-1 text-[12px] w-40 font-mono"
+            />
+          </label>
+          <span className="text-[11px] text-slate-400">
+            {scorerPin ? 'Share this with players so they can unlock score entry.' : 'Set a code if you want to limit who can score.'}
+          </span>
+        </div>
+      )}
 
       {sgStats.hasAny && (
         <div className="mt-4 border-t border-slate-200 pt-3">

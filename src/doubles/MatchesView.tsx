@@ -9,6 +9,7 @@ export function MatchesView({
   scoreSettings = { playTo: 21, cap: null },
   guysText = '',
   girlsText = '',
+  onScoreCommit,
 }: {
   matches: MatchRow[];
   setMatches: (f: (prev: MatchRow[]) => MatchRow[] | MatchRow[]) => void;
@@ -16,6 +17,10 @@ export function MatchesView({
   scoreSettings?: ScoreSettings;
   guysText?: string;
   girlsText?: string;
+  // Called with the final scoreText whenever a score changes — used by
+  // non-admin scorers to save just that match, since their edits otherwise
+  // never leave their own browser (the main autosave only runs for admins).
+  onScoreCommit?: (matchId: string, scoreText: string) => void;
 }) {
   // A match's own tag ("a.tag || b.tag || null") can't tell you WHICH team
   // is actually same-gender — a mixed team simply matched against an
@@ -62,7 +67,10 @@ export function MatchesView({
     if (rounds.length) setOpen(new Set([liveRound ?? rounds[rounds.length - 1]]));
   }, [matches.length]);
 
-  const update = (id: string, patch: Partial<MatchRow>) => setMatches(prev => prev.map(m => m.id === id ? { ...m, ...patch } : m));
+  const update = (id: string, patch: Partial<MatchRow>) => {
+    setMatches(prev => prev.map(m => m.id === id ? { ...m, ...patch } : m));
+    if (patch.scoreText !== undefined) onScoreCommit?.(id, patch.scoreText);
+  };
   const requestDelete = (round: number) => { setConfirmR(round); };
   const doDelete = (round: number) => { setMatches(prev => prev.filter(m => m.round !== round)); setConfirmR(null); };
 

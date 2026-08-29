@@ -48,3 +48,18 @@ export async function apiSaveRevcoScore(
   });
   if (!res.ok) throw new Error(`POST /api/revco-score failed (${res.status})`);
 }
+
+// Same as apiSaveRevcoScore, for the Doubles format.
+export async function apiSaveDoublesScore(
+  division: "UPPER" | "LOWER",
+  matchId: string,
+  scoreText: string,
+  scorerPin: string,
+): Promise<void> {
+  const res = await fetch("/api/doubles-score", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ division, matchId, scoreText, scorerPin }),
+  });
+  if (!res.ok) throw new Error(`POST /api/doubles-score failed (${res.status})`);
+}
