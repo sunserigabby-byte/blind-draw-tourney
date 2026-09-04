@@ -162,6 +162,35 @@ export function MatchesView({
     return dups.length ? `Already playing elsewhere this round: ${dups.join(', ')}` : null;
   }, [addBuffer, matches]);
 
+  // Shared per-match display values, used by both the desktop table and the
+  // mobile card list so the two views can't drift out of sync with each other.
+  const computeMatchDisplay = (m: MatchRow) => {
+    const parsed = parseScore(m.scoreText);
+    const scored = parsed && parsed[0] !== parsed[1];
+    const matchesRules = parsed ? isValidScore(parsed[0], parsed[1], scoreSettings) : false;
+    const valid = !m.scoreText || matchesRules;
+    const warning = scored && !matchesRules;
+    const t1Win = scored ? parsed![0] > parsed![1] : null;
+    const t1IsUR = guysSet.has(slug(m.t1p1)) && guysSet.has(slug(m.t1p2));
+    const t1IsPP = girlsSet.has(slug(m.t1p1)) && girlsSet.has(slug(m.t1p2));
+    const t2IsUR = guysSet.has(slug(m.t2p1)) && guysSet.has(slug(m.t2p2));
+    const t2IsPP = girlsSet.has(slug(m.t2p1)) && girlsSet.has(slug(m.t2p2));
+    return { parsed, scored, matchesRules, valid, warning, t1Win, t1IsUR, t1IsPP, t2IsUR, t2IsPP };
+  };
+
+  // Shared team-edit dropdown, used by both the desktop table and mobile
+  // cards — doesn't depend on which match, only on the shared edit buffer.
+  const playerSelect = (slot: 't1p1' | 't1p2' | 't2p1' | 't2p2') => (
+    <select
+      className="border border-slate-300 rounded px-1 py-1 text-[12px] bg-white"
+      value={editBuffer?.[slot] ?? ''}
+      onChange={(e) => setEditBuffer(prev => prev ? { ...prev, [slot]: e.target.value } : prev)}
+    >
+      <option value="">—</option>
+      {rosterNames.map(n => <option key={n} value={n}>{n}</option>)}
+    </select>
+  );
+
   return (
     <section className="bg-white backdrop-blur rounded-2xl shadow-lg ring-1 ring-sky-200 p-6 border border-sky-100">
       <h2 className="text-[20px] font-bold text-sky-800 mb-2 tracking-tight">Matches & Results (Doubles)</h2>
@@ -262,6 +291,7 @@ export function MatchesView({
           const { total, scored } = roundStats.get(r) ?? { total: 0, scored: 0 };
           const allDone = total > 0 && scored === total;
           const isLive = r === liveRound;
+          const roundMatches = matches.filter(m => m.round === r).sort((a, b) => a.court - b.court);
 
           return (
             <div key={r} className={`border rounded-xl overflow-hidden shadow-sm bg-white ${isLive ? 'ring-2 ring-sky-400' : ''}`}>
@@ -332,7 +362,8 @@ export function MatchesView({
               )}
 
               {open.has(r) && (
-                <div className="overflow-x-auto">
+                <>
+                <div className="hidden sm:block overflow-x-auto">
                   <table className="min-w-full text-[13px]">
                     <thead className="sticky top-0 bg-white/90 backdrop-blur">
                       <tr className="text-left text-slate-600">
@@ -344,30 +375,9 @@ export function MatchesView({
                       </tr>
                     </thead>
                     <tbody>
-                      {matches.filter(m => m.round === r).sort((a, b) => a.court - b.court).map((m, idx) => {
-                        const parsed = parseScore(m.scoreText);
-                        const scored = parsed && parsed[0] !== parsed[1];
-                        const matchesRules = parsed ? isValidScore(parsed[0], parsed[1], scoreSettings) : false;
-                        const valid = !m.scoreText || matchesRules;
-                        const warning = scored && !matchesRules;
-                        const t1Win = scored ? parsed![0] > parsed![1] : null;
-
-                        const t1IsUR = guysSet.has(slug(m.t1p1)) && guysSet.has(slug(m.t1p2));
-                        const t1IsPP = girlsSet.has(slug(m.t1p1)) && girlsSet.has(slug(m.t1p2));
-                        const t2IsUR = guysSet.has(slug(m.t2p1)) && guysSet.has(slug(m.t2p2));
-                        const t2IsPP = girlsSet.has(slug(m.t2p1)) && girlsSet.has(slug(m.t2p2));
+                      {roundMatches.map((m, idx) => {
+                        const { parsed, scored, valid, warning, t1Win, t1IsUR, t1IsPP, t2IsUR, t2IsPP } = computeMatchDisplay(m);
                         const isEditingRow = editingMatchId === m.id;
-
-                        const playerSelect = (slot: 't1p1' | 't1p2' | 't2p1' | 't2p2') => (
-                          <select
-                            className="border border-slate-300 rounded px-1 py-1 text-[12px] bg-white"
-                            value={editBuffer?.[slot] ?? ''}
-                            onChange={(e) => setEditBuffer(prev => prev ? { ...prev, [slot]: e.target.value } : prev)}
-                          >
-                            <option value="">—</option>
-                            {rosterNames.map(n => <option key={n} value={n}>{n}</option>)}
-                          </select>
-                        );
 
                         return (
                           <tr
@@ -479,6 +489,101 @@ export function MatchesView({
                     </tbody>
                   </table>
                 </div>
+
+                <div className="sm:hidden divide-y divide-slate-100">
+                  {roundMatches.map((m) => {
+                    const { valid, warning, t1Win, t1IsUR, t1IsPP, t2IsUR, t2IsPP } = computeMatchDisplay(m);
+                    const isEditingRow = editingMatchId === m.id;
+                    return (
+                      <div
+                        key={m.id}
+                        className={
+                          "p-3 space-y-2 " +
+                          (m.tag === 'ULTIMATE_REVCO' ? 'bg-blue-50/40' : m.tag === 'POWER_PUFF' ? 'bg-pink-50/40' : '')
+                        }
+                      >
+                        <div className="flex items-center justify-between">
+                          <span className="text-[11px] font-semibold text-slate-500">Court {m.court}</span>
+                          {isAdmin && !isEditingRow && (
+                            <button
+                              className="text-[11px] px-2 py-0.5 rounded border text-slate-700 hover:bg-slate-50"
+                              onClick={() => startEditingTeams(m)}
+                            >
+                              Edit teams
+                            </button>
+                          )}
+                        </div>
+
+                        {isEditingRow ? (
+                          <div className="space-y-2">
+                            <div className="flex items-center gap-1">
+                              {playerSelect('t1p1')}
+                              {playerSelect('t1p2')}
+                            </div>
+                            <div className="text-center text-[11px] text-slate-400">vs</div>
+                            <div className="flex items-center gap-1">
+                              {playerSelect('t2p1')}
+                              {playerSelect('t2p2')}
+                            </div>
+                            {editDupWarning && <p className="text-[11px] text-amber-700">{editDupWarning}</p>}
+                            <div className="flex items-center gap-2">
+                              <button className="px-3 py-1.5 rounded bg-emerald-600 text-white text-[12px] hover:bg-emerald-700" onClick={saveEditingTeams}>
+                                Save
+                              </button>
+                              <button className="px-3 py-1.5 rounded border text-[12px]" onClick={cancelEditingTeams}>
+                                Cancel
+                              </button>
+                            </div>
+                          </div>
+                        ) : (
+                          <>
+                            <div className={`flex flex-wrap items-center gap-2 rounded px-2 py-1.5 ${t1Win === true ? 'bg-emerald-50' : ''}`}>
+                              {t1IsUR && (
+                                <span className="inline-block text-[10px] px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 ring-1 ring-blue-200">
+                                  Ultimate Revco
+                                </span>
+                              )}
+                              {t1IsPP && (
+                                <span className="inline-block text-[10px] px-2 py-0.5 rounded-full bg-pink-100 text-pink-700 ring-1 ring-pink-200">
+                                  Power Puff
+                                </span>
+                              )}
+                              <span className="text-[14px] font-medium">{m.t1p1} &amp; {m.t1p2}</span>
+                            </div>
+                            <div className="text-center text-[11px] text-slate-400">vs</div>
+                            <div className={`flex flex-wrap items-center gap-2 rounded px-2 py-1.5 ${t1Win === false ? 'bg-emerald-50' : ''}`}>
+                              {t2IsUR && (
+                                <span className="inline-block text-[10px] px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 ring-1 ring-blue-200">
+                                  Ultimate Revco
+                                </span>
+                              )}
+                              {t2IsPP && (
+                                <span className="inline-block text-[10px] px-2 py-0.5 rounded-full bg-pink-100 text-pink-700 ring-1 ring-pink-200">
+                                  Power Puff
+                                </span>
+                              )}
+                              <span className="text-[14px] font-medium">{m.t2p1} &amp; {m.t2p2}</span>
+                            </div>
+                          </>
+                        )}
+
+                        <input
+                          className={
+                            "w-full border rounded px-3 py-2.5 text-[16px] text-center " +
+                            (warning ? 'border-amber-400 bg-amber-50' : valid ? 'border-slate-300' : 'border-red-500 bg-red-50')
+                          }
+                          value={m.scoreText || ''}
+                          onChange={(e) => update(m.id, { scoreText: e.target.value })}
+                          placeholder={`to ${scoreSettings.playTo}${scoreSettings.cap ? ', cap ' + scoreSettings.cap : ''}`}
+                          title={warning ? `Score doesn't match current rules (play to ${scoreSettings.playTo}${scoreSettings.cap ? ', cap ' + scoreSettings.cap : ', no cap'})` : ''}
+                          disabled={!canScoreResolved}
+                          inputMode="numeric"
+                        />
+                      </div>
+                    );
+                  })}
+                </div>
+                </>
               )}
             </div>
           );
