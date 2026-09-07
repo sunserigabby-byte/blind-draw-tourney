@@ -765,6 +765,7 @@ export default function BlindDrawTourneyApp() {
                 </div>
               </section>
               <RoundGenerator
+                key={activeDivision}
                 guysText={currentD.guysText}
                 girlsText={currentD.girlsText}
                 matches={currentD.matches}
@@ -826,6 +827,7 @@ export default function BlindDrawTourneyApp() {
               </div>
             )}
             <MatchesView
+              key={activeDivision}
               matches={currentD.matches}
               setMatches={(v: any) => setCurrentD(p => ({ ...p, matches: typeof v === 'function' ? v(p.matches) : v }))}
               isAdmin={isAdmin}
@@ -836,6 +838,7 @@ export default function BlindDrawTourneyApp() {
               onScoreCommit={handleDoublesScoreCommit}
             />
             <Leaderboard
+              key={activeDivision}
               matches={currentD.matches}
               guysText={currentD.guysText}
               girlsText={currentD.girlsText}
@@ -847,6 +850,7 @@ export default function BlindDrawTourneyApp() {
               isAdmin={isAdmin}
             />
             <DoublesFairnessReport
+              key={activeDivision}
               matches={currentD.matches}
               guysText={currentD.guysText}
               girlsText={currentD.girlsText}
@@ -858,6 +862,7 @@ export default function BlindDrawTourneyApp() {
         return (
           <>
             <StandingsCompact
+              key={activeDivision}
               matches={currentD.matches}
               guysText={currentD.guysText}
               girlsText={currentD.girlsText}
@@ -866,6 +871,7 @@ export default function BlindDrawTourneyApp() {
             />
             <fieldset disabled={!isAdmin} className={!isAdmin ? "opacity-95" : ""}>
               <PlayoffBuilder
+                key={activeDivision}
                 matches={currentD.matches}
                 guysText={currentD.guysText}
                 girlsText={currentD.girlsText}
@@ -880,6 +886,7 @@ export default function BlindDrawTourneyApp() {
               />
             </fieldset>
             <DoublesBracketView
+              key={activeDivision}
               brackets={currentD.brackets}
               setBrackets={(v: any) => setCurrentD(p => ({ ...p, brackets: typeof v === 'function' ? v(p.brackets) : v }))}
               isAdmin={isAdmin}
