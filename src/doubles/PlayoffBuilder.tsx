@@ -37,6 +37,8 @@ export function PlayoffBuilder({
   const [upperK, setUpperK] = useState<number>(Math.ceil(Math.max(1, guysRows.length) / 2));
   const [seedRandom, setSeedRandom] = useState<boolean>(true);
   const [groupSize, setGroupSize] = useState<number>(2);
+  // null = auto (scaled to the guy:girl roster ratio); a number overrides it.
+  const [guysGroupSize, setGuysGroupSize] = useState<number | null>(null);
   const [rrRandomize, setRrRandomize] = useState<boolean>(false);
   const [confirmMode, setConfirmMode] = useState<'main' | 'rr' | null>(null);
   const [editTeams, setEditTeams] = useState<EditTeam[]>([]);
@@ -114,20 +116,23 @@ export function PlayoffBuilder({
 
     const teams: Team[] = [];
 
-    // "Pairing window" sets the girls-side window; the guys-side window is
-    // scaled to match the actual guy:girl ratio in this slice (e.g. 16
-    // guys : 8 girls -> a window of 2 girls pulls in 4 guys), so each
-    // window mirrors the roster proportionally instead of pairing 1-for-1
-    // and dumping every excess guy into one leftover pool at the end.
-    // Within a window, ALL of that window's guys are shuffled together and
-    // the first N (girls-window-size) are randomly paired with the
-    // (also-shuffled) girls; whichever guys are left over form an Ultimate
-    // Revco team from that same window — so which specific guys get a
-    // mixed slot vs. an Ultimate Revco slot is randomized every time, not
-    // just who partners whom.
+    // "Girls per pairing window" sets the girls-side window size directly.
+    // The guys-side window defaults to auto (scaled to match the actual
+    // guy:girl ratio in this slice, e.g. 16 guys : 8 girls -> a window of 2
+    // girls pulls in 4 guys) but can be set manually instead via "Guys per
+    // pairing window". Within a window, ALL of that window's guys are
+    // shuffled together and the first N (girls-window-size) are randomly
+    // paired with the (also-shuffled) girls; whichever guys are left over
+    // form an Ultimate Revco team from that same window — so which
+    // specific guys get a mixed slot vs. an Ultimate Revco slot is
+    // randomized every rebuild, not just who partners whom. Smaller
+    // windows mean tighter rank-matching but less visible variety between
+    // rebuilds, since only players within the same window ever get
+    // reshuffled among each other.
     const girlsWindowSize = Math.max(1, groupSize);
     const ratio = h.length > 0 ? g.length / h.length : 1;
-    const guysWindowSize = Math.max(girlsWindowSize, Math.round(girlsWindowSize * ratio));
+    const autoGuysWindowSize = Math.max(girlsWindowSize, Math.round(girlsWindowSize * ratio));
+    const guysWindowSize = guysGroupSize && guysGroupSize > 0 ? guysGroupSize : autoGuysWindowSize;
     const leftoverWindowSize = Math.max(2, Math.abs(guysWindowSize - girlsWindowSize));
 
     let guyBase = 0, girlBase = 0;
@@ -470,9 +475,22 @@ export function PlayoffBuilder({
             onChange={(e) => setGroupSize(clampN(+e.target.value || 1, 1))}
           />
         </label>
+        <label className="flex items-center gap-2">
+          Guys per pairing window
+          <input
+            className="w-16 border rounded px-2 py-1"
+            type="number"
+            min={1}
+            placeholder={String(Math.max(groupSize, Math.round(groupSize * (girlsRows.length > 0 ? guysRows.length / girlsRows.length : 1))))}
+            value={guysGroupSize ?? ''}
+            onChange={(e) => setGuysGroupSize(e.target.value === '' ? null : clampN(+e.target.value || 1, 1))}
+          />
+        </label>
         <span className="text-[11px] text-slate-500">
-          → {Math.max(groupSize, Math.round(groupSize * (girlsRows.length > 0 ? guysRows.length / girlsRows.length : 1)))} guys per window
-          (matches your {guysRows.length}:{girlsRows.length} roster ratio), randomly split into mixed teams + an Ultimate Revco team from the leftover guys
+          {guysGroupSize
+            ? `Manually set — with your ${guysRows.length}:${girlsRows.length} roster this would auto-compute to ${Math.max(groupSize, Math.round(groupSize * (girlsRows.length > 0 ? guysRows.length / girlsRows.length : 1)))}.`
+            : `Auto (blank = matches your ${guysRows.length}:${girlsRows.length} roster ratio).`}
+          {' '}Each window is randomly split into mixed teams + an Ultimate Revco team from the leftover guys.
         </span>
 
         {splitBracket && (
