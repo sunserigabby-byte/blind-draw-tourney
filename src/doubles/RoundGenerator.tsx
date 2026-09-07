@@ -545,6 +545,51 @@ export function RoundGenerator({
     return shuffle(tied)[0];
   }
 
+  // How many guys need to sit out so team formation (mixed pairs + same-
+  // gender pairs) comes out perfectly even, with no unpaired individual and
+  // no leftover odd team. Purely a function of the guy/girl counts — safe
+  // to compute before any random assignment happens.
+  function computeSitOutCount(guysCount: number, girlsCount: number): number {
+    for (let n = 0; n <= guysCount; n++) {
+      const g = guysCount - n;
+      const mixedCount = Math.min(g, girlsCount);
+      const leftoverGuys = g - mixedCount;
+      const leftoverGirls = girlsCount - mixedCount;
+      if (leftoverGuys % 2 !== 0 || leftoverGirls % 2 !== 0) continue;
+      const teamCount = mixedCount + leftoverGuys / 2 + leftoverGirls / 2;
+      if (teamCount % 2 === 0) return n;
+    }
+    return 0; // Shouldn't happen, but never block round generation over it.
+  }
+
+  // Picks `count` sit-outs from the FULL available roster's sit-out
+  // history, not just whoever ends up in a leftover/same-gender pool once
+  // random assignment happens — that pool is itself driven by a separate,
+  // unrelated role-fairness system (mixed vs. Ultimate Revco priority), so
+  // limiting sit-out eligibility to it let players who'd never sat go
+  // uncounted for rounds at a time just because they kept landing on mixed
+  // teams, while someone who'd already sat could be picked again purely
+  // from bad luck in which pool they landed in that round.
+  function chooseSitOuts(
+    guysPool: string[],
+    girlsPool: string[],
+    count: number,
+    stats: ReturnType<typeof buildPlayerUsageStats>,
+    roundIdx: number,
+  ): string[] {
+    const chosen: string[] = [];
+    let remainingGuys = [...guysPool];
+    let remainingGirls = [...girlsPool];
+    for (let i = 0; i < count; i++) {
+      const pick = chooseSingleSitOut([...remainingGuys, ...remainingGirls], stats, roundIdx, remainingGuys, remainingGirls);
+      if (!pick) break;
+      chosen.push(pick);
+      remainingGuys = remainingGuys.filter(p => p !== pick);
+      remainingGirls = remainingGirls.filter(p => p !== pick);
+    }
+    return chosen;
+  }
+
   function chooseByeTeamIndex(
     teams: TeamBuild[],
     stats: ReturnType<typeof buildPlayerUsageStats>,
@@ -591,21 +636,13 @@ export function RoundGenerator({
     let availableGuys = guys.filter(p => !heldOut.has(slug(p)));
     let availableGirls = girls.filter(p => !heldOut.has(slug(p)));
 
-    if ((availableGuys.length + availableGirls.length) % 2 === 1) {
-      const singleSit = chooseSingleSitOut(
-        [...availableGuys, ...availableGirls],
-        stats,
-        roundIdx,
-        availableGuys,
-        availableGirls
-      );
-      sitOuts.push(singleSit);
-
-      if (availableGuys.includes(singleSit)) {
-        availableGuys = availableGuys.filter((p) => p !== singleSit);
-      } else {
-        availableGirls = availableGirls.filter((p) => p !== singleSit);
-      }
+    const sitOutCount = computeSitOutCount(availableGuys.length, availableGirls.length);
+    if (sitOutCount > 0) {
+      const chosen = chooseSitOuts(availableGuys, availableGirls, sitOutCount, stats, roundIdx);
+      sitOuts.push(...chosen);
+      const chosenSet = new Set(chosen);
+      availableGuys = availableGuys.filter((p) => !chosenSet.has(p));
+      availableGirls = availableGirls.filter((p) => !chosenSet.has(p));
     }
 
     const shuffledGuys = shuffle(availableGuys, seedNum);
@@ -708,12 +745,25 @@ export function RoundGenerator({
       roundIdx
     );
 
+    // Defense-in-depth: makeSameGenderTeams returns any single unpaired
+    // leftover instead of silently dropping them from the round. With
+    // sit-out counts now computed up front (via computeSitOutCount) this
+    // shouldn't happen, but if it ever does, treat it as an emergency
+    // sit-out rather than letting a player vanish with no record at all.
+    if (guyTeamsBuilt.leftovers.length) sitOuts.push(...guyTeamsBuilt.leftovers);
+    if (girlTeamsBuilt.leftovers.length) sitOuts.push(...girlTeamsBuilt.leftovers);
+
     const allTeams: TeamBuild[] = [
       ...mixedBuilt.mixed,
       ...guyTeamsBuilt.teams,
       ...girlTeamsBuilt.teams,
     ];
 
+    // Defense-in-depth fallback — with sit-outs now decided up front from
+    // the full roster, allTeams.length should already be even and this
+    // should never fire. Left in case an edge case in computeSitOutCount
+    // slips through, so a round still completes cleanly rather than
+    // erroring out.
     if (allTeams.length % 2 === 1) {
       const byeIdx = chooseByeTeamIndex(allTeams, stats, roundIdx);
       const byeTeam = allTeams.splice(byeIdx, 1)[0];
