@@ -40,6 +40,11 @@ export function PlayoffBuilder({
   // null = auto (scaled to the guy:girl roster ratio); a number overrides it.
   const [guysGroupSize, setGuysGroupSize] = useState<number | null>(null);
   const [rrRandomize, setRrRandomize] = useState<boolean>(false);
+  // Players who lost their first-round match but don't want to play
+  // Redemption Rally — their former partner (if still opted in) gets
+  // re-paired with someone else instead of being dropped along with them.
+  const [rrPicker, setRrPicker] = useState<boolean>(false);
+  const [rrExcluded, setRrExcluded] = useState<Set<string>>(new Set());
   const [confirmMode, setConfirmMode] = useState<'main' | 'rr' | null>(null);
   const [editTeams, setEditTeams] = useState<EditTeam[]>([]);
   const [editMode, setEditMode] = useState<'main' | 'rr' | null>(null);
@@ -387,6 +392,53 @@ export function PlayoffBuilder({
     return rrTeams;
   }
 
+  // Same as rerandomizeRrTeams, but respects individual opt-outs: a losing
+  // team where BOTH players opted in keeps its original partnership
+  // (unless "RR re-randomize partners" is on, which reshuffles everyone
+  // regardless); a player who opted in but whose partner opted out becomes
+  // an "orphan" and gets randomly paired with another orphan instead of
+  // being dropped along with their former partner.
+  function buildRRTeamsFromLosers(losers: Team[], excluded: Set<string>): Team[] {
+    const gStats = new Map(guysRows.map(r => [r.name, r] as const));
+    const hStats = new Map(girlsRows.map(r => [r.name, r] as const));
+
+    const keptTeams: Team[] = [];
+    const orphans: string[] = [];
+
+    for (const t of losers) {
+      const remaining = t.members.filter(m => m && !excluded.has(m));
+      if (remaining.length === 2 && !rrRandomize) {
+        keptTeams.push(t);
+      } else {
+        orphans.push(...remaining);
+      }
+    }
+
+    const orphanGuys = shuffle(orphans.filter(n => gStats.has(n)));
+    const orphanGirls = shuffle(orphans.filter(n => hStats.has(n)));
+    const K = Math.min(orphanGuys.length, orphanGirls.length);
+
+    const newTeams: Team[] = [];
+    for (let i = 0; i < K; i++) {
+      const members = [orphanGuys[i], orphanGirls[i]];
+      const name = members.join(' & ');
+      newTeams.push({ id: `RR-new-${i + 1}-${slug(name)}`, name, members, seed: 0, division: 'RR' });
+    }
+
+    const allTeams = [...keptTeams, ...newTeams];
+    allTeams.sort((A, B) => {
+      const sA = scoreTeam(A.members, gStats, hStats);
+      const sB = scoreTeam(B.members, gStats, hStats);
+      return (sB.W - sA.W) || (sB.PD - sA.PD) || A.name.localeCompare(B.name);
+    });
+    allTeams.forEach((t, i) => {
+      t.seed = i + 1;
+      t.id = `RR-${i + 1}-${slug(t.name)}`;
+    });
+
+    return allTeams;
+  }
+
   function buildRedemptionRally() {
     setBrackets(prev => {
       const mainOnly = prev.filter(b => b.division !== 'RR');
@@ -400,9 +452,9 @@ export function PlayoffBuilder({
         return prev;
       }
 
-      const rrTeams = rerandomizeRrTeams(losers);
+      const rrTeams = buildRRTeamsFromLosers(losers, rrExcluded);
       if (rrTeams.length < 2) {
-        alert("Not enough valid RR teams could be formed.");
+        alert("Not enough players opted in to build Redemption Rally.");
         return prev;
       }
 
@@ -410,13 +462,38 @@ export function PlayoffBuilder({
       return [...nonRr, ...rrBracket];
     });
     setConfirmMode(null);
+    setRrPicker(false);
     setEditTeams([]);
     setEditMode(null);
   }
 
+  // Eligible losers for the picker UI — recomputed live as brackets/settings
+  // change, so the checklist always reflects who's actually lost so far.
+  const rrCandidates = useMemo(() => {
+    const mainOnly = brackets.filter(b => b.division !== 'RR');
+    const includeDivs: PlayDiv[] = splitBracket ? ['UPPER', 'LOWER'] : [baseDivision];
+    return collectLosersForRR(mainOnly, includeDivs);
+  }, [brackets, splitBracket, baseDivision]);
+  const rrCandidatePlayers = useMemo(
+    () => uniq(rrCandidates.flatMap(t => t.members).filter(Boolean)),
+    [rrCandidates],
+  );
+
   function onClickBuildRedemptionRally() {
+    setRrExcluded(new Set());
+    setRrPicker(true);
+  }
+  function confirmRrPicker() {
+    setRrPicker(false);
     if (hasRR) setConfirmMode('rr');
     else buildRedemptionRally();
+  }
+  function toggleRrExcluded(name: string) {
+    setRrExcluded(prev => {
+      const next = new Set(prev);
+      if (next.has(name)) next.delete(name); else next.add(name);
+      return next;
+    });
   }
 
   function prepareRRToEdit() {
@@ -547,6 +624,44 @@ export function PlayoffBuilder({
           Prepare RR Teams to Edit…
         </button>
       </div>
+
+      {rrPicker && (
+        <div className="bg-indigo-50 border border-indigo-200 rounded-lg p-3 mt-3 text-[12px] space-y-2">
+          <p className="text-indigo-900 font-medium">
+            Who's playing Redemption Rally? Uncheck anyone sitting it out — if their partner is still
+            checked in, that player gets randomly paired with someone else in the same situation instead
+            of being dropped.
+          </p>
+          {rrCandidatePlayers.length === 0 ? (
+            <p className="text-slate-500">No eligible losers yet — finish some Round 1/2 matches first.</p>
+          ) : (
+            <div className="grid sm:grid-cols-3 gap-x-4 gap-y-1 max-h-64 overflow-y-auto">
+              {rrCandidatePlayers.map(name => (
+                <label key={name} className="flex items-center gap-1.5 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={!rrExcluded.has(name)}
+                    onChange={() => toggleRrExcluded(name)}
+                  />
+                  <span className={rrExcluded.has(name) ? 'text-slate-400 line-through' : 'text-slate-800'}>{name}</span>
+                </label>
+              ))}
+            </div>
+          )}
+          <div className="flex items-center gap-2 pt-1">
+            <button
+              className="px-3 py-1.5 rounded bg-indigo-600 text-white text-[12px] hover:bg-indigo-700"
+              onClick={confirmRrPicker}
+              disabled={rrCandidatePlayers.length === 0}
+            >
+              Build Redemption Rally
+            </button>
+            <button className="px-3 py-1.5 rounded border text-[12px]" onClick={() => setRrPicker(false)}>
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
 
       {confirmMode && (
         <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 mt-3 flex items-center justify-between gap-3 text-[12px]">
