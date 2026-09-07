@@ -100,16 +100,7 @@ export function buildVisualColumns(brackets: BracketMatch[], division: PlayDiv) 
   const cols: BracketMatch[][] = [];
 
   for (let r = 1; r <= maxRound; r++) {
-    let col = list.filter(b => b.round === r).sort((a, b) => a.slot - b.slot);
-
-    if (r === 1) {
-      col = col.filter(m => {
-        const onlyOneTeam = (!!m.team1 && !m.team2) || (!m.team1 && !!m.team2);
-        const isBye = m.score === 'BYE';
-        return !(onlyOneTeam && isBye);
-      });
-    }
-
+    const col = list.filter(b => b.round === r).sort((a, b) => a.slot - b.slot);
     cols.push(col);
   }
 
