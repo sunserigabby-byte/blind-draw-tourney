@@ -177,7 +177,7 @@ export function Leaderboard({
               <th className="py-1 px-2">PD</th>
               {isAdmin && <th className="py-1 px-2" title="Grace wins — credit added for rounds a player will miss">Grace W</th>}
               {isAdmin && <th className="py-1 px-2" title="Grace point differential — credit added for rounds a player will miss">Grace PD</th>}
-              {isAdmin && <th className="py-1 px-2">Manual</th>}
+              {isAdmin && <th className="py-1 px-2 sticky right-0 bg-white z-20 border-l border-slate-200 shadow-[-2px_0_4px_-2px_rgba(0,0,0,0.15)]">Manual</th>}
             </tr>
           </thead>
           <tbody>
@@ -240,7 +240,7 @@ export function Leaderboard({
                     </td>
                   )}
                   {isAdmin && (
-                    <td className="py-1 px-2">
+                    <td className={`py-1 px-2 sticky right-0 z-10 border-l border-slate-200 shadow-[-2px_0_4px_-2px_rgba(0,0,0,0.15)] ${isOverridden ? 'bg-violet-50' : 'bg-white'}`}>
                       {isEditing ? (
                         <div className="flex items-center gap-1">
                           <button className="px-2 py-0.5 rounded bg-emerald-600 text-white text-[11px] hover:bg-emerald-700" onClick={saveEditRow}>Save</button>
