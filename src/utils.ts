@@ -150,6 +150,24 @@ export function isScoredGame(scoreText?: string): boolean {
   return p !== null && p[0] !== p[1];
 }
 
+// Splits/rebuilds a "21-15" scoreText into its two sides. Used to render a
+// score as two separate number boxes instead of one free-text field — iOS's
+// numeric keypad (inputMode="numeric") has no dash key at all, so a single
+// dash-separated text field is literally untypeable there.
+export function getScoreSide(scoreText: string | undefined, side: 'a' | 'b'): string {
+  const text = (scoreText || '').trim();
+  if (!text) return '';
+  const m = text.match(/^(\d*)\s*[-–]\s*(\d*)$/);
+  if (!m) return '';
+  return (side === 'a' ? m[1] : m[2]) ?? '';
+}
+export function setScoreSide(scoreText: string | undefined, side: 'a' | 'b', val: string): string {
+  const a = side === 'a' ? val.trim() : getScoreSide(scoreText, 'a');
+  const b = side === 'b' ? val.trim() : getScoreSide(scoreText, 'b');
+  if (!a && !b) return '';
+  return `${a}-${b}`;
+}
+
 // Legacy wrappers — kept so existing code still compiles during migration
 export function isValidDoublesScore(a: number, b: number) {
   return isValidScore(a, b, { playTo: 21, cap: null });

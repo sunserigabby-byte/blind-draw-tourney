@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import type { MatchRow, ScoreSettings } from '../types';
-import { uniq, slug, parseScore, isValidScore, isScoredGame } from '../utils';
+import { uniq, slug, parseScore, isValidScore, isScoredGame, getScoreSide, setScoreSide } from '../utils';
 
 export function MatchesView({
   matches,
@@ -190,6 +190,29 @@ export function MatchesView({
       {rosterNames.map(n => <option key={n} value={n}>{n}</option>)}
     </select>
   );
+
+  // Two separate digit boxes instead of one "21-15" text field — iOS's
+  // numeric keypad (inputMode="numeric") has no dash key, so a single
+  // dash-separated field can't actually be typed on an iPhone at all.
+  // Called as a plain function (not <ScoreInput/>) deliberately — a
+  // capitalized component defined inside the render body would be a new
+  // component type on every re-render (i.e. every keystroke), remounting
+  // the <input>s and losing focus after each digit typed.
+  const renderScoreInput = (m: MatchRow, warning: boolean | null, valid: boolean, size: 'compact' | 'large') => {
+    const boxClass =
+      (size === 'large' ? 'w-14 h-11 text-[18px] ' : 'w-11 py-1 text-[13px] ') +
+      'border rounded text-center ' +
+      (warning ? 'border-amber-400 bg-amber-50' : valid ? 'border-slate-300' : 'border-red-500 bg-red-50');
+    const onSide = (side: 'a' | 'b') => (e: React.ChangeEvent<HTMLInputElement>) =>
+      update(m.id, { scoreText: setScoreSide(m.scoreText, side, e.target.value.replace(/[^\d]/g, '')) });
+    return (
+      <div className="flex items-center gap-1">
+        <input type="text" inputMode="numeric" className={boxClass} value={getScoreSide(m.scoreText, 'a')} onChange={onSide('a')} placeholder="–" disabled={!canScoreResolved} />
+        <span className="text-slate-400">–</span>
+        <input type="text" inputMode="numeric" className={boxClass} value={getScoreSide(m.scoreText, 'b')} onChange={onSide('b')} placeholder="–" disabled={!canScoreResolved} />
+      </div>
+    );
+  };
 
   return (
     <section className="bg-white backdrop-blur rounded-2xl shadow-lg ring-1 ring-sky-200 p-6 border border-sky-100">
@@ -437,18 +460,8 @@ export function MatchesView({
                               )}
                             </td>
 
-                            <td className="py-1 px-2">
-                              <input
-                                className={
-                                  "w-40 border rounded px-2 py-1 text-[12px] " +
-                                  (warning ? 'border-amber-400 bg-amber-50' : valid ? 'border-slate-300' : 'border-red-500 bg-red-50')
-                                }
-                                value={m.scoreText || ''}
-                                onChange={(e) => update(m.id, { scoreText: e.target.value })}
-                                placeholder={`to ${scoreSettings.playTo}${scoreSettings.cap ? ', cap ' + scoreSettings.cap : ''}`}
-                                title={warning ? `Score doesn't match current rules (play to ${scoreSettings.playTo}${scoreSettings.cap ? ', cap ' + scoreSettings.cap : ', no cap'})` : ''}
-                                disabled={!canScoreResolved}
-                              />
+                            <td className="py-1 px-2" title={warning ? `Score doesn't match current rules (play to ${scoreSettings.playTo}${scoreSettings.cap ? ', cap ' + scoreSettings.cap : ', no cap'})` : ''}>
+                              {renderScoreInput(m, warning, valid, 'compact')}
                             </td>
 
                             {isAdmin && (
@@ -567,18 +580,9 @@ export function MatchesView({
                           </>
                         )}
 
-                        <input
-                          className={
-                            "w-full border rounded px-3 py-2.5 text-[16px] text-center " +
-                            (warning ? 'border-amber-400 bg-amber-50' : valid ? 'border-slate-300' : 'border-red-500 bg-red-50')
-                          }
-                          value={m.scoreText || ''}
-                          onChange={(e) => update(m.id, { scoreText: e.target.value })}
-                          placeholder={`to ${scoreSettings.playTo}${scoreSettings.cap ? ', cap ' + scoreSettings.cap : ''}`}
-                          title={warning ? `Score doesn't match current rules (play to ${scoreSettings.playTo}${scoreSettings.cap ? ', cap ' + scoreSettings.cap : ', no cap'})` : ''}
-                          disabled={!canScoreResolved}
-                          inputMode="numeric"
-                        />
+                        <div className="flex items-center justify-center">
+                          {renderScoreInput(m, warning, valid, 'large')}
+                        </div>
                       </div>
                     );
                   })}
