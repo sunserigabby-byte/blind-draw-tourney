@@ -130,10 +130,11 @@ export function MatchesView({
   // shows up in the round's own match list (and flows into Leaderboard/
   // fairness tracking) instead of being an invisible bonus number.
   const openAddMatch = () => {
-    const defaultRound = rounds[0] ?? 1;
-    const courtsInRound = matches.filter(m => m.round === defaultRound).map(m => m.court);
-    const defaultCourt = courtsInRound.length ? Math.max(...courtsInRound) + 1 : 1;
-    setAddBuffer({ round: String(defaultRound), court: String(defaultCourt), t1p1: '', t1p2: '', t2p1: '', t2p2: '', scoreText: '' });
+    // Default to a brand-new round after the last one, since that's the
+    // more common case ("add this as its own round") — the field is still
+    // freely editable to target an existing round instead.
+    const defaultRound = rounds.length ? Math.max(...rounds) + 1 : 1;
+    setAddBuffer({ round: String(defaultRound), court: '1', t1p1: '', t1p2: '', t2p1: '', t2p2: '', scoreText: '' });
     setShowAddMatch(true);
   };
   const cancelAddMatch = () => setShowAddMatch(false);
@@ -243,6 +244,9 @@ export function MatchesView({
                     onChange={(e) => setAddBuffer(prev => ({ ...prev, round: e.target.value }))}
                   />
                 </label>
+                <span className="text-[11px] text-slate-400">
+                  defaults to a new round after the last one — change it to add into an existing round instead
+                </span>
                 <label className="flex items-center gap-1">
                   Court
                   <input
