@@ -2,7 +2,7 @@ import React, { useMemo, useState } from 'react';
 import type { Team, BracketMatch, RevcoBDRound, ScoreSettings } from '../types';
 import { slug, shuffle, uniq, parseMickeyPairsGendered, parseMickeyFreeGendered } from '../utils';
 import { buildBracket } from '../components/BracketView';
-import { computeRevcoStandings, type UnitRow } from './Leaderboard';
+import { computeRevcoStandings, type UnitRow, type RevcoOverrides } from './Leaderboard';
 import { buildDoubleElimBracket } from './doubleElim';
 
 type ElimType = 'single' | 'double';
@@ -57,6 +57,7 @@ export function RevcoBDPlayoffBuilder({
   setBrackets,
   division,
   scoreSettings = { playTo: 21, cap: null },
+  overrides = {},
 }: {
   rounds: RevcoBDRound[];
   pairsText: string;
@@ -65,13 +66,14 @@ export function RevcoBDPlayoffBuilder({
   setBrackets: (f: ((prev: BracketMatch[]) => BracketMatch[]) | BracketMatch[]) => void;
   division: 'UPPER' | 'LOWER';
   scoreSettings?: ScoreSettings;
+  overrides?: RevcoOverrides;
 }) {
   const [confirmMode, setConfirmMode] = useState<'random' | 'crossover' | null>(null);
   const [editTeams, setEditTeams] = useState<PreparedTeam[]>([]);
 
   const units = useMemo(
-    () => computeRevcoStandings(rounds, pairsText, freeAgentsText, scoreSettings),
-    [rounds, pairsText, freeAgentsText, scoreSettings],
+    () => computeRevcoStandings(rounds, pairsText, freeAgentsText, scoreSettings, overrides),
+    [rounds, pairsText, freeAgentsText, scoreSettings, overrides],
   );
   const totalPlayers = units.reduce((n, u) => n + u.players.length, 0);
   const hasBracket = brackets.some(b => b.division === division);

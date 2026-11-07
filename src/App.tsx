@@ -30,7 +30,7 @@ import { MickeyBDPlayoffBuilder } from './mickeyBlind/PlayoffBuilder';
 import { MickeyBDFairnessReport } from './mickeyBlind/FairnessReport';
 import { RevcoBDRoundManager } from './revcoBlind/RoundManager';
 import { RevcoBDMatchesView } from './revcoBlind/MatchesView';
-import { RevcoBDLeaderboard, RevcoBDStandingsCompact } from './revcoBlind/Leaderboard';
+import { RevcoBDLeaderboard, RevcoBDStandingsCompact, type RevcoOverrides } from './revcoBlind/Leaderboard';
 import { RevcoBDFairnessReport } from './revcoBlind/FairnessReport';
 import { RevcoBDPlayoffBuilder } from './revcoBlind/PlayoffBuilder';
 import { RevcoBDBracketView } from './revcoBlind/BracketView';
@@ -107,6 +107,8 @@ type RevcoBDDivisionState = {
   scorerPin?: string;
   publicScoring?: boolean;
   rosterType?: RosterType;
+  // Admin hand-set W/L/PD per pair / free agent (keyed by unitOverrideKey).
+  standingsOverrides?: RevcoOverrides;
 };
 function emptyRevcoBDState(): RevcoBDDivisionState {
   return { pairsText: "", freeAgentsText: "", guysText: "", girlsText: "", rounds: [], brackets: [], courtCount: 1, startHour: 9, slotMinutes: 45, scorerPin: "", publicScoring: false, rosterType: 'mixed' };
@@ -1341,6 +1343,10 @@ export default function BlindDrawTourneyApp() {
                   : currentRBD.freeAgentsText
               }
               scoreSettings={rbdScoreSettings}
+              overrides={currentRBD.standingsOverrides ?? {}}
+              setOverrides={isAdmin
+                ? (f) => setCurrentRBD(p => ({ ...p, standingsOverrides: f(p.standingsOverrides ?? {}) }))
+                : undefined}
             />
             <RevcoBDFairnessReport
               rounds={currentRBD.rounds ?? []}
@@ -1366,6 +1372,7 @@ export default function BlindDrawTourneyApp() {
                   : currentRBD.freeAgentsText
               }
               scoreSettings={rbdScoreSettings}
+              overrides={currentRBD.standingsOverrides ?? {}}
             />
             <fieldset disabled={!isAdmin} className={!isAdmin ? "opacity-95" : ""}>
               <RevcoBDPlayoffBuilder
@@ -1380,6 +1387,7 @@ export default function BlindDrawTourneyApp() {
                 setBrackets={(v: any) => setCurrentRBD(p => ({ ...p, brackets: typeof v === 'function' ? v(p.brackets ?? []) : v }))}
                 division={activeDivision}
                 scoreSettings={rbdScoreSettings}
+                overrides={currentRBD.standingsOverrides ?? {}}
               />
             </fieldset>
             <RevcoBDBracketView

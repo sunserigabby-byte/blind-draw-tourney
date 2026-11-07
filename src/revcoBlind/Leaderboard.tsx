@@ -1,9 +1,19 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import type { ScoreSettings, RevcoBDRound } from '../types';
 import { parseScore, isValidScore, slug, parseMickeyPairsGendered, parseMickeyFreeGendered } from '../utils';
 
+export type StandingsOverride = { W: number; L: number; PD: number };
+export type RevcoOverrides = Record<string, StandingsOverride>;
+
+// Stable id for a pair / free agent, used to remember manual overrides.
+// Built from player names (not list position) so reordering the roster
+// doesn't move an override onto the wrong people.
+export const unitOverrideKey = (players: string[]) => players.map(slug).sort().join('|');
+
 export type UnitRow = {
   key: string;
+  overrideKey: string;
+  overridden: boolean;
   label: string;
   kind: 'pair' | 'free';
   players: string[];
@@ -14,12 +24,14 @@ export type UnitRow = {
 };
 
 // Per-pair (or free agent) standings across every round played — shared by
-// the leaderboard display and the playoff builder's seeding.
+// the leaderboard display and the playoff builder's seeding. `overrides`
+// replaces a row's W/L/PD outright with admin-typed numbers.
 export function computeRevcoStandings(
   rounds: RevcoBDRound[],
   pairsText: string,
   freeAgentsText: string,
   scoreSettings: ScoreSettings,
+  overrides: RevcoOverrides = {},
 ): UnitRow[] {
   const pairUnits = parseMickeyPairsGendered(pairsText).map((u, i) => ({
     kind: 'pair' as const,
@@ -39,7 +51,10 @@ export function computeRevcoStandings(
   type Acc = UnitRow & { slugs: string[] };
   const accs = new Map<string, Acc>();
   for (const u of [...pairUnits, ...freeUnitsRaw]) {
-    accs.set(u.key, { key: u.key, label: u.label, kind: u.kind, players: u.players, slugs: u.slugs, W: 0, L: 0, PD: 0, rounds: 0 });
+    accs.set(u.key, {
+      key: u.key, overrideKey: unitOverrideKey(u.players), overridden: false,
+      label: u.label, kind: u.kind, players: u.players, slugs: u.slugs, W: 0, L: 0, PD: 0, rounds: 0,
+    });
   }
 
   const allUnits = [...pairUnits, ...freeUnitsRaw];
@@ -80,6 +95,11 @@ export function computeRevcoStandings(
     }
   }
 
+  for (const acc of accs.values()) {
+    const o = overrides[acc.overrideKey];
+    if (o) { acc.W = o.W; acc.L = o.L; acc.PD = o.PD; acc.overridden = true; }
+  }
+
   const rows: UnitRow[] = Array.from(accs.values()).map(({ slugs, ...rest }) => rest);
   rows.sort((a, b) => {
     if (b.W !== a.W) return b.W - a.W;
@@ -94,15 +114,42 @@ export function RevcoBDLeaderboard({
   pairsText,
   freeAgentsText,
   scoreSettings = { playTo: 21, cap: null },
+  overrides = {},
+  setOverrides,
 }: {
   rounds: RevcoBDRound[];
   pairsText: string;
   freeAgentsText: string;
   scoreSettings?: ScoreSettings;
+  overrides?: RevcoOverrides;
+  // Only passed for admins — viewers see the table without Edit buttons.
+  setOverrides?: (f: (prev: RevcoOverrides) => RevcoOverrides) => void;
 }) {
   const unitRows = useMemo<UnitRow[]>(
-    () => computeRevcoStandings(rounds, pairsText, freeAgentsText, scoreSettings),
-    [rounds, pairsText, freeAgentsText, scoreSettings],
+    () => computeRevcoStandings(rounds, pairsText, freeAgentsText, scoreSettings, overrides),
+    [rounds, pairsText, freeAgentsText, scoreSettings, overrides],
+  );
+
+  const [editingKey, setEditingKey] = useState<string | null>(null);
+  const [editBuffer, setEditBuffer] = useState<StandingsOverride>({ W: 0, L: 0, PD: 0 });
+  const startEdit = (r: UnitRow) => { setEditingKey(r.overrideKey); setEditBuffer({ W: r.W, L: r.L, PD: r.PD }); };
+  const saveEdit = () => {
+    if (!editingKey) return;
+    setOverrides?.(prev => ({ ...prev, [editingKey]: editBuffer }));
+    setEditingKey(null);
+  };
+  const clearOverride = (key: string) => {
+    setOverrides?.(prev => { const { [key]: _drop, ...rest } = prev; return rest; });
+    if (editingKey === key) setEditingKey(null);
+  };
+  const canEdit = !!setOverrides;
+  const numInput = (field: keyof StandingsOverride) => (
+    <input
+      type="number"
+      className="w-14 border border-slate-300 rounded px-1 py-0.5 text-[12px] tabular-nums"
+      value={editBuffer[field]}
+      onChange={e => { const v = parseInt(e.target.value) || 0; setEditBuffer(b => ({ ...b, [field]: v })); }}
+    />
   );
 
   if (unitRows.length === 0) return null;
@@ -115,6 +162,12 @@ export function RevcoBDLeaderboard({
           Wins tallied per match across every round played. Play to {scoreSettings.playTo}
           {scoreSettings.cap ? `, cap ${scoreSettings.cap}` : ', no cap'}, win by 2.
         </p>
+        {canEdit && (
+          <p className="text-[11px] text-slate-500 mt-1">
+            Admin: click <span className="font-medium">Edit</span> on a row to set its W / L / PD by hand. Manual
+            numbers replace the calculated ones (including for playoff seeding) until you click Reset.
+          </p>
+        )}
       </div>
 
       <section className="bg-white/95 backdrop-blur rounded-xl shadow ring-1 ring-slate-200 p-4">
@@ -128,11 +181,14 @@ export function RevcoBDLeaderboard({
                 <th className="py-1 px-2">W</th>
                 <th className="py-1 px-2">L</th>
                 <th className="py-1 px-2">PD</th>
+                {canEdit && <th className="py-1 px-2" />}
               </tr>
             </thead>
             <tbody>
-              {unitRows.map((r, i) => (
-                <tr key={r.key} className="border-t">
+              {unitRows.map((r, i) => {
+                const isEditing = editingKey === r.overrideKey;
+                return (
+                <tr key={r.key} className={'border-t ' + (r.overridden ? 'bg-amber-50/60' : '')}>
                   <td className="py-1 px-2 tabular-nums font-semibold text-sky-800">{i + 1}</td>
                   <td className="py-1 px-2">
                     <span className="mr-1.5">{r.label}</span>
@@ -142,13 +198,44 @@ export function RevcoBDLeaderboard({
                     }>
                       {r.kind === 'pair' ? 'Pair' : 'Free agent'}
                     </span>
+                    {r.overridden && (
+                      <span className="ml-1 text-[10px] px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-800">edited</span>
+                    )}
                   </td>
                   <td className="py-1 px-2 tabular-nums text-center text-slate-500">{r.rounds}</td>
-                  <td className="py-1 px-2 tabular-nums">{r.W}</td>
-                  <td className="py-1 px-2 tabular-nums">{r.L}</td>
-                  <td className="py-1 px-2 tabular-nums">{r.PD > 0 ? `+${r.PD}` : r.PD}</td>
+                  {isEditing ? (
+                    <>
+                      <td className="py-1 px-2">{numInput('W')}</td>
+                      <td className="py-1 px-2">{numInput('L')}</td>
+                      <td className="py-1 px-2">{numInput('PD')}</td>
+                    </>
+                  ) : (
+                    <>
+                      <td className="py-1 px-2 tabular-nums">{r.W}</td>
+                      <td className="py-1 px-2 tabular-nums">{r.L}</td>
+                      <td className="py-1 px-2 tabular-nums">{r.PD > 0 ? `+${r.PD}` : r.PD}</td>
+                    </>
+                  )}
+                  {canEdit && (
+                    <td className="py-1 px-2 whitespace-nowrap">
+                      {isEditing ? (
+                        <span className="inline-flex gap-1">
+                          <button className="px-2 py-0.5 rounded bg-emerald-600 text-white text-[11px] hover:bg-emerald-700" onClick={saveEdit}>Save</button>
+                          <button className="px-2 py-0.5 rounded border text-[11px]" onClick={() => setEditingKey(null)}>Cancel</button>
+                        </span>
+                      ) : (
+                        <span className="inline-flex gap-1">
+                          <button className="px-2 py-0.5 rounded border text-slate-700 hover:bg-slate-50 text-[11px]" onClick={() => startEdit(r)}>Edit</button>
+                          {r.overridden && (
+                            <button className="px-2 py-0.5 rounded text-red-600 hover:bg-red-50 text-[11px]" onClick={() => clearOverride(r.overrideKey)} title="Go back to the calculated numbers">Reset</button>
+                          )}
+                        </span>
+                      )}
+                    </td>
+                  )}
                 </tr>
-              ))}
+                );
+              })}
             </tbody>
           </table>
         </div>
@@ -164,15 +251,17 @@ export function RevcoBDStandingsCompact({
   pairsText,
   freeAgentsText,
   scoreSettings = { playTo: 21, cap: null },
+  overrides = {},
 }: {
   rounds: RevcoBDRound[];
   pairsText: string;
   freeAgentsText: string;
   scoreSettings?: ScoreSettings;
+  overrides?: RevcoOverrides;
 }) {
   const unitRows = useMemo<UnitRow[]>(
-    () => computeRevcoStandings(rounds, pairsText, freeAgentsText, scoreSettings),
-    [rounds, pairsText, freeAgentsText, scoreSettings],
+    () => computeRevcoStandings(rounds, pairsText, freeAgentsText, scoreSettings, overrides),
+    [rounds, pairsText, freeAgentsText, scoreSettings, overrides],
   );
 
   if (unitRows.length === 0) return null;
