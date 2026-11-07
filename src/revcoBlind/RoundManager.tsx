@@ -9,6 +9,7 @@ import {
   buildPairMap, buildPairHistory, getPairIds, pairKey,
   type PairId, type PairHistory,
 } from './pairUtils';
+import { makeupCountsForNames } from './makeup';
 
 const rid = () => Math.random().toString(36).slice(2, 10);
 const SMART_CANDIDATES = 150;
@@ -325,10 +326,14 @@ function pickBestCandidate(
 type EditState = {
   teams: { id: string; name: string; players: string[] }[];
   matches: { id: string; teamAId: string; teamBId: string }[];
+  // Everyone who was in this round when editing started (on a team or
+  // sitting). Anyone in this list who isn't on a team after editing sits.
+  roundPlayers: string[];
 };
 
 function roundToEditState(round: RevcoBDRound): EditState {
   return {
+    roundPlayers: uniq([...round.teams.flatMap(t => t.players), ...(round.sitOuts ?? [])]),
     teams: round.teams.map(t => ({
       id: t.id,
       name: t.name,
@@ -489,7 +494,8 @@ export function RevcoBDRoundManager({
     setRounds(prev => prev.map(r => {
       if (r.id !== editingId) return r;
       const newTeams: MickeyTeam[] = editBuffer.teams.map((et, i) => ({
-        ...r.teams[i],
+        pool: 1,
+        ...r.teams.find(t => t.id === et.id),
         id: et.id,
         name: et.name.trim() || `Team ${i + 1}`,
         players: et.players.map(p => p.trim()).filter(Boolean),
@@ -498,18 +504,78 @@ export function RevcoBDRoundManager({
         const existing = r.matches.find(m => m.id === em.id);
         return { ...(existing ?? { id: em.id, pool: r.number }), teamAId: em.teamAId, teamBId: em.teamBId };
       });
-      const placed = new Set(newTeams.flatMap(t => t.players));
-      const sitOuts = (r.sitOuts ?? []).filter(n => !placed.has(n));
-      return { ...r, teams: newTeams, matches: newMatches, sitOuts };
+      return { ...r, teams: newTeams, matches: newMatches, sitOuts: editSitting };
     }));
     setEditingId(null);
     setEditBuffer(null);
   };
 
+  // ── Round editor helpers ──
+  // Picking a player who's already on another team swaps the two players,
+  // so nobody gets lost. Picking someone who was sitting puts them in, and
+  // whoever they replace moves to the sitting list.
+  const setEditPlayer = (tIdx: number, pIdx: number, name: string) =>
+    setEditBuffer(buf => {
+      if (!buf) return buf;
+      const old = buf.teams[tIdx].players[pIdx];
+      const teams = buf.teams.map(t => ({ ...t, players: [...t.players] }));
+      if (name) {
+        for (const t of teams) {
+          const j = t.players.indexOf(name);
+          if (j >= 0) t.players[j] = old;
+        }
+      }
+      teams[tIdx].players[pIdx] = name;
+      const roundPlayers = name ? uniq([...buf.roundPlayers, name]) : buf.roundPlayers;
+      return { ...buf, teams, roundPlayers };
+    });
+  const addEditTeam = () =>
+    setEditBuffer(buf => buf && ({
+      ...buf,
+      teams: [...buf.teams, { id: rid(), name: `Team ${buf.teams.length + 1}`, players: ['', '', '', ''] }],
+    }));
+  const removeEditTeam = (teamId: string) =>
+    setEditBuffer(buf => buf && ({
+      ...buf,
+      teams: buf.teams.filter(t => t.id !== teamId),
+      matches: buf.matches.filter(m => m.teamAId !== teamId && m.teamBId !== teamId),
+    }));
+  const addEditMatch = () =>
+    setEditBuffer(buf => {
+      if (!buf || buf.teams.length < 2) return buf;
+      const busy = new Set(buf.matches.flatMap(m => [m.teamAId, m.teamBId]));
+      const free = buf.teams.filter(t => !busy.has(t.id));
+      const [a, b] = free.length >= 2 ? free : buf.teams;
+      return { ...buf, matches: [...buf.matches, { id: rid(), teamAId: a.id, teamBId: b.id }] };
+    });
+  const removeEditMatch = (matchId: string) =>
+    setEditBuffer(buf => buf && ({ ...buf, matches: buf.matches.filter(m => m.id !== matchId) }));
+
   const dupNames = useMemo(() => {
     if (!editBuffer) return [];
     const all = editBuffer.teams.flatMap(t => t.players.filter(Boolean));
     return uniq(all.filter((n, i) => all.indexOf(n) !== i));
+  }, [editBuffer]);
+
+  // Who would be sitting if the edit were saved right now.
+  const editSitting = useMemo(() => {
+    if (!editBuffer) return [];
+    const placed = new Set(editBuffer.teams.flatMap(t => t.players.filter(Boolean)));
+    return editBuffer.roundPlayers.filter(n => !placed.has(n));
+  }, [editBuffer]);
+
+  // Problems that would make the round unplayable — Save is blocked until fixed.
+  const editProblems = useMemo(() => {
+    if (!editBuffer) return [];
+    const out: string[] = [];
+    const nameOf = (id: string) => editBuffer.teams.find(t => t.id === id)?.name ?? 'a team';
+    const seen = new Map<string, number>();
+    editBuffer.matches.forEach((m, i) => {
+      if (m.teamAId === m.teamBId) out.push(`Match ${i + 1} has ${nameOf(m.teamAId)} playing itself.`);
+      for (const id of [m.teamAId, m.teamBId]) seen.set(id, (seen.get(id) ?? 0) + 1);
+    });
+    for (const [id, n] of seen) if (n > 1) out.push(`${nameOf(id)} is in more than one match.`);
+    return uniq(out);
   }, [editBuffer]);
 
   return (
@@ -678,6 +744,15 @@ export function RevcoBDRoundManager({
                     <span className="ml-2 text-[11px] font-normal text-slate-500">
                       {round.teams.length} team{round.teams.length === 1 ? '' : 's'} · {round.matches.length} match{round.matches.length === 1 ? '' : 'es'}
                     </span>
+                    <label className="ml-3 inline-flex items-center gap-1 text-[11px] font-normal text-slate-600 cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        className="accent-purple-600"
+                        checked={!!round.makeup}
+                        onChange={e => { const v = e.target.checked; setRounds(prev => prev.map(r => r.id === round.id ? { ...r, makeup: v } : r)); }}
+                      />
+                      Only counts for players short a game
+                    </label>
                   </div>
                   <div className="flex items-center gap-1.5">
                     {!isEditing ? (
@@ -688,13 +763,27 @@ export function RevcoBDRoundManager({
                       </>
                     ) : (
                       <>
-                        <button className="px-2 py-1 rounded bg-emerald-600 text-white text-[11px]" onClick={saveEdit}>Save</button>
+                        <button
+                          className="px-2 py-1 rounded bg-emerald-600 text-white text-[11px] disabled:opacity-40"
+                          onClick={saveEdit}
+                          disabled={editProblems.length > 0}
+                          title={editProblems.length > 0 ? 'Fix the problems listed below first' : ''}
+                        >
+                          Save
+                        </button>
                         <button className="px-2 py-1 rounded border text-slate-700 text-[11px]" onClick={cancelEdit}>Cancel</button>
                       </>
                     )}
                   </div>
                 </div>
 
+                {round.makeup && (
+                  <div className="mb-2 text-[12px] rounded px-2 py-1 border bg-purple-50 border-purple-200 text-purple-900">
+                    <span className="font-semibold">Counts only for:</span>{' '}
+                    {makeupCountsForNames(rounds, round).join(', ') || 'nobody — everyone in a match already has the most games'}
+                    <span className="block text-[11px] text-purple-700/80">Everyone else plays, but this round won't change their standings.</span>
+                  </div>
+                )}
                 {!isEditing && (
                   <div className="grid md:grid-cols-2 gap-1.5 text-[12px] text-slate-600">
                     {round.teams.map(t => {
@@ -718,26 +807,48 @@ export function RevcoBDRoundManager({
 
                 {isEditing && editBuffer && (
                   <div className="space-y-3 mt-2">
+                    <p className="text-[11px] text-slate-500">
+                      Pick a player who's on another team and the two swap places. Pick someone who's sitting and the
+                      player they replace goes to the sitting list. Changing a matchup keeps any score already entered.
+                    </p>
                     {dupNames.length > 0 && (
                       <div className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1">
                         Duplicate players: {dupNames.join(', ')}
                       </div>
                     )}
+                    {editProblems.length > 0 && (
+                      <div className="text-[11px] text-red-700 bg-red-50 border border-red-200 rounded px-2 py-1 space-y-0.5">
+                        {editProblems.map(p => <div key={p}>{p}</div>)}
+                      </div>
+                    )}
+                    <div className="text-[12px] rounded px-2 py-1 border bg-amber-50 border-amber-200">
+                      <span className="font-semibold text-amber-800">Sitting out:</span>{' '}
+                      <span className="text-slate-600">{editSitting.length > 0 ? editSitting.join(', ') : 'nobody'}</span>
+                    </div>
                     <div className="grid md:grid-cols-2 gap-2">
                       {editBuffer.teams.map((team, tIdx) => (
                         <div key={team.id} className="bg-white border border-slate-200 rounded p-2 space-y-1.5">
-                          <input
-                            className="w-full border border-slate-300 rounded px-2 py-1 text-[12px] font-medium"
-                            value={team.name}
-                            onChange={e => { const v = e.target.value; setEditBuffer(buf => buf && ({ ...buf, teams: buf.teams.map((t, i) => i === tIdx ? { ...t, name: v } : t) })); }}
-                          />
+                          <div className="flex items-center gap-1.5">
+                            <input
+                              className="flex-1 min-w-0 border border-slate-300 rounded px-2 py-1 text-[12px] font-medium"
+                              value={team.name}
+                              onChange={e => { const v = e.target.value; setEditBuffer(buf => buf && ({ ...buf, teams: buf.teams.map((t, i) => i === tIdx ? { ...t, name: v } : t) })); }}
+                            />
+                            <button
+                              className="px-1.5 py-1 rounded border text-red-500 hover:bg-red-50 text-[11px]"
+                              onClick={() => removeEditTeam(team.id)}
+                              title="Remove this team (its players move to sitting, and any match it was in is removed)"
+                            >
+                              ✕
+                            </button>
+                          </div>
                           <div className="grid grid-cols-2 gap-1">
                             {team.players.map((player, pIdx) => (
                               <select
                                 key={pIdx}
                                 className={'border rounded px-1.5 py-1 text-[12px] bg-white ' + (player && dupNames.includes(player) ? 'border-amber-400 bg-amber-50' : 'border-slate-300')}
                                 value={player}
-                                onChange={e => { const v = e.target.value; setEditBuffer(buf => buf && ({ ...buf, teams: buf.teams.map((t, i) => i === tIdx ? { ...t, players: t.players.map((p, j) => j === pIdx ? v : p) } : t) })); }}
+                                onChange={e => setEditPlayer(tIdx, pIdx, e.target.value)}
                               >
                                 <option value="">— player {pIdx + 1} —</option>
                                 {allPlayerNames.map(name => <option key={name} value={name}>{name}</option>)}
@@ -747,8 +858,14 @@ export function RevcoBDRoundManager({
                         </div>
                       ))}
                     </div>
+                    <button className="px-2 py-1 rounded border text-slate-700 hover:bg-white text-[11px]" onClick={addEditTeam}>
+                      + Add team
+                    </button>
                     <div className="bg-white border border-slate-200 rounded p-2 space-y-1.5">
                       <div className="text-[11px] font-semibold text-slate-700 uppercase tracking-wide">Match pairings</div>
+                      {editBuffer.matches.length === 0 && (
+                        <div className="text-[11px] text-slate-400">No matches — every team sits this round.</div>
+                      )}
                       {editBuffer.matches.map((m, mIdx) => (
                         <div key={m.id} className="flex items-center gap-2 text-[12px] flex-wrap">
                           <span className="text-slate-500">Match {mIdx + 1}:</span>
@@ -761,8 +878,22 @@ export function RevcoBDRoundManager({
                             onChange={e => { const v = e.target.value; setEditBuffer(buf => buf && ({ ...buf, matches: buf.matches.map((mm, i) => i === mIdx ? { ...mm, teamBId: v } : mm) })); }}>
                             {editBuffer.teams.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
                           </select>
+                          <button
+                            className="px-1.5 py-1 rounded text-red-500 hover:bg-red-50 text-[11px]"
+                            onClick={() => removeEditMatch(m.id)}
+                            title="Remove this match (both teams sit)"
+                          >
+                            ✕
+                          </button>
                         </div>
                       ))}
+                      <button
+                        className="px-2 py-1 rounded border text-slate-700 hover:bg-slate-50 text-[11px] disabled:opacity-40"
+                        onClick={addEditMatch}
+                        disabled={editBuffer.teams.length < 2}
+                      >
+                        + Add match
+                      </button>
                     </div>
                   </div>
                 )}

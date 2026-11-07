@@ -122,6 +122,9 @@ export type RevcoBDRound = {
   // Individual players left without a partner this round (e.g. more girls
   // than guys) — they aren't on any team and sit the whole round.
   sitOuts?: string[];
+  // Make-up round: results only count for players who are short a game
+  // (see revcoBlind/makeup.ts). Everyone still plays.
+  makeup?: boolean;
 };
 
 // Configurable score rules — changeable per format anytime during the tournament

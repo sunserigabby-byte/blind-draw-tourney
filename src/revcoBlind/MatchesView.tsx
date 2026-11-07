@@ -1,6 +1,7 @@
 import React, { useMemo } from 'react';
 import type { RevcoMatchRow, ScoreSettings, RevcoBDRound } from '../types';
 import { parseScore, isValidScore, mickeyTeamLabel } from '../utils';
+import { makeupCountsForNames } from './makeup';
 
 function formatTime(hour24: number, minute: number): string {
   const ampm = hour24 >= 12 ? 'PM' : 'AM';
@@ -263,6 +264,12 @@ export function RevcoBDMatchesView({
                       </span>
                     )}
                   </div>
+                  {round.makeup && (
+                    <div className="text-[12px] text-purple-900 bg-purple-50 border border-purple-200 rounded-lg px-2.5 py-1">
+                      <span className="font-semibold">Counts only for:</span>{' '}
+                      {makeupCountsForNames(rounds, round).join(', ') || 'nobody'}
+                    </div>
+                  )}
                   {(sitting.length > 0 || (round.sitOuts?.length ?? 0) > 0) && (
                     <div className="text-[12px] text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1">
                       <span className="font-semibold">Sitting this round:</span> {[

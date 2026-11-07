@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import type { ScoreSettings, RevcoBDRound } from '../types';
 import { parseScore, isValidScore, slug, parseMickeyPairsGendered, parseMickeyFreeGendered } from '../utils';
+import { makeupEligibility } from './makeup';
 
 export type StandingsOverride = { W: number; L: number; PD: number };
 export type RevcoOverrides = Record<string, StandingsOverride>;
@@ -58,8 +59,10 @@ export function computeRevcoStandings(
   }
 
   const allUnits = [...pairUnits, ...freeUnitsRaw];
+  const makeup = makeupEligibility(rounds);
 
   for (const round of rounds) {
+    const makeupFor = makeup.get(round.id);
     const teamFor = (slugs: string[]) => {
       const team = round.teams.find(t => {
         const set = new Set(t.players.map(slug));
@@ -72,6 +75,8 @@ export function computeRevcoStandings(
     for (const u of allUnits) {
       const team = teamFor(u.slugs);
       if (!team) continue;
+      // Make-up round that this pair / player doesn't need — doesn't count.
+      if (makeupFor && !u.slugs.some(s => makeupFor.has(s))) continue;
       const acc = accs.get(u.key)!;
       acc.rounds += 1;
 
