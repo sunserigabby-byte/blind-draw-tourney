@@ -2,20 +2,41 @@ import React, { useMemo } from 'react';
 import type { BracketMatch, PlayDiv } from '../types';
 import { buildVisualColumns } from '../components/BracketView';
 import { mickeyGamesWinner } from '../utils';
+import { grandFinalId, resetFinalId } from './doubleElim';
 
 const ROW_H = 88;
 
-function TeamLine({ t, active, label, sourceId, byId }: {
+type Side = 'W' | 'L' | 'F';
+const sideOf = (m: BracketMatch): Side => m.bracketSide ?? 'W';
+
+// Short label for a match, e.g. "R2, G1" (single elim), "W-R2, G1", "L-R3, G2", "Grand Final".
+function matchLabel(m: BracketMatch, isDouble: boolean): string {
+  const side = sideOf(m);
+  if (side === 'F') return m.round === 1 ? 'Grand Final' : 'Grand Final reset';
+  return `${isDouble ? side + '-' : ''}R${m.round}, G${m.slot}`;
+}
+
+function roundTitle(side: Side, round: number, isDouble: boolean): string {
+  if (side === 'F') return round === 1 ? 'Grand Final' : 'Reset (if necessary)';
+  return `${isDouble ? (side === 'W' ? 'Winners ' : 'Losers ') : ''}Round ${round}`;
+}
+
+function TeamLine({ t, active, label, sourceId, matchId, byId, isDouble }: {
   t?: BracketMatch['team1'];
   active?: boolean;
   label: 'A' | 'B';
   sourceId?: string;
+  matchId: string;
   byId: Map<string, BracketMatch>;
+  isDouble: boolean;
 }) {
   const waiting = () => {
+    if (matchId.endsWith('-F2-1')) return 'Only played if the losers-bracket team wins';
     if (!sourceId) return 'Waiting on previous match';
     const src = byId.get(sourceId);
-    return src ? `Winner of R${src.round}, G${src.slot}` : 'Waiting on previous match';
+    if (!src) return 'Waiting on previous match';
+    const how = src.loserNextId === matchId ? 'Loser' : 'Winner';
+    return `${how} of ${matchLabel(src, isDouble)}`;
   };
   return (
     <div className={'min-h-[30px] flex items-center gap-2 border-b border-slate-300 px-2 py-1 ' + (active ? 'bg-emerald-50' : 'bg-white')}>
@@ -37,12 +58,14 @@ function TeamLine({ t, active, label, sourceId, byId }: {
 function RevcoBracketCard({
   m,
   byId,
+  isDouble,
   isAdmin,
   setGame,
   setScore,
 }: {
   m: BracketMatch;
   byId: Map<string, BracketMatch>;
+  isDouble: boolean;
   isAdmin?: boolean;
   setGame: (id: string, idx: number, value: string) => void;
   setScore: (id: string, value: string) => void;
@@ -57,7 +80,7 @@ function RevcoBracketCard({
       <div className="text-[10px] text-slate-500 mb-1 flex items-center justify-between px-1">
         <span className="inline-flex items-center gap-1">
           <span className="font-medium text-slate-700">{m.division}</span>
-          <span>· R{m.round} · G{m.slot}</span>
+          <span>· {matchLabel(m, isDouble)}</span>
           {bestOf3 && <span className="ml-1 text-[9px] px-1 py-0.5 rounded bg-purple-50 text-purple-700 ring-1 ring-purple-200">Best of 3</span>}
         </span>
         {m.court !== undefined && (
@@ -66,8 +89,8 @@ function RevcoBracketCard({
       </div>
 
       <div className="border border-slate-300 rounded-sm bg-white overflow-hidden">
-        <TeamLine t={m.team1} active={winnerSide === 'team1'} label="A" sourceId={m.team1SourceId} byId={byId} />
-        <TeamLine t={m.team2} active={winnerSide === 'team2'} label="B" sourceId={m.team2SourceId} byId={byId} />
+        <TeamLine t={m.team1} active={winnerSide === 'team1'} label="A" sourceId={m.team1SourceId} matchId={m.id} byId={byId} isDouble={isDouble} />
+        <TeamLine t={m.team2} active={winnerSide === 'team2'} label="B" sourceId={m.team2SourceId} matchId={m.id} byId={byId} isDouble={isDouble} />
       </div>
 
       {m.score === 'BYE' ? (
@@ -142,6 +165,15 @@ export function RevcoBDBracketView({
           if (q) { if (m.loserNextSide === 'team1') q.team1 = loser; else q.team2 = loser; }
         }
       }
+      // Double elim Grand Final: if the losers-bracket team (team2) wins, both
+      // teams now have one loss, so they play the reset game. Otherwise no reset.
+      if (m.id === grandFinalId(m.division)) {
+        const reset = map.get(resetFinalId(m.division));
+        if (reset) {
+          if (w === 'team2') { reset.team1 = m.team1; reset.team2 = m.team2; }
+          else { reset.team1 = undefined; reset.team2 = undefined; reset.score = undefined; reset.games = undefined; }
+        }
+      }
       return copy;
     });
 
@@ -157,9 +189,9 @@ export function RevcoBDBracketView({
 
   // Applies to every match in that round (for that division) at once —
   // set in advance of the round starting, per Gabrielle's preference.
-  const setRoundFormat = (division: PlayDiv, round: number, fmt: 'single' | 'bestOf3') =>
+  const setRoundFormat = (division: PlayDiv, side: Side, round: number, fmt: 'single' | 'bestOf3') =>
     setBrackets(prev => prev.map(m =>
-      (m.division === division && m.round === round) ? { ...m, gameFormat: fmt } : m));
+      (m.division === division && sideOf(m) === side && m.round === round) ? { ...m, gameFormat: fmt } : m));
 
   const anyCols = divisions.some(d => buildVisualColumns(brackets, d).cols.length > 0);
   if (!anyCols) return null;
@@ -172,57 +204,93 @@ export function RevcoBDBracketView({
       </p>
 
       {divisions.map(div => {
-        const cfg = buildVisualColumns(brackets, div);
-        const cols = cfg.cols;
-        if (!cols.length) return null;
+        const divMatches = brackets.filter(m => m.division === div);
+        if (!divMatches.length) return null;
+        const isDouble = divMatches.some(m => sideOf(m) === 'L');
+        const sides: Side[] = isDouble ? ['W', 'L', 'F'] : ['W'];
 
         return (
           <div key={div} className="mb-8">
-            <h3 className="font-semibold text-slate-700 mb-2 text-[14px]">{div}</h3>
-            <div className="overflow-x-auto">
-              <div className="grid gap-2" style={{ gridTemplateColumns: `repeat(${cols.length}, minmax(240px, 1fr))` }}>
-                {cols.map((col, colIdx) => {
-                  const roundNum = col[0]?.round ?? colIdx + 1;
-                  const roundFormat = col[0]?.gameFormat ?? 'single';
-                  return (
-                    <div key={colIdx} className="relative" style={{ minHeight: `${Math.max(cols[0]?.length || 1, 1) * ROW_H * 2}px` }}>
-                      <div className="mb-2 flex items-center gap-1.5">
-                        <span className="text-[11px] font-medium text-slate-600">Round {roundNum}:</span>
-                        <select
-                          className="border border-slate-300 rounded px-1.5 py-0.5 text-[11px] bg-white"
-                          value={roundFormat}
-                          onChange={e => setRoundFormat(div, roundNum, e.target.value as 'single' | 'bestOf3')}
-                          disabled={!isAdmin}
-                        >
-                          <option value="single">One Game</option>
-                          <option value="bestOf3">Match Play (Best of 3)</option>
-                        </select>
-                      </div>
-                      {col.map((m, i) => {
-                        let top = i * ROW_H * 2;
-                        if (colIdx > 0) {
-                          const prevCol = cols[colIdx - 1] || [];
-                          const srcIdxs = [
-                            prevCol.findIndex(p => p.id === m.team1SourceId),
-                            prevCol.findIndex(p => p.id === m.team2SourceId),
-                          ].filter(idx => idx >= 0);
-                          if (srcIdxs.length === 2) {
-                            top = ((Math.min(...srcIdxs) + Math.max(...srcIdxs)) / 2) * ROW_H * 2;
-                          } else if (srcIdxs.length === 1) {
-                            top = srcIdxs[0] * ROW_H * 2;
-                          }
+            <h3 className="font-semibold text-slate-700 mb-2 text-[14px]">
+              {div}
+              {isDouble && <span className="ml-2 text-[11px] font-normal text-slate-500">Double elimination</span>}
+            </h3>
+            {sides.map(side => {
+              const list = divMatches.filter(m => sideOf(m) === side);
+              const cols = buildVisualColumns(list, div).cols.filter(c => c.length > 0);
+              if (!cols.length) return null;
+              // The winners bracket lines up as a tree; the losers bracket and
+              // finals just stack each round's matches top to bottom.
+              const tree = side === 'W';
+              return (
+                <div key={side} className="mb-6">
+                  {isDouble && (
+                    <h4 className="text-[12px] font-semibold uppercase tracking-wide text-slate-500 mb-2">
+                      {side === 'W' ? 'Winners Bracket' : side === 'L' ? 'Losers Bracket' : 'Finals'}
+                    </h4>
+                  )}
+                  <div className="overflow-x-auto">
+                    <div className="grid gap-2" style={{ gridTemplateColumns: `repeat(${cols.length}, minmax(240px, 1fr))` }}>
+                      {cols.map((col, colIdx) => {
+                        const roundNum = col[0].round;
+                        const roundFormat = col[0].gameFormat ?? 'single';
+                        const header = (
+                          <div className="mb-2 flex items-center gap-1.5">
+                            <span className="text-[11px] font-medium text-slate-600">{roundTitle(side, roundNum, isDouble)}:</span>
+                            <select
+                              className="border border-slate-300 rounded px-1.5 py-0.5 text-[11px] bg-white"
+                              value={roundFormat}
+                              onChange={e => setRoundFormat(div, side, roundNum, e.target.value as 'single' | 'bestOf3')}
+                              disabled={!isAdmin}
+                            >
+                              <option value="single">One Game</option>
+                              <option value="bestOf3">Match Play (Best of 3)</option>
+                            </select>
+                          </div>
+                        );
+                        if (!tree) {
+                          return (
+                            <div key={colIdx}>
+                              {header}
+                              <div className="flex flex-col gap-4">
+                                {col.map(m => (
+                                  <RevcoBracketCard key={m.id} m={m} byId={byId} isDouble={isDouble} isAdmin={isAdmin} setGame={setGame} setScore={setScore} />
+                                ))}
+                              </div>
+                            </div>
+                          );
                         }
                         return (
-                          <div key={m.id} className="absolute left-0" style={{ top: top + 28 }}>
-                            <RevcoBracketCard m={m} byId={byId} isAdmin={isAdmin} setGame={setGame} setScore={setScore} />
+                          <div key={colIdx} className="relative" style={{ minHeight: `${Math.max(cols[0]?.length || 1, 1) * ROW_H * 2}px` }}>
+                            {header}
+                            {col.map((m, i) => {
+                              let top = i * ROW_H * 2;
+                              if (colIdx > 0) {
+                                const prevCol = cols[colIdx - 1] || [];
+                                const srcIdxs = [
+                                  prevCol.findIndex(p => p.id === m.team1SourceId),
+                                  prevCol.findIndex(p => p.id === m.team2SourceId),
+                                ].filter(idx => idx >= 0);
+                                if (srcIdxs.length === 2) {
+                                  top = ((Math.min(...srcIdxs) + Math.max(...srcIdxs)) / 2) * ROW_H * 2;
+                                } else if (srcIdxs.length === 1) {
+                                  top = srcIdxs[0] * ROW_H * 2;
+                                }
+                              }
+                              return (
+                                <div key={m.id} className="absolute left-0" style={{ top: top + 28 }}>
+                                  <RevcoBracketCard m={m} byId={byId} isDouble={isDouble} isAdmin={isAdmin} setGame={setGame} setScore={setScore} />
+                                </div>
+                              );
+                            })}
                           </div>
                         );
                       })}
                     </div>
-                  );
-                })}
-              </div>
-            </div>
+                  </div>
+                </div>
+              );
+            })}
           </div>
         );
       })}

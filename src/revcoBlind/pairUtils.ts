@@ -93,6 +93,11 @@ export function buildPairHistory(rounds: RevcoBDRound[], pairMap: Map<string, Pa
       }
     }
 
+    // Extra players left without a partner (e.g. more girls than guys).
+    for (const name of round.sitOuts ?? []) {
+      bump(sitOutCount, pairMap.get(slug(name)) ?? slug(name));
+    }
+
     // Opponent + court tracking for played matches only.
     for (let courtIdx = 0; courtIdx < round.matches.length; courtIdx++) {
       const match = round.matches[courtIdx];

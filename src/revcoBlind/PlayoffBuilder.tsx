@@ -3,6 +3,9 @@ import type { Team, BracketMatch, RevcoBDRound, ScoreSettings } from '../types';
 import { slug, shuffle, uniq, parseMickeyPairsGendered, parseMickeyFreeGendered } from '../utils';
 import { buildBracket } from '../components/BracketView';
 import { computeRevcoStandings, type UnitRow } from './Leaderboard';
+import { buildDoubleElimBracket } from './doubleElim';
+
+type ElimType = 'single' | 'double';
 
 type PreparedTeam = { id: string; name: string; players: string[] };
 
@@ -72,6 +75,11 @@ export function RevcoBDPlayoffBuilder({
   );
   const totalPlayers = units.reduce((n, u) => n + u.players.length, 0);
   const hasBracket = brackets.some(b => b.division === division);
+  // Default to whatever the current bracket is, so the toggle matches what's shown.
+  const [elimType, setElimType] = useState<ElimType>(() =>
+    brackets.some(b => b.division === division && b.bracketSide === 'L') ? 'double' : 'single');
+  const makeBracket = (teams: Team[]) =>
+    elimType === 'double' ? buildDoubleElimBracket(division, teams) : buildBracket(division, teams);
 
   const allPlayerNames = useMemo(
     () => uniq([
@@ -81,15 +89,17 @@ export function RevcoBDPlayoffBuilder({
     [pairsText, freeAgentsText],
   );
 
+  const minTeams = elimType === 'double' ? 3 : 2;
+
   const build = (mode: 'random' | 'crossover') => {
     const prepared = mode === 'random' ? formRandomTeams(units) : formCrossoverTeams(units);
-    if (prepared.length < 2) {
+    if (prepared.length < minTeams) {
       alert(mode === 'crossover'
         ? `Crossover pairing needs exactly 12 pairs/free agents. You currently have ${units.length}.`
-        : 'Need at least 2 teams worth of players to build a bracket.');
+        : `Need at least ${minTeams} teams worth of players to build a ${elimType}-elimination bracket.`);
       return;
     }
-    setBrackets(() => buildBracket(division, toTeamObjs(prepared, division)));
+    setBrackets(() => makeBracket(toTeamObjs(prepared, division)));
     setConfirmMode(null);
     setEditTeams([]);
   };
@@ -112,8 +122,8 @@ export function RevcoBDPlayoffBuilder({
 
   const buildFromEdit = () => {
     const objs = toTeamObjs(editTeams, division);
-    if (objs.length < 2) { alert('Need at least 2 teams (with players) to build a bracket.'); return; }
-    setBrackets(() => buildBracket(division, objs));
+    if (objs.length < minTeams) { alert(`Need at least ${minTeams} teams (with players) to build a ${elimType}-elimination bracket.`); return; }
+    setBrackets(() => makeBracket(objs));
     setEditTeams([]);
     setConfirmMode(null);
   };
@@ -145,7 +155,7 @@ export function RevcoBDPlayoffBuilder({
       <div>
         <h3 className="text-[16px] font-semibold text-sky-800">Playoffs ({division})</h3>
         <p className="text-[11px] text-slate-500 mt-1">
-          Builds a fresh single-elimination bracket by re-drawing new teams of 4 from your pairs and
+          Builds a fresh single- or double-elimination bracket by re-drawing new teams of 4 from your pairs and
           free agents, based on their pool-play record. Pairs always stay together. Adjust the
           auto-formed teams below before building, or build directly.
         </p>
@@ -154,6 +164,33 @@ export function RevcoBDPlayoffBuilder({
           · {rounds.length} round{rounds.length === 1 ? '' : 's'} played
         </p>
       </div>
+
+      <div className="flex items-center gap-2 flex-wrap">
+        <span className="text-[12px] text-slate-500 font-medium">Bracket type:</span>
+        <div className="flex rounded-lg border border-slate-200 overflow-hidden text-[12px] font-medium">
+          {([
+            { key: 'single', label: 'Single elimination' },
+            { key: 'double', label: 'Double elimination' },
+          ] as const).map(opt => (
+            <button
+              key={opt.key}
+              type="button"
+              className={'px-3 py-1.5 transition-colors ' + (elimType === opt.key ? 'bg-sky-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50')}
+              onClick={() => setElimType(opt.key)}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
+        <span className="text-[11px] text-slate-400">
+          {elimType === 'double'
+            ? 'Every team must lose twice to be out. Losers drop to a second bracket; Grand Final has an "if necessary" reset game.'
+            : 'One loss and you\'re out.'}
+        </span>
+      </div>
+      {elimType === 'double' && hasBracket && !brackets.some(b => b.division === division && b.bracketSide === 'L') && (
+        <p className="text-[11px] text-amber-700">The current bracket is single elimination — rebuild to switch it to double.</p>
+      )}
 
       <div className="flex items-center gap-2 flex-wrap">
         <button

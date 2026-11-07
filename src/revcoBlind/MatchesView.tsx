@@ -263,9 +263,12 @@ export function RevcoBDMatchesView({
                       </span>
                     )}
                   </div>
-                  {sitting.length > 0 && (
-                    <div className="text-[11px] text-slate-500">
-                      Sitting this round: {sitting.map(t => mickeyTeamLabel(t, pairsText)).join(' · ')}
+                  {(sitting.length > 0 || (round.sitOuts?.length ?? 0) > 0) && (
+                    <div className="text-[12px] text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1">
+                      <span className="font-semibold">Sitting this round:</span> {[
+                        ...sitting.map(t => mickeyTeamLabel(t, pairsText)),
+                        ...(round.sitOuts ?? []),
+                      ].join(' · ')}
                     </div>
                   )}
                 </div>

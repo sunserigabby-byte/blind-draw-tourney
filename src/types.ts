@@ -45,6 +45,10 @@ export interface BracketMatch {
   // `score`) or best-of-3 match play (uses `games`). Set per round, in
   // advance of that round starting; defaults to 'single' when unset.
   gameFormat?: 'single' | 'bestOf3';
+  // Revco Quads double elimination: which part of the bracket this match is in.
+  // 'W' = winners bracket, 'L' = losers bracket, 'F' = grand final (+ reset).
+  // Unset means a plain single-elimination match.
+  bracketSide?: 'W' | 'L' | 'F';
 }
 
 export type QuadsMatchRow = {
@@ -115,6 +119,9 @@ export type RevcoBDRound = {
   number: number;
   teams: MickeyTeam[];
   matches: RevcoMatchRow[];
+  // Individual players left without a partner this round (e.g. more girls
+  // than guys) — they aren't on any team and sit the whole round.
+  sitOuts?: string[];
 };
 
 // Configurable score rules — changeable per format anytime during the tournament

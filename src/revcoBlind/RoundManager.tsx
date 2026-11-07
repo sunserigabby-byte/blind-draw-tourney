@@ -120,6 +120,28 @@ function pairFreeAgentsGreedy(
   return pairs;
 }
 
+// Phase 0a — Pick who sits when guys and girls don't match up.
+// Every free agent needs an opposite-gender partner, so the surplus side
+// (usually girls) sits the round. Whoever has sat the fewest times so far
+// plays; ties are broken randomly so the same people don't always sit.
+function pickSurplusSitOuts(
+  guyNames: string[],
+  girlNames: string[],
+  history: PairHistory,
+): { guys: string[]; girls: string[]; sitOuts: string[] } {
+  const extra = Math.abs(guyNames.length - girlNames.length);
+  if (extra === 0) return { guys: guyNames, girls: girlNames, sitOuts: [] };
+  const bigger = guyNames.length > girlNames.length ? guyNames : girlNames;
+  const ranked = bigger
+    .map(name => ({ name, sat: history.sitOutCount.get(slug(name)) ?? 0, r: Math.random() }))
+    .sort((a, b) => b.sat - a.sat || a.r - b.r);
+  // Players who have sat the fewest times are at the END of `ranked`.
+  const sitOuts = ranked.slice(ranked.length - extra).map(x => x.name);
+  const sitSet = new Set(sitOuts);
+  const keep = (list: string[]) => list.filter(n => !sitSet.has(n));
+  return { guys: keep(guyNames), girls: keep(girlNames), sitOuts };
+}
+
 // Phase 1 — Greedy history-aware team formation.
 // Pairs that have been teammates least often get grouped first.
 // noise > 0 adds random jitter so repeated calls explore different groupings.
@@ -230,7 +252,7 @@ function pickBestCandidate(
   history: PairHistory,
   pairMap: Map<string, PairId>,
   useSmart: boolean,
-): { teams: MickeyTeam[]; matches: RevcoMatchRow[] } | null {
+): { teams: MickeyTeam[]; matches: RevcoMatchRow[]; sitOuts: string[] } | null {
   // Registered pairs — always stay together
   const registeredPairIds: PairId[] = parseMickeyPairsGendered(pairsText)
     .map(members => members.map(m => slug(m.name)).sort().join('|'));
@@ -261,13 +283,15 @@ function pickBestCandidate(
   const soloIds: PairId[] = soloNames.map(n => slug(n));
 
   const tries = useSmart ? SMART_CANDIDATES : 1;
-  let best: { teams: MickeyTeam[]; matches: RevcoMatchRow[]; score: number } | null = null;
+  let best: { teams: MickeyTeam[]; matches: RevcoMatchRow[]; sitOuts: string[]; score: number } | null = null;
 
   for (let i = 0; i < tries; i++) {
     const noise = i === 0 ? 0 : 2.0;
 
-    // Phase 0: pair free agents into temporary M+F partners for this round
-    const tempPairs = pairFreeAgentsGreedy(guyNames, girlNames, history, noise);
+    // Phase 0: sit the surplus gender, then pair the rest into temporary
+    // M+F partners for this round
+    const surplus = pickSurplusSitOuts(guyNames, girlNames, history);
+    const tempPairs = pairFreeAgentsGreedy(surplus.guys, surplus.girls, history, noise);
 
     const allPairIds: PairId[] = [
       ...registeredPairIds,
@@ -285,14 +309,15 @@ function pickBestCandidate(
     const matchPairs = greedyOpponentMatching(groups, history, noise);
     if (matchPairs.length === 0) continue;
     const { teams, matches } = buildRoundFromGroups(groups, matchPairs, pairIdToPlayers, roundNumber);
-    const score = useSmart ? scorePairCandidate(teams, matches, history, pairMap) : 0;
+    let score = useSmart ? scorePairCandidate(teams, matches, history, pairMap) : 0;
+    for (const name of surplus.sitOuts) score += (history.sitOutCount.get(slug(name)) ?? 0) * SITOUT_WEIGHT;
     // <= (not <) so that when candidates tie — always true on Round 1, since
     // there's no history yet to score against — a later, shuffled candidate
     // wins instead of defaulting to the very first, unshuffled, list-order one.
-    if (!best || score <= best.score) best = { teams, matches, score };
+    if (!best || score <= best.score) best = { teams, matches, sitOuts: surplus.sitOuts, score };
   }
 
-  return best ? { teams: best.teams, matches: best.matches } : null;
+  return best ? { teams: best.teams, matches: best.matches, sitOuts: best.sitOuts } : null;
 }
 
 // ── Manual edit state ─────────────────────────────────────────────────────────
@@ -378,6 +403,18 @@ export function RevcoBDRoundManager({
     guysCount +
     girlsCount;
 
+  // Free agents need an opposite-gender partner, so any gap sits each round.
+  const { genderGap, extraGender } = useMemo(() => {
+    let guys = 0, girls = 0;
+    if (rosterType === 'freeAgents') { guys = guysCount; girls = girlsCount; }
+    else if (rosterType === 'mixed') {
+      const free = parseMickeyFreeGendered(freeAgentsText);
+      guys = free.filter(m => m.gender === 'M').length;
+      girls = free.filter(m => m.gender === 'F').length;
+    }
+    return { genderGap: Math.abs(guys - girls), extraGender: girls > guys ? 'girl' : 'guy' };
+  }, [rosterType, guysCount, girlsCount, freeAgentsText]);
+
   const allPlayerNames = useMemo(
     () => uniq([
       ...parseMickeyPairsGendered(pairsText).flat().map(m => m.name),
@@ -401,6 +438,7 @@ export function RevcoBDRoundManager({
       number: prev.length + 1,
       teams: result.teams,
       matches: result.matches,
+      sitOuts: result.sitOuts,
     }]);
   };
 
@@ -416,7 +454,7 @@ export function RevcoBDRoundManager({
         const history = buildPairHistory(working, pairMap);
         const result = pickBestCandidate(pairsText, freeAgentsText, guysText, girlsText, rosterType, working.length + 1, history, pairMap, useSmart);
         if (!result) break;
-        working.push({ id: rid(), number: working.length + 1, teams: result.teams, matches: result.matches });
+        working.push({ id: rid(), number: working.length + 1, teams: result.teams, matches: result.matches, sitOuts: result.sitOuts });
       }
       return working;
     });
@@ -430,7 +468,7 @@ export function RevcoBDRoundManager({
       const history = buildPairHistory(otherRounds, pairMap);
       const result = pickBestCandidate(pairsText, freeAgentsText, guysText, girlsText, rosterType, r.number, history, pairMap, useSmart);
       if (!result) return r;
-      return { ...r, teams: result.teams, matches: result.matches };
+      return { ...r, teams: result.teams, matches: result.matches, sitOuts: result.sitOuts };
     }));
     setConfirmRedrawId(null);
   };
@@ -460,7 +498,9 @@ export function RevcoBDRoundManager({
         const existing = r.matches.find(m => m.id === em.id);
         return { ...(existing ?? { id: em.id, pool: r.number }), teamAId: em.teamAId, teamBId: em.teamBId };
       });
-      return { ...r, teams: newTeams, matches: newMatches };
+      const placed = new Set(newTeams.flatMap(t => t.players));
+      const sitOuts = (r.sitOuts ?? []).filter(n => !placed.has(n));
+      return { ...r, teams: newTeams, matches: newMatches, sitOuts };
     }));
     setEditingId(null);
     setEditBuffer(null);
@@ -495,6 +535,11 @@ export function RevcoBDRoundManager({
             }
             {totalPlayers > 0 && ` · ${totalPlayers} player${totalPlayers === 1 ? '' : 's'} total`}
           </span>
+          {genderGap > 0 && (
+            <span className="ml-2 text-[11px] text-amber-700">
+              {genderGap} extra {extraGender}{genderGap === 1 ? '' : 's'} will sit each round (rotates fairly).
+            </span>
+          )}
         </span>
         <label className="flex items-center gap-1.5">
           Courts available:
@@ -662,6 +707,12 @@ export function RevcoBDRoundManager({
                         </div>
                       );
                     })}
+                    {(round.sitOuts?.length ?? 0) > 0 && (
+                      <div className="rounded px-2 py-1 border bg-amber-50 border-amber-200 md:col-span-2">
+                        <span className="text-[10px] text-amber-600 font-semibold">sitting out (no partner this round)</span>
+                        <span className="text-slate-500"> — {round.sitOuts!.join(', ')}</span>
+                      </div>
+                    )}
                   </div>
                 )}
 
