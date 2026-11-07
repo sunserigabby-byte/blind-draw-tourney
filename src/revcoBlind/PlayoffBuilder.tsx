@@ -19,19 +19,53 @@ function toTeamObjs(teams: PreparedTeam[], division: 'UPPER' | 'LOWER'): Team[] 
   }));
 }
 
-// Random: shuffle every pair/free agent, then group consecutive units into
-// teams of 4 players. An odd unit left over sits out this bracket.
-function formRandomTeams(units: UnitRow[]): PreparedTeam[] {
-  const shuffled = shuffle(units);
-  const teams: PreparedTeam[] = [];
-  for (let i = 0; i + 1 < shuffled.length; i += 2) {
-    teams.push({
-      id: `rand-${teams.length + 1}`,
-      name: `${shuffled[i].label} / ${shuffled[i + 1].label}`,
-      players: [...shuffled[i].players, ...shuffled[i + 1].players],
-    });
+type Gender = 'M' | 'F' | null;
+type BuildMode = 'ranked' | 'random' | 'crossover';
+
+// Teams of 4 = 2 guys + 2 girls. Registered pairs (already 1 guy + 1 girl)
+// team up two at a time; free agents are split into a guys list and a girls
+// list and grouped two-and-two.
+//   ranked — each list in standings order, so guys 1-2 + girls 1-2 make
+//            Team 1 (seed 1), guys 3-4 + girls 3-4 make Team 2, and so on.
+//   random — each list shuffled first.
+// Anyone who can't make a full 2+2 team is returned in `leftOut`.
+function formQuadTeams(
+  units: UnitRow[],
+  genderOf: Map<string, Gender>,
+  mode: 'ranked' | 'random',
+): { teams: PreparedTeam[]; leftOut: string[] } {
+  const order = <T,>(list: T[]) => (mode === 'random' ? shuffle(list) : list);
+  const pairs = order(units.filter(u => u.kind === 'pair' && u.players.length >= 2));
+  const free = units.filter(u => !(u.kind === 'pair' && u.players.length >= 2));
+  const g = (u: UnitRow) => genderOf.get(slug(u.players[0])) ?? null;
+  const guys = order(free.filter(u => g(u) === 'M'));
+  const girls = order(free.filter(u => g(u) === 'F'));
+  // No (M)/(F) marker: fill whichever side is shorter.
+  for (const u of order(free.filter(u => g(u) === null))) (guys.length <= girls.length ? guys : girls).push(u);
+
+  const teams: { units: UnitRow[] }[] = [];
+  for (let i = 0; i + 1 < pairs.length; i += 2) teams.push({ units: [pairs[i], pairs[i + 1]] });
+  const oddPair = pairs.length % 2 === 1 ? pairs[pairs.length - 1] : null;
+  if (oddPair && guys.length && girls.length) teams.push({ units: [oddPair, guys.shift()!, girls.shift()!] });
+  while (guys.length >= 2 && girls.length >= 2) {
+    teams.push({ units: [guys.shift()!, guys.shift()!, girls.shift()!, girls.shift()!] });
   }
-  return teams;
+
+  // With pairs in the mix, seed by the team's combined record.
+  if (mode === 'ranked' && pairs.length > 0) {
+    const tot = (t: { units: UnitRow[] }, k: 'W' | 'PD') => t.units.reduce((n, u) => n + u[k], 0);
+    teams.sort((a, b) => tot(b, 'W') - tot(a, 'W') || tot(b, 'PD') - tot(a, 'PD'));
+  }
+
+  const used = new Set(teams.flatMap(t => t.units));
+  const leftOut = units.filter(u => !used.has(u)).flatMap(u => u.players);
+  return {
+    teams: teams.map((t, i) => {
+      const players = t.units.flatMap(u => u.players);
+      return { id: `${mode}-${i + 1}`, name: players.join(' / '), players };
+    }),
+    leftOut,
+  };
 }
 
 // Crossover: rank all 12 pairs/free agents by pool-play record, split into
@@ -58,6 +92,7 @@ export function RevcoBDPlayoffBuilder({
   division,
   scoreSettings = { playTo: 21, cap: null },
   overrides = {},
+  excluded = [],
 }: {
   rounds: RevcoBDRound[];
   pairsText: string;
@@ -67,14 +102,30 @@ export function RevcoBDPlayoffBuilder({
   division: 'UPPER' | 'LOWER';
   scoreSettings?: ScoreSettings;
   overrides?: RevcoOverrides;
+  // Players not playing in the playoffs (chosen in PlayoffExclusions).
+  excluded?: string[];
 }) {
-  const [confirmMode, setConfirmMode] = useState<'random' | 'crossover' | null>(null);
+  const [confirmMode, setConfirmMode] = useState<BuildMode | null>(null);
   const [editTeams, setEditTeams] = useState<PreparedTeam[]>([]);
 
-  const units = useMemo(
+  const allUnits = useMemo(
     () => computeRevcoStandings(rounds, pairsText, freeAgentsText, scoreSettings, overrides),
     [rounds, pairsText, freeAgentsText, scoreSettings, overrides],
   );
+  // Leave out anyone not playing playoffs (a registered pair drops out together).
+  const excludedSet = useMemo(() => new Set(excluded.map(slug)), [excluded]);
+  const units = useMemo(
+    () => allUnits.filter(u => !u.players.some(p => excludedSet.has(slug(p)))),
+    [allUnits, excludedSet],
+  );
+  const genderOf = useMemo(() => {
+    const m = new Map<string, Gender>();
+    for (const pair of parseMickeyPairsGendered(pairsText)) for (const p of pair) m.set(slug(p.name), p.gender);
+    for (const p of parseMickeyFreeGendered(freeAgentsText)) m.set(slug(p.name), p.gender);
+    return m;
+  }, [pairsText, freeAgentsText]);
+  const rankedPreview = useMemo(() => formQuadTeams(units, genderOf, 'ranked'), [units, genderOf]);
+
   const totalPlayers = units.reduce((n, u) => n + u.players.length, 0);
   const hasBracket = brackets.some(b => b.division === division);
   // Default to whatever the current bracket is, so the toggle matches what's shown.
@@ -93,8 +144,11 @@ export function RevcoBDPlayoffBuilder({
 
   const minTeams = elimType === 'double' ? 3 : 2;
 
-  const build = (mode: 'random' | 'crossover') => {
-    const prepared = mode === 'random' ? formRandomTeams(units) : formCrossoverTeams(units);
+  const formFor = (mode: BuildMode): PreparedTeam[] =>
+    mode === 'crossover' ? formCrossoverTeams(units) : formQuadTeams(units, genderOf, mode).teams;
+
+  const build = (mode: BuildMode) => {
+    const prepared = formFor(mode);
     if (prepared.length < minTeams) {
       alert(mode === 'crossover'
         ? `Crossover pairing needs exactly 12 pairs/free agents. You currently have ${units.length}.`
@@ -106,13 +160,13 @@ export function RevcoBDPlayoffBuilder({
     setEditTeams([]);
   };
 
-  const onClickBuild = (mode: 'random' | 'crossover') => {
+  const onClickBuild = (mode: BuildMode) => {
     if (hasBracket) setConfirmMode(mode);
     else build(mode);
   };
 
-  const prepareToEdit = (mode: 'random' | 'crossover') => {
-    const prepared = mode === 'random' ? formRandomTeams(units) : formCrossoverTeams(units);
+  const prepareToEdit = (mode: BuildMode) => {
+    const prepared = formFor(mode);
     if (prepared.length < 2) {
       alert(mode === 'crossover'
         ? `Crossover pairing needs exactly 12 pairs/free agents. You currently have ${units.length}.`
@@ -157,9 +211,9 @@ export function RevcoBDPlayoffBuilder({
       <div>
         <h3 className="text-[16px] font-semibold text-sky-800">Playoffs ({division})</h3>
         <p className="text-[11px] text-slate-500 mt-1">
-          Builds a fresh single- or double-elimination bracket by re-drawing new teams of 4 from your pairs and
-          free agents, based on their pool-play record. Pairs always stay together. Adjust the
-          auto-formed teams below before building, or build directly.
+          Builds a single- or double-elimination bracket from new teams of 4 (2 guys + 2 girls). Ranked groups guys
+          and girls by their pool-play standings: the top 2 guys + top 2 girls are Team 1, the next 2 + 2 are Team 2,
+          and so on. Pairs always stay together. Adjust the auto-formed teams before building, or build directly.
         </p>
         <p className="text-[11px] text-slate-500 mt-1">
           {totalPlayers} player{totalPlayers === 1 ? '' : 's'} · {units.length} pair/agent{units.length === 1 ? '' : 's'}{' '}
@@ -193,6 +247,38 @@ export function RevcoBDPlayoffBuilder({
       {elimType === 'double' && hasBracket && !brackets.some(b => b.division === division && b.bracketSide === 'L') && (
         <p className="text-[11px] text-amber-700">The current bracket is single elimination — rebuild to switch it to double.</p>
       )}
+
+      {rankedPreview.teams.length > 0 && (
+        <div className="border border-slate-200 rounded-lg p-3 bg-slate-50/60 text-[12px] space-y-1">
+          <div className="font-semibold text-slate-700">Ranked teams preview</div>
+          {rankedPreview.teams.map((t, i) => (
+            <div key={t.id}><span className="font-semibold text-sky-800">Seed {i + 1}:</span> {t.players.join(', ')}</div>
+          ))}
+          {rankedPreview.leftOut.length > 0 && (
+            <div className="text-amber-700">
+              Can't fit on a 2 guys + 2 girls team: {rankedPreview.leftOut.join(', ')}. Mark someone as not playing,
+              or use "Prepare Ranked Teams to Edit" to place them by hand.
+            </div>
+          )}
+        </div>
+      )}
+
+      <div className="flex items-center gap-2 flex-wrap">
+        <button
+          className="px-3 py-1.5 rounded-lg bg-sky-600 text-white hover:bg-sky-700 text-[13px] disabled:opacity-40"
+          disabled={rankedPreview.teams.length < minTeams}
+          onClick={() => onClickBuild('ranked')}
+        >
+          {hasBracket ? 'Rebuild Ranked Bracket (1-4, 5-8…)' : 'Build Ranked Bracket (1-4, 5-8…)'}
+        </button>
+        <button
+          className="px-2.5 py-1.5 rounded-lg border border-slate-300 text-slate-700 hover:bg-slate-50 text-[12px] disabled:opacity-40"
+          disabled={rankedPreview.teams.length < 2}
+          onClick={() => prepareToEdit('ranked')}
+        >
+          Prepare Ranked Teams to Edit…
+        </button>
+      </div>
 
       <div className="flex items-center gap-2 flex-wrap">
         <button

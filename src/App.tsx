@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import type { MatchRow, TriplesMatchRow, BracketMatch, KobGameRow, ScoreSettings, MickeyTeam, MickeyMatchRow, RevcoMatchRow, RevcoBDRound } from './types';
+import type { MatchRow, TriplesMatchRow, BracketMatch, KobGameRow, ScoreSettings, MickeyTeam, MickeyMatchRow, RevcoMatchRow, RevcoBDRound, RevcoRotPlayoff } from './types';
 import { apiGetState, apiSaveState, apiSaveRevcoScore, apiSaveDoublesScore } from './api';
+import { uniq, parseMickeyPairsGendered, parseMickeyFreeGendered } from './utils';
 import { SunnyLogo } from './components/SunnyLogo';
 import { LineNumberTextarea } from './components/LinedTextarea';
 import { BracketView } from './components/BracketView';
@@ -34,6 +35,8 @@ import { RevcoBDLeaderboard, RevcoBDStandingsCompact, type RevcoOverrides } from
 import { RevcoBDFairnessReport } from './revcoBlind/FairnessReport';
 import { RevcoBDPlayoffBuilder } from './revcoBlind/PlayoffBuilder';
 import { RevcoBDBracketView } from './revcoBlind/BracketView';
+import { RevcoRotatingPlayoff } from './revcoBlind/RotatingPlayoff';
+import { PlayoffExclusions } from './revcoBlind/PlayoffExclusions';
 import { ScoreSettingsPanel } from './components/ScoreSettingsPanel';
 import { Sidebar, SIDEBAR_DIVISIONS, SIDEBAR_SECTIONS, type SidebarSection, type SidebarTabKey } from './components/Sidebar';
 import { ThemeToggle, readStoredTheme, applyTheme, persistTheme, type Theme } from './components/ThemeToggle';
@@ -109,6 +112,12 @@ type RevcoBDDivisionState = {
   rosterType?: RosterType;
   // Admin hand-set W/L/PD per pair / free agent (keyed by unitOverrideKey).
   standingsOverrides?: RevcoOverrides;
+  // Players sitting out the playoffs entirely.
+  playoffExcluded?: string[];
+  // 'bracket' = fixed teams in a single/double-elim bracket (default);
+  // 'rotating' = double elimination by player with new teams every round.
+  playoffFormat?: 'bracket' | 'rotating';
+  rotatingPlayoff?: RevcoRotPlayoff;
 };
 function emptyRevcoBDState(): RevcoBDDivisionState {
   return { pairsText: "", freeAgentsText: "", guysText: "", girlsText: "", rounds: [], brackets: [], courtCount: 1, startHour: 9, slotMinutes: 45, scorerPin: "", publicScoring: false, rosterType: 'mixed' };
@@ -1361,33 +1370,75 @@ export default function BlindDrawTourneyApp() {
         );
       }
       if (activeSection === 'PLAYOFFS') {
+        const rbdFreeText = (currentRBD.rosterType ?? 'mixed') === 'freeAgents'
+          ? [currentRBD.guysText ?? '', currentRBD.girlsText ?? ''].join('\n')
+          : currentRBD.freeAgentsText;
+        const rbdAllPlayers = uniq([
+          ...parseMickeyPairsGendered(currentRBD.pairsText).flat().map(m => m.name),
+          ...parseMickeyFreeGendered(rbdFreeText).map(m => m.name),
+        ].filter(Boolean));
+        const playoffFormat = currentRBD.playoffFormat ?? 'bracket';
         return (
           <>
             <RevcoBDStandingsCompact
               rounds={currentRBD.rounds ?? []}
               pairsText={currentRBD.pairsText}
-              freeAgentsText={
-                (currentRBD.rosterType ?? 'mixed') === 'freeAgents'
-                  ? [currentRBD.guysText ?? '', currentRBD.girlsText ?? ''].join('\n')
-                  : currentRBD.freeAgentsText
-              }
+              freeAgentsText={rbdFreeText}
               scoreSettings={rbdScoreSettings}
               overrides={currentRBD.standingsOverrides ?? {}}
             />
+            {isAdmin && (
+              <>
+                <div className="flex items-center gap-2 flex-wrap bg-white/95 rounded-xl shadow ring-1 ring-slate-200 px-4 py-3">
+                  <span className="text-[12px] text-slate-500 font-medium">Playoff format:</span>
+                  <div className="flex rounded-lg border border-slate-200 overflow-hidden text-[12px] font-medium">
+                    {([
+                      { key: 'rotating', label: 'Rotating teams (double elim by player)' },
+                      { key: 'bracket', label: 'Fixed-team bracket' },
+                    ] as const).map(opt => (
+                      <button
+                        key={opt.key}
+                        type="button"
+                        className={'px-3 py-1.5 transition-colors ' + (playoffFormat === opt.key ? 'bg-sky-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50')}
+                        onClick={() => setCurrentRBD(p => ({ ...p, playoffFormat: opt.key }))}
+                      >
+                        {opt.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <PlayoffExclusions
+                  allPlayers={rbdAllPlayers}
+                  excluded={currentRBD.playoffExcluded ?? []}
+                  setExcluded={(names: string[]) => setCurrentRBD(p => ({ ...p, playoffExcluded: names }))}
+                />
+              </>
+            )}
+            {playoffFormat === 'rotating' ? (
+              <RevcoRotatingPlayoff
+                rounds={currentRBD.rounds ?? []}
+                pairsText={currentRBD.pairsText}
+                freeAgentsText={rbdFreeText}
+                scoreSettings={rbdScoreSettings}
+                overrides={currentRBD.standingsOverrides ?? {}}
+                excluded={currentRBD.playoffExcluded ?? []}
+                playoff={currentRBD.rotatingPlayoff}
+                setPlayoff={(f) => setCurrentRBD(p => ({ ...p, rotatingPlayoff: f(p.rotatingPlayoff) }))}
+                isAdmin={isAdmin}
+              />
+            ) : (
+            <>
             <fieldset disabled={!isAdmin} className={!isAdmin ? "opacity-95" : ""}>
               <RevcoBDPlayoffBuilder
                 rounds={currentRBD.rounds ?? []}
                 pairsText={currentRBD.pairsText}
-                freeAgentsText={
-                  (currentRBD.rosterType ?? 'mixed') === 'freeAgents'
-                    ? [currentRBD.guysText ?? '', currentRBD.girlsText ?? ''].join('\n')
-                    : currentRBD.freeAgentsText
-                }
+                freeAgentsText={rbdFreeText}
                 brackets={currentRBD.brackets ?? []}
                 setBrackets={(v: any) => setCurrentRBD(p => ({ ...p, brackets: typeof v === 'function' ? v(p.brackets ?? []) : v }))}
                 division={activeDivision}
                 scoreSettings={rbdScoreSettings}
                 overrides={currentRBD.standingsOverrides ?? {}}
+                excluded={currentRBD.playoffExcluded ?? []}
               />
             </fieldset>
             <RevcoBDBracketView
@@ -1395,6 +1446,8 @@ export default function BlindDrawTourneyApp() {
               setBrackets={(v: any) => setCurrentRBD(p => ({ ...p, brackets: typeof v === 'function' ? v(p.brackets ?? []) : v }))}
               isAdmin={isAdmin}
             />
+            </>
+            )}
           </>
         );
       }

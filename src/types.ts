@@ -127,6 +127,36 @@ export type RevcoBDRound = {
   makeup?: boolean;
 };
 
+// Revco Quads "rotating teams" playoff — double elimination by PLAYER.
+// Every round, still-alive players are re-ranked and drawn into new teams
+// of 2 guys + 2 girls; a player is out after their 2nd loss.
+export type RevcoRotPlayer = {
+  name: string;
+  gender: 'M' | 'F' | null;
+  // Pool-play record when the playoff started (used for ranking).
+  poolW: number;
+  poolPD: number;
+};
+export type RevcoRotMatch = {
+  id: string;
+  // 'W' = undefeated group, 'L' = one-loss group, 'MIX' = groups combined
+  // because neither could field a match, 'F' = the final.
+  group: 'W' | 'L' | 'MIX' | 'F';
+  teamA: string[];
+  teamB: string[];
+  score?: string;
+};
+export type RevcoRotRound = {
+  id: string;
+  number: number;
+  matches: RevcoRotMatch[];
+  sitting: string[];
+};
+export type RevcoRotPlayoff = {
+  players: RevcoRotPlayer[];
+  rounds: RevcoRotRound[];
+};
+
 // Configurable score rules — changeable per format anytime during the tournament
 export type ScoreSettings = { playTo: number; cap: number | null };
 

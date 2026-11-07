@@ -114,6 +114,27 @@ export function computeRevcoStandings(
   return rows;
 }
 
+// Split standings into Guys / Girls (by the (M)/(F) marker on free agents),
+// keeping the overall order inside each group. Registered pairs and free
+// agents without a marker go in a third group.
+export function splitStandingsByGender(
+  rows: UnitRow[],
+  pairsText: string,
+  freeAgentsText: string,
+): { title: string; rows: UnitRow[] }[] {
+  const genderOf = new Map<string, 'M' | 'F' | null>();
+  for (const pair of parseMickeyPairsGendered(pairsText)) for (const p of pair) genderOf.set(slug(p.name), p.gender);
+  for (const p of parseMickeyFreeGendered(freeAgentsText)) genderOf.set(slug(p.name), p.gender);
+  const g = (r: UnitRow) => (r.kind === 'free' ? genderOf.get(slug(r.players[0])) ?? null : null);
+  const groups = [
+    { title: 'Guys', rows: rows.filter(r => g(r) === 'M') },
+    { title: 'Girls', rows: rows.filter(r => g(r) === 'F') },
+    { title: 'Pairs & others', rows: rows.filter(r => g(r) === null) },
+  ].filter(x => x.rows.length > 0);
+  // No gender info at all — just one list.
+  return groups.length === 1 ? [{ title: '', rows }] : groups;
+}
+
 export function RevcoBDLeaderboard({
   rounds,
   pairsText,
@@ -157,12 +178,17 @@ export function RevcoBDLeaderboard({
     />
   );
 
+  const groups = useMemo(
+    () => splitStandingsByGender(unitRows, pairsText, freeAgentsText),
+    [unitRows, pairsText, freeAgentsText],
+  );
+
   if (unitRows.length === 0) return null;
 
   return (
     <section className="space-y-4">
       <div>
-        <h2 className="text-[18px] font-bold text-sky-900 mb-1">Standings — by Pair / Free Agent</h2>
+        <h2 className="text-[18px] font-bold text-sky-900 mb-1">Standings</h2>
         <p className="text-[11px] text-slate-500">
           Wins tallied per match across every round played. Play to {scoreSettings.playTo}
           {scoreSettings.cap ? `, cap ${scoreSettings.cap}` : ', no cap'}, win by 2.
@@ -175,76 +201,79 @@ export function RevcoBDLeaderboard({
         )}
       </div>
 
-      <section className="bg-white/95 backdrop-blur rounded-xl shadow ring-1 ring-slate-200 p-4">
-        <div className="overflow-x-auto">
-          <table className="min-w-full text-[13px]">
-            <thead>
-              <tr className="text-left text-slate-600">
-                <th className="py-1 px-2">#</th>
-                <th className="py-1 px-2">Pair / Free Agent</th>
-                <th className="py-1 px-2 text-center">Rounds</th>
-                <th className="py-1 px-2">W</th>
-                <th className="py-1 px-2">L</th>
-                <th className="py-1 px-2">PD</th>
-                {canEdit && <th className="py-1 px-2" />}
-              </tr>
-            </thead>
-            <tbody>
-              {unitRows.map((r, i) => {
-                const isEditing = editingKey === r.overrideKey;
-                return (
-                <tr key={r.key} className={'border-t ' + (r.overridden ? 'bg-amber-50/60' : '')}>
-                  <td className="py-1 px-2 tabular-nums font-semibold text-sky-800">{i + 1}</td>
-                  <td className="py-1 px-2">
-                    <span className="mr-1.5">{r.label}</span>
-                    <span className={
-                      'text-[10px] px-1.5 py-0.5 rounded-full ' +
-                      (r.kind === 'pair' ? 'bg-blue-100 text-blue-700' : 'bg-slate-100 text-slate-600')
-                    }>
-                      {r.kind === 'pair' ? 'Pair' : 'Free agent'}
-                    </span>
-                    {r.overridden && (
-                      <span className="ml-1 text-[10px] px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-800">edited</span>
-                    )}
-                  </td>
-                  <td className="py-1 px-2 tabular-nums text-center text-slate-500">{r.rounds}</td>
-                  {isEditing ? (
-                    <>
-                      <td className="py-1 px-2">{numInput('W')}</td>
-                      <td className="py-1 px-2">{numInput('L')}</td>
-                      <td className="py-1 px-2">{numInput('PD')}</td>
-                    </>
-                  ) : (
-                    <>
-                      <td className="py-1 px-2 tabular-nums">{r.W}</td>
-                      <td className="py-1 px-2 tabular-nums">{r.L}</td>
-                      <td className="py-1 px-2 tabular-nums">{r.PD > 0 ? `+${r.PD}` : r.PD}</td>
-                    </>
-                  )}
-                  {canEdit && (
-                    <td className="py-1 px-2 whitespace-nowrap">
-                      {isEditing ? (
-                        <span className="inline-flex gap-1">
-                          <button className="px-2 py-0.5 rounded bg-emerald-600 text-white text-[11px] hover:bg-emerald-700" onClick={saveEdit}>Save</button>
-                          <button className="px-2 py-0.5 rounded border text-[11px]" onClick={() => setEditingKey(null)}>Cancel</button>
-                        </span>
-                      ) : (
-                        <span className="inline-flex gap-1">
-                          <button className="px-2 py-0.5 rounded border text-slate-700 hover:bg-slate-50 text-[11px]" onClick={() => startEdit(r)}>Edit</button>
-                          {r.overridden && (
-                            <button className="px-2 py-0.5 rounded text-red-600 hover:bg-red-50 text-[11px]" onClick={() => clearOverride(r.overrideKey)} title="Go back to the calculated numbers">Reset</button>
-                          )}
-                        </span>
+      {groups.map(group => (
+        <section key={group.title} className="bg-white/95 backdrop-blur rounded-xl shadow ring-1 ring-slate-200 p-4">
+          {group.title && <h3 className="text-[15px] font-semibold text-sky-800 mb-2">{group.title}</h3>}
+          <div className="overflow-x-auto">
+            <table className="min-w-full text-[13px]">
+              <thead>
+                <tr className="text-left text-slate-600">
+                  <th className="py-1 px-2">#</th>
+                  <th className="py-1 px-2">Pair / Free Agent</th>
+                  <th className="py-1 px-2 text-center">Rounds</th>
+                  <th className="py-1 px-2">W</th>
+                  <th className="py-1 px-2">L</th>
+                  <th className="py-1 px-2">PD</th>
+                  {canEdit && <th className="py-1 px-2" />}
+                </tr>
+              </thead>
+              <tbody>
+                {group.rows.map((r, i) => {
+                  const isEditing = editingKey === r.overrideKey;
+                  return (
+                  <tr key={r.key} className={'border-t ' + (r.overridden ? 'bg-amber-50/60' : '')}>
+                    <td className="py-1 px-2 tabular-nums font-semibold text-sky-800">{i + 1}</td>
+                    <td className="py-1 px-2">
+                      <span className="mr-1.5">{r.label}</span>
+                      <span className={
+                        'text-[10px] px-1.5 py-0.5 rounded-full ' +
+                        (r.kind === 'pair' ? 'bg-blue-100 text-blue-700' : 'bg-slate-100 text-slate-600')
+                      }>
+                        {r.kind === 'pair' ? 'Pair' : 'Free agent'}
+                      </span>
+                      {r.overridden && (
+                        <span className="ml-1 text-[10px] px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-800">edited</span>
                       )}
                     </td>
-                  )}
-                </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      </section>
+                    <td className="py-1 px-2 tabular-nums text-center text-slate-500">{r.rounds}</td>
+                    {isEditing ? (
+                      <>
+                        <td className="py-1 px-2">{numInput('W')}</td>
+                        <td className="py-1 px-2">{numInput('L')}</td>
+                        <td className="py-1 px-2">{numInput('PD')}</td>
+                      </>
+                    ) : (
+                      <>
+                        <td className="py-1 px-2 tabular-nums">{r.W}</td>
+                        <td className="py-1 px-2 tabular-nums">{r.L}</td>
+                        <td className="py-1 px-2 tabular-nums">{r.PD > 0 ? `+${r.PD}` : r.PD}</td>
+                      </>
+                    )}
+                    {canEdit && (
+                      <td className="py-1 px-2 whitespace-nowrap">
+                        {isEditing ? (
+                          <span className="inline-flex gap-1">
+                            <button className="px-2 py-0.5 rounded bg-emerald-600 text-white text-[11px] hover:bg-emerald-700" onClick={saveEdit}>Save</button>
+                            <button className="px-2 py-0.5 rounded border text-[11px]" onClick={() => setEditingKey(null)}>Cancel</button>
+                          </span>
+                        ) : (
+                          <span className="inline-flex gap-1">
+                            <button className="px-2 py-0.5 rounded border text-slate-700 hover:bg-slate-50 text-[11px]" onClick={() => startEdit(r)}>Edit</button>
+                            {r.overridden && (
+                              <button className="px-2 py-0.5 rounded text-red-600 hover:bg-red-50 text-[11px]" onClick={() => clearOverride(r.overrideKey)} title="Go back to the calculated numbers">Reset</button>
+                            )}
+                          </span>
+                        )}
+                      </td>
+                    )}
+                  </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      ))}
     </section>
   );
 }
@@ -269,13 +298,21 @@ export function RevcoBDStandingsCompact({
     [rounds, pairsText, freeAgentsText, scoreSettings, overrides],
   );
 
+  const groups = useMemo(
+    () => splitStandingsByGender(unitRows, pairsText, freeAgentsText),
+    [unitRows, pairsText, freeAgentsText],
+  );
+
   if (unitRows.length === 0) return null;
 
   return (
     <section className="bg-white/95 backdrop-blur rounded-xl shadow ring-1 ring-slate-200 p-4">
       <h3 className="text-[14px] font-semibold text-sky-800 mb-2">Standings (reference)</h3>
-      <div className="grid sm:grid-cols-2 gap-x-6 gap-y-0.5">
-        {unitRows.map((r, i) => (
+      <div className="grid sm:grid-cols-2 gap-x-6 gap-y-3">
+        {groups.map(group => (
+        <div key={group.title}>
+        {group.title && <div className="text-[12px] font-semibold text-slate-600 uppercase tracking-wide mb-1">{group.title}</div>}
+        {group.rows.map((r, i) => (
           <div key={r.key} className="flex items-baseline gap-1.5 text-[12px] py-0.5 border-b border-slate-100 last:border-0">
             <span className="tabular-nums font-semibold text-sky-800 w-4 shrink-0">{i + 1}.</span>
             <span className="truncate">{r.label}</span>
@@ -283,6 +320,8 @@ export function RevcoBDStandingsCompact({
               {r.W}-{r.L} ({r.PD > 0 ? `+${r.PD}` : r.PD})
             </span>
           </div>
+        ))}
+        </div>
         ))}
       </div>
     </section>
